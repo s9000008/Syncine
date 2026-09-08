@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Syncine (同映) - 跨平台影片同步播放",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "跨地理位置、跨網頁即時低延遲影片同步播放套件 (支援 YouTube, Bilibili)",
   "permissions": [
     "storage",

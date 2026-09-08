@@ -106,7 +106,7 @@ async function runAllTests() {
   const app = express();
   app.use(express.json());
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.0.0' });
+    res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.1.0' });
   });
 
   const httpServer = http.createServer(app);

@@ -259,7 +259,7 @@ export default function Popup() {
                   Syncine (同映)
                 </h1>
                 <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  v2.4
+                  v2.1.0
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
