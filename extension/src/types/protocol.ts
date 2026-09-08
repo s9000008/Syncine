@@ -7,6 +7,7 @@ export type SyncineEvent =
   | 'CREATE_ROOM_SUCCESS' 
   | 'JOIN_ROOM' 
   | 'JOIN_ROOM_SUCCESS' 
+  | 'LEAVE_ROOM'
   | 'REQUEST_CURRENT_STATE' 
   | 'SYNC_STATE' 
   | 'REDIRECT_ROOM' 
@@ -34,6 +35,8 @@ export interface JoinRequest {
   timestamp: number;
 }
 
+export type ConnectionStatus = 'CONNECTED' | 'RECONNECTING' | 'DISCONNECTED';
+
 export interface RoomStateInfo {
   roomId: string;
   isHost: boolean;
@@ -42,6 +45,7 @@ export interface RoomStateInfo {
   currentUrl?: string;
   mode?: ConnectionMode;
   p2pStatus?: P2PStatus;
+  connectionStatus?: ConnectionStatus;
   connectedPeerCount?: number;
   serverlessHandshakeState?: 'IDLE' | 'AWAITING_ANSWER' | 'AWAITING_HOST_CONFIRM' | 'CONNECTED';
   offerCode?: string;
@@ -92,6 +96,7 @@ export interface ExtensionMessage {
     | 'CS_ROOM_STATE_CHANGED'
     | 'CS_REQUEST_CURRENT_STATE'
     | 'CS_JOIN_REQUESTS_UPDATED'
+    | 'CS_CONNECTION_STATUS_CHANGED'
     | 'GET_ROOM_STATE'
     // Offscreen WebRTC 內部通訊訊息
     | 'OFFSCREEN_INIT_P2P'

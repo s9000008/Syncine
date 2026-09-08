@@ -16,7 +16,7 @@
 > [!NOTE]
 > **功能範疇調整說明**：
 > 1. **WebRTC P2P 點對點連線**：已於 **v2.3 正式實裝**，採用 Chrome MV3 官方推薦之 `chrome.offscreen` Document 承載 WebRTC DataChannel，並結合現有 Socket 伺服器進行初始 SDP 信令交換與自動降級機制。
-> 2. **雲端硬碟**：Google Drive 內嵌影片同步功能列為中長期規劃，詳見第 10 章。
+> 2. **未來平台擴充**：預計逐步擴充支援 Vimeo、Netflix、巴哈姆特動畫瘋等平台，專注於純影音即時同步體驗（詳見第 10 章）。
 
 ---
 
@@ -300,38 +300,44 @@ export interface TogglePermissionMsg {
 
 ---
 
-## 9. 異常處理與邊界條件 (AI 開發檢查清單)
+## 9. 異常處理與短中期優化項目
 
-AI 在編寫實作代碼時，請確認完全覆蓋以下異常邊界：
+### 9.1 核心異常邊界條件 (已實裝覆蓋)
 * [x] **緩衝卡頓處理**：當某一觀影者觸發瀏覽器原生 `waiting` (Buffering) 事件並持續超過 5 秒時，向房間發送 `PAUSE`，避免成員進度嚴重落後，同時防止網路輕微波動造成過度頻繁暫停。
 * [x] **時間軸跳轉對齊**：主動 SEEK 事件除校準時間戳外，雙向同步發送端之 `paused` 狀態，避免跳轉後接收端定格暫停。
-* [ ] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
-* [ ] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
-* [ ] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並依設定引導解散或升級首位 Guest 為新房主。
+* [x] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
+* [x] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
+* [x] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並升級加入時間最早之 Guest 為新房主。
+
+### 9.2 短中期優化項目 (Short-to-Medium Term Optimizations)
+1. **突發斷線恢復機制 (Auto-Reconnection & Grace Period)**：
+   - 透過 `chrome.storage.local` 本地持久化工作階段（Session Persistence），防範瀏覽器重啟或 SW 休眠遺失房號。
+   - 伺服器端實施「主動退房立即銷毀」與「非預期突發斷線 60 秒保留寬限期 (Grace Period)」，在寬限期內原房成員重新連線即自動取消消滅計時器，實現平滑無感「回魂」。
+2. **Log 資訊注入攻擊防護 (Log Injection Defense)**：
+   - 前後端全面配置日誌清毒輔助函式（`sanitizeLog`），對使用者傳入之 `userId`, `roomId`, `targetUrl`, `reason` 等欄位徹底過濾 CRLF 換行符（`\r\n`）與不可見控制字元，防止偽造日誌行（Log Forging / CRLF Injection）與終端機轉義攻擊，並設定最大截斷長度防止日誌爆破。
+3. **客戶端伺服器與 P2P 通道連線狀態確認 (Connectivity Healthcheck)**：
+   - 控制面板實施真實非同步健康探測（對官方伺服器 `/health` 端點及 P2P STUN 狀態做可達性校驗），在面板頂部與選單即時回饋「線上就緒」或「連線異常」狀態，杜絕假性在線。
+4. **客戶端連線模式動態顯示與容錯引導**：
+   - 移除「多人群組推薦 P2P」標籤，避免對使用者造成模式誤導。
+   - 於面板右下角將原固定文字改為動態顯示當前連線模式（`連線模式：WebRTC P2P 直連` / `連線模式：官方中繼伺服器` / `連線模式：自架主機`）。
+   - 於模式說明卡片明確標記：「💡 若因嚴格防火牆或網路限制導致 P2P 連線失敗，可改用『預設中繼伺服器』模式」。
+5. **單分頁觀影防護提示 (Single Active Tab Advisory)**：
+   - 於控制面板顯著標記：「💡 建議同時僅開啟一個支援的影片分頁，以確保最佳同步效果，避免多重視窗干擾」。
 
 ---
 
-## 10. 未來預期功能規劃 (Future Roadmap)
+## 10. 長期主要功能規劃 (Long-Term Roadmap)
 
-以下項目列為中長期預期功能，當前核心版本暫不實裝，但系統架構設計需保留介面以利平滑擴充：
+以下項目列為系統長期演進之主要功能路線圖：
 
-### 10.1 WebRTC 點對點直連模式 (已於 v2.3 實裝)
-* 系統已正式實裝 WebRTC P2P DataChannel 星狀拓撲直連與 MV3 Offscreen Document 載體架構，規格詳見第 3.3 節。
+### 10.1 支援更多主流影音串流平台 (Streaming Platforms Integration)
+* **目標平台**：逐步擴展支援 **Vimeo**、**Netflix**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
+* **技術要點**：針對各平台相異的播放器 DOM 結構、SPA 換集路由機制與自適應串流防禦（防跳幀、防廣告干擾）實裝專屬 Content Script 解析適配器。
 
-### 10.2 雲端硬碟同步播放 (Cloud Drive Integration)
-* **需求背景**：使用者期望與好友同步觀看儲存於雲端硬碟（Google Drive、OneDrive、Dropbox）上的私有影片。
-* **當前技術痛點與移出原因**：
-  1. **跨網域 Iframe 存取限制**：Google Drive 預覽介面中的 `<video>` 標籤深嵌於跨網域 Iframe（如 `docs.google.com`），受同源政策（SOP）阻擋，Content Script 注入與事件監聽難度高。
-  2. **身分驗證與檔案共用限制**：每位觀影者之 Google 帳號與存取權限不同，若檔案未公開共用，其餘成員將無法開啟影片。
-* **未來實作規劃方案**：
-  - **階段一**：開發專屬 Google Drive API 授權代理，直接獲取影片串流直連網址（Direct Streaming URL）。
-  - **階段二**：藉由套件背景權限與 `postMessage` 建立跨 Iframe 通訊管道，並重構白名單規則（`drive.google.com`, `docs.google.com`）。
+### 10.2 本地影片 P2P 串流播放 (Local Video P2P Streaming)
+* **需求定位**：允許房主選取本機硬碟中的私有影片檔案（`.mp4`, `.mkv`），免上傳第三方雲端，直接端對端串流給好友同步觀看。
+* **技術方案**：利用 WebRTC DataChannel 進行二進位分塊傳輸（File Chunking）或 WebTorrent 技術，結合 MediaSource Extensions (MSE) API 於觀眾端瀏覽器動態解碼組裝播放，落實極致隱私與零伺服器頻寬負載。
 
-### 10.3 本地檔案 P2P 同步播放 (Local Video Streaming / WebTorrent)
-* 允許房主選取電腦本地影片檔案（`.mp4`, `.mkv`），利用 WebRTC DataChannel 分塊傳輸（Chunking）或 WebTorrent 技術，免上傳雲端直接點對點同步串流至觀眾瀏覽器播放。
-
-### 10.4 房間即時語音通話 (WebRTC Voice Chat)
-* 在既有的 WebRTC 通道上附加音訊軌（Audio Track），讓同房間好友在觀影過程中進行超低延遲語音對話，免切換第三方語音軟體。
-
-### 10.5 更多主流影音串流平台支援
-* 逐步適配 Netflix、Disney+、巴哈姆特動畫瘋等平台，針對各平台動態 DOM、DRM 加密播放器與按鈕做專屬防禦適配。
+### 10.3 多語系介面支援 (Internationalization / i18n)
+* **需求定位**：擴展國際化社群，支援多國語言介面。
+* **技術方案**：建立輕量 i18n 資源庫與切換機制，支援繁體中文（預設）、簡體中文、英文等多語系即時切換。

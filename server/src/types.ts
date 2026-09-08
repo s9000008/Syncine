@@ -5,6 +5,7 @@ export type SyncineEvent =
   | 'CREATE_ROOM_SUCCESS' 
   | 'JOIN_ROOM' 
   | 'JOIN_ROOM_SUCCESS' 
+  | 'LEAVE_ROOM'
   | 'REQUEST_CURRENT_STATE' 
   | 'SYNC_STATE' 
   | 'REDIRECT_ROOM' 
@@ -141,5 +142,6 @@ export interface RoomState {
   mode?: ConnectionMode;
   members: Map<string, RoomMember>;
   hostDisconnectTimer?: NodeJS.Timeout;
+  emptyRoomTimer?: NodeJS.Timeout;
 }
 

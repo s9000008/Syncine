@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
+import { sanitizeLog } from './utils';
 import {
   CreateRoomReq,
   JoinRoomReq,
@@ -44,9 +45,16 @@ const io = new Server(server, {
 });
 
 const roomManager = new RoomManager();
+roomManager.setHostTimeoutCallback((updatedRoom) => {
+  io.to(updatedRoom.roomId).emit('HOST_CHANGED', {
+    newHostUserId: updatedRoom.hostUserId,
+    message: '原房主離線逾時，系統已轉移房主權限給新成員'
+  });
+  io.to(updatedRoom.roomId).emit('MEMBER_COUNT_UPDATED', { count: updatedRoom.members.size });
+});
 
 io.on('connection', (socket: Socket) => {
-  console.log(`[Socket.IO] 新用戶連線: ${socket.id}`);
+  console.log(`[Socket.IO] 新用戶連線: ${sanitizeLog(socket.id)}`);
 
   // 1. 建立房間
   socket.on('CREATE_ROOM', (payload: CreateRoomReq) => {
@@ -70,6 +78,11 @@ io.on('connection', (socket: Socket) => {
   // 2. 加入房間
   socket.on('JOIN_ROOM', (payload: JoinRoomReq) => {
     const { roomId, data } = payload;
+    const isReconnecting = (data as any)?.isReconnecting;
+    if (isReconnecting) {
+      console.log(`[Socket.IO] 偵測到斷線回魂加入請求: ${sanitizeLog(data.userId)} (Room: ${sanitizeLog(roomId)})`);
+    }
+
     const result = roomManager.joinRoom(roomId, socket.id, data.userId);
 
     if (!result.success || !result.room) {
@@ -103,13 +116,15 @@ io.on('connection', (socket: Socket) => {
     // 廣播最新人數給全房
     io.to(room.roomId).emit('MEMBER_COUNT_UPDATED', { count: room.members.size });
 
-    // 規格 4.1：新人員加入時，向 Host 發送 REQUEST_CURRENT_STATE 拉取最新狀態
-    console.log(`[Socket.IO] 向 Host (${room.hostSocketId}) 發送 REQUEST_CURRENT_STATE 拉取狀態給新人員 (${socket.id})`);
-    io.to(room.hostSocketId).emit('REQUEST_CURRENT_STATE', {
-      event: 'REQUEST_CURRENT_STATE',
-      roomId: room.roomId,
-      targetGuestSocketId: socket.id
-    });
+    // 規格 4.1：僅當新進人員為 Guest 時，向 Host 發送 REQUEST_CURRENT_STATE 拉取最新狀態
+    if (socket.id !== room.hostSocketId) {
+      console.log(`[Socket.IO] 向 Host (${sanitizeLog(room.hostSocketId)}) 發送 REQUEST_CURRENT_STATE 拉取狀態給新人員 (${sanitizeLog(socket.id)})`);
+      io.to(room.hostSocketId).emit('REQUEST_CURRENT_STATE', {
+        event: 'REQUEST_CURRENT_STATE',
+        roomId: room.roomId,
+        targetGuestSocketId: socket.id
+      });
+    }
   });
 
   // 人數校準查詢
@@ -132,7 +147,7 @@ io.on('connection', (socket: Socket) => {
 
     // 後端二重安全檢查：未授權之 Guest 廣播直接 Drop
     if (!roomManager.canExecuteAction(socket.id)) {
-      console.warn(`[Security Check Drop] Socket ${socket.id} 嘗試觸發 SYNC_STATE 但無權限！`);
+      console.warn(`[Security Check Drop] Socket ${sanitizeLog(socket.id)} 嘗試觸發 SYNC_STATE 但無權限！`);
       socket.emit('ERROR', { message: '權限不足：目前房主已停用觀眾操作權限' });
       return;
     }
@@ -140,7 +155,7 @@ io.on('connection', (socket: Socket) => {
     // 若包含目標 Guest Socket ID，代表是單向回傳狀態給新進觀眾
     if ((payload as any).targetGuestSocketId) {
       const targetId = (payload as any).targetGuestSocketId;
-      console.log(`[Socket.IO] 將拉取的初始化狀態獨立回傳給新觀眾: ${targetId}`);
+      console.log(`[Socket.IO] 將拉取的初始化狀態獨立回傳給新觀眾: ${sanitizeLog(targetId)}`);
       io.to(targetId).emit('SYNC_STATE', payload);
     } else {
       // 廣播給房間內其他所有成員
@@ -157,13 +172,13 @@ io.on('connection', (socket: Socket) => {
 
     // 僅 Host 可發起網頁跳轉
     if (room.hostSocketId !== socket.id) {
-      console.warn(`[Security Check Drop] 非 Host (${socket.id}) 嘗試觸發 REDIRECT_ROOM`);
+      console.warn(`[Security Check Drop] 非 Host (${sanitizeLog(socket.id)}) 嘗試觸發 REDIRECT_ROOM`);
       socket.emit('ERROR', { message: '僅房主可進行網頁同步跳轉' });
       return;
     }
 
     room.currentUrl = data.targetUrl;
-    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${data.targetUrl} (Room: ${roomId})`);
+    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${sanitizeLog(data.targetUrl)} (Room: ${sanitizeLog(roomId)})`);
     socket.to(room.roomId).emit('REDIRECT_ROOM', payload);
   });
 
@@ -189,7 +204,7 @@ io.on('connection', (socket: Socket) => {
     const { roomId, data } = payload;
     data.senderSocketId = socket.id;
     if (data.targetSocketId) {
-      console.log(`[WebRTC Signaling] 轉發 SIGNAL_OFFER 至 targetSocketId: ${data.targetSocketId}`);
+      console.log(`[WebRTC Signaling] 轉發 SIGNAL_OFFER 至 targetSocketId: ${sanitizeLog(data.targetSocketId)}`);
       io.to(data.targetSocketId).emit('SIGNAL_OFFER', payload);
     } else {
       socket.to(roomId).emit('SIGNAL_OFFER', payload);
@@ -200,7 +215,7 @@ io.on('connection', (socket: Socket) => {
     const { roomId, data } = payload;
     data.senderSocketId = socket.id;
     if (data.targetSocketId) {
-      console.log(`[WebRTC Signaling] 轉發 SIGNAL_ANSWER 至 targetSocketId: ${data.targetSocketId}`);
+      console.log(`[WebRTC Signaling] 轉發 SIGNAL_ANSWER 至 targetSocketId: ${sanitizeLog(data.targetSocketId)}`);
       io.to(data.targetSocketId).emit('SIGNAL_ANSWER', payload);
     } else {
       socket.to(roomId).emit('SIGNAL_ANSWER', payload);
@@ -219,7 +234,7 @@ io.on('connection', (socket: Socket) => {
 
   // 7. WebRTC 連線受阻時的降級回退廣播
   socket.on('P2P_FALLBACK', (payload: { roomId: string; reason?: string }) => {
-    console.log(`[WebRTC Signaling] 房間 ${payload.roomId} 收到 P2P_FALLBACK 請求，通知全體成員切換為中繼模式`);
+    console.log(`[WebRTC Signaling] 房間 ${sanitizeLog(payload.roomId)} 收到 P2P_FALLBACK 請求，通知全體成員切換為中繼模式`);
     const room = roomManager.getRoom(payload.roomId);
     if (room) {
       room.mode = 'DEFAULT';
@@ -230,16 +245,29 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // 8. 離線處理
+  // 8. 主動退出房間 (用戶手動點擊退房)
+  socket.on('LEAVE_ROOM', () => {
+    console.log(`[Socket.IO] 用戶主動退出房間: ${sanitizeLog(socket.id)}`);
+    const result = roomManager.handleDisconnect(socket.id, undefined, true);
+    if (result.roomId) {
+      socket.leave(result.roomId);
+      if (!result.roomClosed) {
+        const room = roomManager.getRoom(result.roomId);
+        io.to(result.roomId).emit('MEMBER_LEFT', {
+          socketId: socket.id,
+          isHost: result.isHost
+        });
+        if (room) {
+          io.to(result.roomId).emit('MEMBER_COUNT_UPDATED', { count: room.members.size });
+        }
+      }
+    }
+  });
+
+  // 9. 離線處理 (非主動，支援 60 秒寬限期)
   socket.on('disconnect', () => {
-    console.log(`[Socket.IO] 用戶斷開連線: ${socket.id}`);
-    const result = roomManager.handleDisconnect(socket.id, (updatedRoom) => {
-      // 當 30 秒倒數到達並產生新 Host 時，通知房間內所有人
-      io.to(updatedRoom.roomId).emit('HOST_CHANGED', {
-        newHostUserId: updatedRoom.hostUserId,
-        message: '原房主離線逾時，系統已轉移房主權限權限給新成員'
-      });
-    });
+    console.log(`[Socket.IO] 用戶斷開連線: ${sanitizeLog(socket.id)}`);
+    const result = roomManager.handleDisconnect(socket.id, undefined, false);
 
     if (result.roomId && !result.roomClosed) {
       const room = roomManager.getRoom(result.roomId);

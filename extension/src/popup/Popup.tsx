@@ -35,8 +35,19 @@ export default function Popup() {
   const [compositeCode, setCompositeCode] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
+  const [serverHealth, setServerHealth] = useState<'CHECKING' | 'ONLINE' | 'OFFLINE'>('CHECKING');
 
   useEffect(() => {
+    // 探測官方中繼伺服器 /health 連線健康狀態
+    fetch(`${DEFAULT_SERVER_URL}/health`, { signal: AbortSignal.timeout(4000) })
+      .then((res) => {
+        if (res.ok) setServerHealth('ONLINE');
+        else setServerHealth('OFFLINE');
+      })
+      .catch(() => {
+        setServerHealth('OFFLINE');
+      });
+
     // 獲取當前分頁網址
     chrome.tabs?.query?.({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.url) {
@@ -79,6 +90,20 @@ export default function Popup() {
   const isBilibili = activeTabUrl.includes('bilibili.com/video') || activeTabUrl.includes('bilibili.com/bangumi');
   const isTargetSite = isYouTube || isBilibili;
 
+  const safeSendMessage = (message: any, callback?: (res: any) => void) => {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      try {
+        chrome.runtime.sendMessage(message, callback);
+      } catch (e) {
+        console.warn('[Popup] sendMessage 失敗:', e);
+        if (callback) callback({ success: false, error: '傳送訊息失敗' });
+      }
+    } else {
+      console.log('[Popup Dev/Preview] 模擬 sendMessage 回應:', message);
+      if (callback) callback({ success: true, roomState: null });
+    }
+  };
+
   // ----------------------------------------------------
   // 1. 建房處理 (支援同一邀請碼邀請多人群體加入)
   // ----------------------------------------------------
@@ -101,7 +126,7 @@ export default function Popup() {
       targetServerUrl = input;
     }
 
-    chrome.runtime.sendMessage(
+    safeSendMessage(
       {
         type: 'BG_CREATE_ROOM',
         payload: {
@@ -135,7 +160,7 @@ export default function Popup() {
     setLoading(true);
     setErrorMessage(null);
 
-    chrome.runtime.sendMessage(
+    safeSendMessage(
       {
         type: 'BG_JOIN_ROOM',
         payload: { shareCode: input, mode: connectionMode }
@@ -155,14 +180,14 @@ export default function Popup() {
   // 3. 房主審核處理 (批准 / 拒絕入房申請)
   // ----------------------------------------------------
   const handleApproveRequest = (requestId: string) => {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'BG_APPROVE_JOIN_REQUEST',
       payload: { requestId }
     });
   };
 
   const handleRejectRequest = (requestId: string) => {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'BG_REJECT_JOIN_REQUEST',
       payload: { requestId }
     });
@@ -179,7 +204,7 @@ export default function Popup() {
   // 4. 房內操作與控制
   // ----------------------------------------------------
   const handleLeaveRoom = () => {
-    chrome.runtime.sendMessage({ type: 'BG_LEAVE_ROOM' }, () => {
+    safeSendMessage({ type: 'BG_LEAVE_ROOM' }, () => {
       setRoomState(null);
       setCompositeCode('');
       setShareCodeInput('');
@@ -188,7 +213,7 @@ export default function Popup() {
   };
 
   const handleTogglePermission = (allow: boolean) => {
-    chrome.runtime.sendMessage(
+    safeSendMessage(
       {
         type: 'BG_TOGGLE_PERMISSION',
         payload: { allowGuestControl: allow }
@@ -203,7 +228,7 @@ export default function Popup() {
 
   const handleSyncCurrentTab = () => {
     if (!activeTabUrl) return;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'BG_REDIRECT_ROOM',
       payload: { targetUrl: activeTabUrl }
     });
@@ -238,8 +263,20 @@ export default function Popup() {
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                同步服務已就緒
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    roomState?.connectionStatus === 'RECONNECTING'
+                      ? 'bg-amber-400 animate-ping'
+                      : roomState?.connectionStatus === 'DISCONNECTED'
+                      ? 'bg-rose-500'
+                      : 'bg-emerald-400 animate-pulse'
+                  }`}
+                ></span>
+                {roomState?.connectionStatus === 'RECONNECTING'
+                  ? '重新連線回魂中...'
+                  : roomState?.connectionStatus === 'DISCONNECTED'
+                  ? '連線中斷等待中'
+                  : '同步服務已就緒'}
               </p>
             </div>
           </div>
@@ -257,9 +294,31 @@ export default function Popup() {
           )}
         </div>
 
+        {/* 斷線與自動重連回魂中醒目橫幅 */}
+        {roomState && roomState.connectionStatus && roomState.connectionStatus !== 'CONNECTED' && (
+          <div
+            className={`mb-3 p-2.5 rounded-lg text-xs flex items-center gap-2 border shadow-sm ${
+              roomState.connectionStatus === 'RECONNECTING'
+                ? 'bg-amber-950/40 text-amber-300 border-amber-600/50'
+                : 'bg-rose-950/40 text-rose-300 border-rose-600/50'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                roomState.connectionStatus === 'RECONNECTING' ? 'bg-amber-400 animate-ping' : 'bg-rose-400'
+              }`}
+            />
+            <span className="leading-snug">
+              {roomState.connectionStatus === 'RECONNECTING'
+                ? '⚡ 偵測到網路波動，系統正持續嘗試自動重連回魂中...'
+                : '⚠️ 與伺服器連線已中斷，正在等待網路恢復...'}
+            </span>
+          </div>
+        )}
+
         {/* 當前分頁狀態提示條 */}
         <div
-          className={`mb-3 p-2 rounded-lg text-[11px] flex items-center justify-between border ${
+          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border ${
             isTargetSite
               ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
               : 'bg-amber-950/30 text-amber-300 border-amber-800/40'
@@ -280,6 +339,12 @@ export default function Popup() {
               支援
             </span>
           )}
+        </div>
+
+        {/* 建議僅開啟單一分頁防護提示 */}
+        <div className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5">
+          <span className="text-amber-400 font-bold flex-shrink-0">💡 提示</span>
+          <span className="truncate">建議瀏覽器同時僅開啟一個支援的影片分頁，以避免同步干擾。</span>
         </div>
 
         {/* 錯誤提示 */}
@@ -364,7 +429,6 @@ export default function Popup() {
                       <Server className="w-3.5 h-3.5 text-emerald-400" />
                       連線方式 (Connection Mode)
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-normal">多人群組推薦 P2P</span>
                   </label>
 
                   <div className="relative">
@@ -395,17 +459,44 @@ export default function Popup() {
                     <p className="text-[10px] text-slate-300 leading-relaxed">
                       同一組邀請碼可發送給多位好友直接申請加入，房主收到通知後一鍵審核，全房即可透過加密星狀拓撲低延遲直連！
                     </p>
+                    <div className="text-[10px] text-amber-300/90 bg-amber-950/40 p-1.5 rounded border border-amber-800/40 mt-1 flex items-start gap-1">
+                      <span className="flex-shrink-0">💡</span>
+                      <span>提示：若因嚴格防火牆或網路限制導致 P2P 連線失敗，可切換為「預設中繼伺服器」模式。</span>
+                    </div>
                   </div>
                 )}
 
                 {connectionMode === 'DEFAULT' && (
                   <div className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400">中繼伺服器狀態:</span>
-                      <span className="text-emerald-400 font-semibold">線上就緒</span>
+                      <span className="text-slate-400">官方伺服器狀態:</span>
+                      <span
+                        className={`text-[10px] font-semibold flex items-center gap-1 ${
+                          serverHealth === 'ONLINE'
+                            ? 'text-emerald-400'
+                            : serverHealth === 'OFFLINE'
+                            ? 'text-rose-400'
+                            : 'text-amber-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            serverHealth === 'ONLINE'
+                              ? 'bg-emerald-400 animate-pulse'
+                              : serverHealth === 'OFFLINE'
+                              ? 'bg-rose-500'
+                              : 'bg-amber-400 animate-ping'
+                          }`}
+                        ></span>
+                        {serverHealth === 'ONLINE'
+                          ? '線上就緒 (Fly.io)'
+                          : serverHealth === 'OFFLINE'
+                          ? '連線異常 (請檢查網路)'
+                          : '連線探測中...'}
+                      </span>
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      連線至預設中繼伺服器，提供穩定開箱即用的房間同步服務。
+                      連線至官方中繼伺服器，提供穩定開箱即用的房間同步服務，適用於任何網路環境。
                     </p>
                   </div>
                 )}
@@ -452,6 +543,55 @@ export default function Popup() {
             {/* TAB 2: 加入房間面板 */}
             {activeTab === 'join' && (
               <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+                {/* 當前連線方式狀態指示與即時切換區 */}
+                <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5 text-teal-400" />
+                      當前連線方式 (Connection Mode):
+                    </span>
+                    <span className="text-[10px] text-teal-400 font-medium">可即時切換</span>
+                  </div>
+
+                  <div className="relative">
+                    <select
+                      value={connectionMode}
+                      onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-teal-500 transition appearance-none cursor-pointer pr-8 font-medium"
+                    >
+                      <option value="P2P">⚡ 1. 純端對端直連 (WebRTC P2P)</option>
+                      <option value="DEFAULT">2. 預設中繼伺服器 (官方中繼)</option>
+                      <option value="CUSTOM_IP">3. 自行輸入 IP (自架主機 / LAN)</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+                  </div>
+
+                  {/* 當前模式專屬狀態反饋與指引 */}
+                  {connectionMode === 'P2P' && (
+                    <div className="text-[10px] text-emerald-400/90 flex items-center gap-1 pt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>已選定 P2P 直連：貼入房主邀請碼，送出申請由房主審核直連。</span>
+                    </div>
+                  )}
+                  {connectionMode === 'DEFAULT' && (
+                    <div className="text-[10px] text-teal-400/90 flex items-center justify-between pt-0.5">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
+                        <span>已選定官方中繼：透過官方中繼伺服器快速同步。</span>
+                      </span>
+                      <span className="text-[9px] text-slate-400">
+                        {serverHealth === 'ONLINE' ? '🟢 線上' : serverHealth === 'OFFLINE' ? '🔴 離線' : '🟡 檢測中'}
+                      </span>
+                    </div>
+                  )}
+                  {connectionMode === 'CUSTOM_IP' && (
+                    <div className="text-[10px] text-blue-400/90 flex items-center gap-1 pt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                      <span>已選定自架主機：貼入複合分享碼（如 IP:代碼|Base64）將自動對接。</span>
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-teal-400" />
@@ -459,13 +599,23 @@ export default function Popup() {
                   </label>
                   <input
                     type="text"
-                    placeholder="輸入房主提供的 6 碼代碼 (例如: 892301)"
+                    placeholder={
+                      connectionMode === 'P2P'
+                        ? '輸入房主提供的 P2P 邀請碼 (例如: 892301)'
+                        : connectionMode === 'CUSTOM_IP'
+                        ? '輸入房主自架複合碼 (例如: IP:892301|aHR0...)'
+                        : '輸入房主提供的 6 碼代碼 (例如: 892301)'
+                    }
                     value={shareCodeInput}
                     onChange={(e) => setShareCodeInput(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500 transition font-mono tracking-wider"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    輸入房主分享的 6 碼代碼，送出申請後房主批准即可自動直連同步。
+                    {connectionMode === 'P2P'
+                      ? '輸入房主分享的 6 碼代碼，送出申請後房主批准即可自動直連同步。'
+                      : connectionMode === 'CUSTOM_IP'
+                      ? '支援複合分享碼，若房主使用自架伺服器，套件將自動切換對應 IP。'
+                      : '輸入 6 碼代碼連線至官方中繼伺服器同步觀影。'}
                   </p>
 
                   <button
@@ -656,7 +806,21 @@ export default function Popup() {
       {/* 底部 Footer */}
       <div className="mt-4 pt-2.5 border-t border-slate-800/80 text-center text-[10px] text-slate-500 flex items-center justify-between">
         <span>Syncine Engine • 支援 YouTube / Bilibili</span>
-        <span className="font-mono text-emerald-400 font-semibold">WebRTC P2P Direct</span>
+        <span className="font-mono text-emerald-400 font-semibold text-[10px]">
+          連線模式: {
+            roomState
+              ? roomState.mode === 'P2P'
+                ? '⚡ WebRTC P2P 直連'
+                : roomState.mode === 'CUSTOM_IP'
+                ? '🌐 自架主機'
+                : '🏢 官方中繼'
+              : connectionMode === 'P2P'
+              ? '⚡ WebRTC P2P 直連'
+              : connectionMode === 'CUSTOM_IP'
+              ? '🌐 自架主機'
+              : '🏢 官方中繼'
+          }
+        </span>
       </div>
     </div>
   );
