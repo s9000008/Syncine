@@ -20,6 +20,13 @@ import {
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
+import {
+  APP_INFO,
+  STATUS_TEXTS,
+  TAB_STATUS_TEXTS,
+  CONNECTION_MODE_TEXTS,
+  ROOM_UI_TEXTS,
+} from '../constants/uiTexts';
 
 export default function Popup() {
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
@@ -256,10 +263,10 @@ export default function Popup() {
             <div>
               <div className="flex items-center gap-1.5">
                 <h1 className="font-bold text-base tracking-wide bg-gradient-to-r from-emerald-400 via-teal-300 to-sky-300 bg-clip-text text-transparent">
-                  Syncine (同映)
+                  {APP_INFO.NAME}
                 </h1>
                 <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  v2.1.0
+                  {APP_INFO.getVersion()}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
@@ -273,10 +280,10 @@ export default function Popup() {
                   }`}
                 ></span>
                 {roomState?.connectionStatus === 'RECONNECTING'
-                  ? '重新連線回魂中...'
+                  ? STATUS_TEXTS.CONNECTION.RECONNECTING
                   : roomState?.connectionStatus === 'DISCONNECTED'
-                  ? '連線中斷等待中'
-                  : '同步服務已就緒'}
+                  ? STATUS_TEXTS.CONNECTION.DISCONNECTED
+                  : STATUS_TEXTS.CONNECTION.READY}
               </p>
             </div>
           </div>
@@ -289,7 +296,7 @@ export default function Popup() {
                   : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
               }`}
             >
-              {roomState.isHost ? '👑 房主 (Host)' : '👀 觀眾 (Guest)'}
+              {roomState.isHost ? STATUS_TEXTS.ROLES.HOST : STATUS_TEXTS.ROLES.GUEST}
             </span>
           )}
         </div>
@@ -310,8 +317,8 @@ export default function Popup() {
             />
             <span className="leading-snug">
               {roomState.connectionStatus === 'RECONNECTING'
-                ? '⚡ 偵測到網路波動，系統正持續嘗試自動重連回魂中...'
-                : '⚠️ 與伺服器連線已中斷，正在等待網路恢復...'}
+                ? STATUS_TEXTS.BANNERS.RECONNECTING
+                : STATUS_TEXTS.BANNERS.DISCONNECTED}
             </span>
           </div>
         )}
@@ -328,23 +335,23 @@ export default function Popup() {
             <Video className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="truncate">
               {isYouTube
-                ? '🎬 YouTube 影片分頁已連線'
+                ? TAB_STATUS_TEXTS.YOUTUBE_CONNECTED
                 : isBilibili
-                ? '📺 Bilibili 影片分頁已連線'
-                : '💡 請開啟 YouTube 或 Bilibili 網頁以進行同步觀影'}
+                ? TAB_STATUS_TEXTS.BILIBILI_CONNECTED
+                : TAB_STATUS_TEXTS.NOT_SUPPORTED}
             </span>
           </div>
           {isTargetSite && (
             <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
-              支援
+              {TAB_STATUS_TEXTS.SUPPORT_BADGE}
             </span>
           )}
         </div>
 
         {/* 建議僅開啟單一分頁防護提示 */}
         <div className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5">
-          <span className="text-amber-400 font-bold flex-shrink-0">💡 提示</span>
-          <span className="truncate">建議瀏覽器同時僅開啟一個支援的影片分頁，以避免同步干擾。</span>
+          <span className="text-amber-400 font-bold flex-shrink-0">{TAB_STATUS_TEXTS.HINT_PREFIX}</span>
+          <span className="truncate">{TAB_STATUS_TEXTS.SINGLE_TAB_HINT}</span>
         </div>
 
         {/* 錯誤提示 */}
@@ -366,20 +373,20 @@ export default function Popup() {
               <Loader2 className="w-6 h-6 animate-spin text-teal-400" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-teal-300">入房申請已送出</h3>
+              <h3 className="text-sm font-bold text-teal-300">{ROOM_UI_TEXTS.AWAITING_TITLE}</h3>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                正在等待房主確認同意，房主批准後雙方將自動無縫連線開播！
+                {ROOM_UI_TEXTS.AWAITING_DESC}
               </p>
             </div>
             <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-700 text-xs font-mono text-slate-400 flex items-center justify-center gap-2">
               <Clock className="w-3.5 h-3.5 text-teal-400" />
-              <span>房間代碼: <strong className="text-teal-300">{roomState.roomId}</strong></span>
+              <span>{ROOM_UI_TEXTS.ROOM_CODE_LABEL}: <strong className="text-teal-300">{roomState.roomId}</strong></span>
             </div>
             <button
               onClick={handleLeaveRoom}
               className="w-full text-center text-xs text-slate-400 hover:text-red-400 pt-1"
             >
-              ✕ 取消申請並返回
+              {ROOM_UI_TEXTS.CANCEL_AND_BACK}
             </button>
           </div>
         ) : !roomState ? (
@@ -401,7 +408,7 @@ export default function Popup() {
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
-                建立房間 (Host)
+                {ROOM_UI_TEXTS.CREATE_TAB}
               </button>
 
               <button
@@ -416,7 +423,7 @@ export default function Popup() {
                 }`}
               >
                 <Users className="w-3.5 h-3.5" />
-                加入房間 (Guest)
+                {ROOM_UI_TEXTS.JOIN_TAB}
               </button>
             </div>
 
@@ -427,7 +434,7 @@ export default function Popup() {
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center justify-between">
                     <span className="flex items-center gap-1">
                       <Server className="w-3.5 h-3.5 text-emerald-400" />
-                      連線方式 (Connection Mode)
+                      {ROOM_UI_TEXTS.CONNECTION_MODE_LABEL}
                     </span>
                   </label>
 
@@ -437,9 +444,9 @@ export default function Popup() {
                       onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 transition appearance-none cursor-pointer pr-8"
                     >
-                      <option value="P2P">⚡ 1. 純端對端直連 (WebRTC P2P - 不限人數)</option>
-                      <option value="DEFAULT">2. 預設中繼伺服器 (官方中繼)</option>
-                      <option value="CUSTOM_IP">3. 自行輸入 IP (自架主機 / LAN)</option>
+                      <option value="P2P">{CONNECTION_MODE_TEXTS.P2P.SELECT_OPTION_CREATE}</option>
+                      <option value="DEFAULT">{CONNECTION_MODE_TEXTS.DEFAULT.SELECT_OPTION}</option>
+                      <option value="CUSTOM_IP">{CONNECTION_MODE_TEXTS.CUSTOM_IP.SELECT_OPTION}</option>
                     </select>
                     <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
                   </div>
@@ -450,18 +457,18 @@ export default function Popup() {
                   <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/50 rounded-lg space-y-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <Zap className="w-3.5 h-3.5" /> WebRTC P2P 統一邀請碼直連
+                        <Zap className="w-3.5 h-3.5" /> {CONNECTION_MODE_TEXTS.P2P.CARD_TITLE}
                       </span>
                       <span className="text-[10px] text-emerald-300 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
-                        不設人數上限
+                        {CONNECTION_MODE_TEXTS.P2P.CARD_BADGE}
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-300 leading-relaxed">
-                      同一組邀請碼可發送給多位好友直接申請加入，房主收到通知後一鍵審核，全房即可透過加密星狀拓撲低延遲直連！
+                      {CONNECTION_MODE_TEXTS.P2P.DESCRIPTION}
                     </p>
                     <div className="text-[10px] text-amber-300/90 bg-amber-950/40 p-1.5 rounded border border-amber-800/40 mt-1 flex items-start gap-1">
                       <span className="flex-shrink-0">💡</span>
-                      <span>提示：若因嚴格防火牆或網路限制導致 P2P 連線失敗，可切換為「預設中繼伺服器」模式。</span>
+                      <span>{CONNECTION_MODE_TEXTS.P2P.FALLBACK_HINT}</span>
                     </div>
                   </div>
                 )}
@@ -469,7 +476,7 @@ export default function Popup() {
                 {connectionMode === 'DEFAULT' && (
                   <div className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400">官方伺服器狀態:</span>
+                      <span className="text-slate-400">{CONNECTION_MODE_TEXTS.DEFAULT.SERVER_STATUS_LABEL}</span>
                       <span
                         className={`text-[10px] font-semibold flex items-center gap-1 ${
                           serverHealth === 'ONLINE'
@@ -489,14 +496,14 @@ export default function Popup() {
                           }`}
                         ></span>
                         {serverHealth === 'ONLINE'
-                          ? '線上就緒 (Fly.io)'
+                          ? CONNECTION_MODE_TEXTS.DEFAULT.SERVER_ONLINE
                           : serverHealth === 'OFFLINE'
-                          ? '連線異常 (請檢查網路)'
-                          : '連線探測中...'}
+                          ? CONNECTION_MODE_TEXTS.DEFAULT.SERVER_OFFLINE
+                          : CONNECTION_MODE_TEXTS.DEFAULT.SERVER_PROBING}
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      連線至官方中繼伺服器，提供穩定開箱即用的房間同步服務，適用於任何網路環境。
+                      {CONNECTION_MODE_TEXTS.DEFAULT.DESCRIPTION}
                     </p>
                   </div>
                 )}
@@ -504,11 +511,11 @@ export default function Popup() {
                 {connectionMode === 'CUSTOM_IP' && (
                   <div className="p-2.5 bg-slate-950/70 border border-blue-900/40 rounded-lg space-y-1.5">
                     <label className="text-[11px] text-slate-300 block font-medium">
-                      自訂伺服器網址 / IP 位址:
+                      {CONNECTION_MODE_TEXTS.CUSTOM_IP.INPUT_LABEL}
                     </label>
                     <input
                       type="text"
-                      placeholder="例如: https://syncine.fly.dev 或 http://192.168.1.100:3000"
+                      placeholder={CONNECTION_MODE_TEXTS.CUSTOM_IP.INPUT_PLACEHOLDER}
                       value={customServerUrl}
                       onChange={(e) => setCustomServerUrl(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
@@ -526,13 +533,13 @@ export default function Popup() {
                   {loading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>正在建立房間...</span>
+                      <span>{ROOM_UI_TEXTS.CREATING_ROOM}</span>
                     </>
                   ) : (
                     <>
                       <Zap className="w-4 h-4" />
                       <span className="text-sm">
-                        {connectionMode === 'P2P' ? '⚡ 建立 P2P 房間 (生成統一邀請碼)' : '🚀 立即建立房間'}
+                        {connectionMode === 'P2P' ? CONNECTION_MODE_TEXTS.P2P.BTN_CREATE : CONNECTION_MODE_TEXTS.DEFAULT.BTN_CREATE}
                       </span>
                     </>
                   )}
@@ -548,9 +555,9 @@ export default function Popup() {
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
                       <Server className="w-3.5 h-3.5 text-teal-400" />
-                      當前連線方式 (Connection Mode):
+                      {ROOM_UI_TEXTS.CONNECTION_MODE_LABEL}:
                     </span>
-                    <span className="text-[10px] text-teal-400 font-medium">可即時切換</span>
+                    <span className="text-[10px] text-teal-400 font-medium">{ROOM_UI_TEXTS.SWITCHABLE_HINT}</span>
                   </div>
 
                   <div className="relative">
@@ -559,9 +566,9 @@ export default function Popup() {
                       onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-teal-500 transition appearance-none cursor-pointer pr-8 font-medium"
                     >
-                      <option value="P2P">⚡ 1. 純端對端直連 (WebRTC P2P)</option>
-                      <option value="DEFAULT">2. 預設中繼伺服器 (官方中繼)</option>
-                      <option value="CUSTOM_IP">3. 自行輸入 IP (自架主機 / LAN)</option>
+                      <option value="P2P">{CONNECTION_MODE_TEXTS.P2P.SELECT_OPTION_JOIN}</option>
+                      <option value="DEFAULT">{CONNECTION_MODE_TEXTS.DEFAULT.SELECT_OPTION}</option>
+                      <option value="CUSTOM_IP">{CONNECTION_MODE_TEXTS.CUSTOM_IP.SELECT_OPTION}</option>
                     </select>
                     <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
                   </div>
@@ -570,14 +577,14 @@ export default function Popup() {
                   {connectionMode === 'P2P' && (
                     <div className="text-[10px] text-emerald-400/90 flex items-center gap-1 pt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <span>已選定 P2P 直連：貼入房主邀請碼，送出申請由房主審核直連。</span>
+                      <span>{CONNECTION_MODE_TEXTS.P2P.JOIN_FEEDBACK}</span>
                     </div>
                   )}
                   {connectionMode === 'DEFAULT' && (
                     <div className="text-[10px] text-teal-400/90 flex items-center justify-between pt-0.5">
                       <span className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
-                        <span>已選定官方中繼：透過官方中繼伺服器快速同步。</span>
+                        <span>{CONNECTION_MODE_TEXTS.DEFAULT.JOIN_FEEDBACK}</span>
                       </span>
                       <span className="text-[9px] text-slate-400">
                         {serverHealth === 'ONLINE' ? '🟢 線上' : serverHealth === 'OFFLINE' ? '🔴 離線' : '🟡 檢測中'}
@@ -587,7 +594,7 @@ export default function Popup() {
                   {connectionMode === 'CUSTOM_IP' && (
                     <div className="text-[10px] text-blue-400/90 flex items-center gap-1 pt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
-                      <span>已選定自架主機：貼入複合分享碼（如 IP:代碼|Base64）將自動對接。</span>
+                      <span>{CONNECTION_MODE_TEXTS.CUSTOM_IP.JOIN_FEEDBACK}</span>
                     </div>
                   )}
                 </div>
@@ -595,16 +602,16 @@ export default function Popup() {
                 <div>
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-teal-400" />
-                    貼入房間代碼 / 邀請碼
+                    {ROOM_UI_TEXTS.PASTE_CODE_LABEL}
                   </label>
                   <input
                     type="text"
                     placeholder={
                       connectionMode === 'P2P'
-                        ? '輸入房主提供的 P2P 邀請碼 (例如: 892301)'
+                        ? CONNECTION_MODE_TEXTS.P2P.PLACEHOLDER
                         : connectionMode === 'CUSTOM_IP'
-                        ? '輸入房主自架複合碼 (例如: IP:892301|aHR0...)'
-                        : '輸入房主提供的 6 碼代碼 (例如: 892301)'
+                        ? CONNECTION_MODE_TEXTS.CUSTOM_IP.PLACEHOLDER
+                        : CONNECTION_MODE_TEXTS.DEFAULT.PLACEHOLDER
                     }
                     value={shareCodeInput}
                     onChange={(e) => setShareCodeInput(e.target.value)}
@@ -612,10 +619,10 @@ export default function Popup() {
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
                     {connectionMode === 'P2P'
-                      ? '輸入房主分享的 6 碼代碼，送出申請後房主批准即可自動直連同步。'
+                      ? CONNECTION_MODE_TEXTS.P2P.INPUT_HINT
                       : connectionMode === 'CUSTOM_IP'
-                      ? '支援複合分享碼，若房主使用自架伺服器，套件將自動切換對應 IP。'
-                      : '輸入 6 碼代碼連線至官方中繼伺服器同步觀影。'}
+                      ? CONNECTION_MODE_TEXTS.CUSTOM_IP.INPUT_HINT
+                      : CONNECTION_MODE_TEXTS.DEFAULT.INPUT_HINT}
                   </p>
 
                   <button
@@ -627,12 +634,12 @@ export default function Popup() {
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>正在連線申請中...</span>
+                        <span>{ROOM_UI_TEXTS.JOINING_ROOM}</span>
                       </>
                     ) : (
                       <>
                         <Zap className="w-4 h-4" />
-                        <span className="text-sm">🔑 申請加入房間 (Join Room)</span>
+                        <span className="text-sm">{ROOM_UI_TEXTS.BTN_JOIN}</span>
                       </>
                     )}
                   </button>
@@ -650,7 +657,7 @@ export default function Popup() {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
-                    房間代碼 (邀請碼)
+                    {ROOM_UI_TEXTS.ROOM_CODE_LABEL}
                   </span>
                   <p className="text-2xl font-mono font-extrabold text-emerald-400 tracking-wider mt-0.5">
                     {roomState.roomId}
@@ -674,7 +681,7 @@ export default function Popup() {
                   className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition active:scale-95 font-semibold cursor-pointer shadow-sm"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? '已複製代碼！' : '複製邀請碼'}
+                  {copied ? ROOM_UI_TEXTS.COPIED_CODE : ROOM_UI_TEXTS.COPY_CODE}
                 </button>
               </div>
 
@@ -682,12 +689,12 @@ export default function Popup() {
               <div className="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
                 <span className="flex items-center gap-1 font-medium text-slate-300">
                   <Users className="w-3.5 h-3.5 text-emerald-400" />
-                  房內成員: <strong className="text-emerald-400 text-xs">{currentMemberCount} 人</strong>
-                  <span className="text-[9px] text-slate-500 ml-1">(每30秒自動校準)</span>
+                  {ROOM_UI_TEXTS.MEMBERS_PREFIX} <strong className="text-emerald-400 text-xs">{currentMemberCount} 人</strong>
+                  <span className="text-[9px] text-slate-500 ml-1">{ROOM_UI_TEXTS.AUTO_CALIBRATE_HINT}</span>
                 </span>
                 <span className="text-emerald-400 font-semibold flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  {roomState.mode === 'P2P' ? 'P2P 直連中' : '中繼連線中'}
+                  {roomState.mode === 'P2P' ? CONNECTION_MODE_TEXTS.P2P.ROOM_STATUS : CONNECTION_MODE_TEXTS.DEFAULT.ROOM_STATUS}
                 </span>
               </div>
             </div>
@@ -698,14 +705,14 @@ export default function Popup() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
                     <Bell className="w-4 h-4 text-amber-400 animate-bounce" />
-                    入房審核申請 ({pendingRequests.length} 位等待中)
+                    {ROOM_UI_TEXTS.AUDIT_REQUEST_TITLE} ({pendingRequests.length} {ROOM_UI_TEXTS.AUDIT_WAITING_SUFFIX})
                   </span>
                   {pendingRequests.length > 1 && (
                     <button
                       onClick={handleApproveAll}
                       className="text-[10px] text-emerald-400 font-bold hover:underline cursor-pointer"
                     >
-                      全部允許
+                      {ROOM_UI_TEXTS.APPROVE_ALL}
                     </button>
                   )}
                 </div>
@@ -730,14 +737,14 @@ export default function Popup() {
                           className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold flex items-center gap-0.5 shadow transition"
                         >
                           <UserCheck className="w-3 h-3" />
-                          允許
+                          {ROOM_UI_TEXTS.APPROVE}
                         </button>
                         <button
                           onClick={() => handleRejectRequest(req.requestId)}
                           className="px-2 py-1 bg-red-600/70 hover:bg-red-600 text-white rounded text-[10px] font-bold flex items-center gap-0.5 transition"
                         >
                           <UserX className="w-3 h-3" />
-                          拒絕
+                          {ROOM_UI_TEXTS.REJECT}
                         </button>
                       </div>
                     </div>
@@ -750,12 +757,12 @@ export default function Popup() {
             {roomState.isHost && (
               <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-800 space-y-2.5">
                 <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" /> 房主權限管理
+                  <Shield className="w-3.5 h-3.5 text-emerald-400" /> {ROOM_UI_TEXTS.HOST_PERMISSION_TITLE}
                 </h3>
 
                 {/* 允許觀眾操作切換 */}
                 <div className="flex items-center justify-between p-2 bg-slate-900/70 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-300">允許觀眾控制播放/暫停</span>
+                  <span className="text-xs text-slate-300">{ROOM_UI_TEXTS.ALLOW_GUEST_CONTROL}</span>
                   <button
                     onClick={() => handleTogglePermission(!roomState.allowGuestControl)}
                     className={`w-10 h-5 flex items-center rounded-full p-1 transition duration-300 ${
@@ -776,7 +783,7 @@ export default function Popup() {
                   className="w-full bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-medium py-2 rounded-lg text-xs transition flex items-center justify-center gap-1.5"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  將全房觀眾跳轉至當前網頁
+                  {ROOM_UI_TEXTS.FORCE_SYNC_TAB}
                 </button>
               </div>
             )}
@@ -788,7 +795,7 @@ export default function Popup() {
                 className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium"
               >
                 <Plus className="w-3.5 h-3.5 text-emerald-400" />
-                建立新房間
+                {ROOM_UI_TEXTS.NEW_ROOM}
               </button>
 
               <button
@@ -796,7 +803,7 @@ export default function Popup() {
                 className="py-2 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                離開房間
+                {ROOM_UI_TEXTS.LEAVE_ROOM}
               </button>
             </div>
           </div>
@@ -805,20 +812,14 @@ export default function Popup() {
 
       {/* 底部 Footer */}
       <div className="mt-4 pt-2.5 border-t border-slate-800/80 text-center text-[10px] text-slate-500 flex items-center justify-between">
-        <span>Syncine Engine • 支援 YouTube / Bilibili</span>
+        <span>{APP_INFO.ENGINE_LABEL}</span>
         <span className="font-mono text-emerald-400 font-semibold text-[10px]">
           連線模式: {
-            roomState
-              ? roomState.mode === 'P2P'
-                ? '⚡ WebRTC P2P 直連'
-                : roomState.mode === 'CUSTOM_IP'
-                ? '🌐 自架主機'
-                : '🏢 官方中繼'
-              : connectionMode === 'P2P'
-              ? '⚡ WebRTC P2P 直連'
-              : connectionMode === 'CUSTOM_IP'
-              ? '🌐 自架主機'
-              : '🏢 官方中繼'
+            (roomState ? roomState.mode : connectionMode) === 'P2P'
+              ? CONNECTION_MODE_TEXTS.P2P.FOOTER_LABEL
+              : (roomState ? roomState.mode : connectionMode) === 'CUSTOM_IP'
+              ? CONNECTION_MODE_TEXTS.CUSTOM_IP.FOOTER_LABEL
+              : CONNECTION_MODE_TEXTS.DEFAULT.FOOTER_LABEL
           }
         </span>
       </div>

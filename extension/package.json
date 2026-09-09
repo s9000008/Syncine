@@ -1,7 +1,7 @@
 {
   "name": "syncine-extension",
-  "version": "2.1.0",
-  "description": "Syncine - Cross-platform video sync Chrome Extension",
+  "version": "2.1.1",
+  "description": "Syncine - Video sync watch party Chrome Extension",
   "type": "module",
   "scripts": {
     "dev": "vite",

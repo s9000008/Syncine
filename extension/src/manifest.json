@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Syncine (同映) - 跨平台影片同步播放",
-  "version": "2.1.0",
-  "description": "跨地理位置、跨網頁即時低延遲影片同步播放套件 (支援 YouTube, Bilibili)",
+  "name": "Syncine (同映) - 遠端影片同步播放 (Watch Party)",
+  "version": "2.1.1",
+  "description": "即時影片同映套件，支援 YouTube、Bilibili，好友遠端一鍵同步播放。 Real-time video sync watch party extension for YouTube & Bilibili.",
   "permissions": [
     "storage",
     "tabs",
