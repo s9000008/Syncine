@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "Syncine (同映) - リモート動画同時視聴 (Watch Party)",
+    "description": "拡張機能の名前"
+  },
+  "appDesc": {
+    "message": "YouTubeとBilibiliに対応したリアルタイム動画同時視聴拡張機能。離れた友達と一緒に動画を楽しめます。",
+    "description": "拡張機能の説明"
+  },
+  "actionTitle": {
+    "message": "Syncine (同映) コントロールパネル",
+    "description": "拡張機能アイコンのツールチップ"
+  }
+}

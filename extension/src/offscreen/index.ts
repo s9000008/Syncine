@@ -1,5 +1,6 @@
 import { Peer, DataConnection } from 'peerjs';
 import { P2PStatus, ExtensionMessage, JoinRequest } from '../types/protocol';
+import { getStandaloneText } from '../locales';
 
 console.log('[Syncine Offscreen] WebRTC Offscreen Document (PeerJS Engine) 已啟動');
 
@@ -363,7 +364,7 @@ class PeerJSWebRTCManager {
               type: 'CS_ROOM_STATE_CHANGED',
               payload: null
             } as ExtensionMessage).catch(() => {});
-            alert('房主已婉拒您的入房申請。');
+            alert(getStandaloneText('ERR_AUDIT_REJECTED', '房主已婉拒您的入房申請。'));
           } else if (data?.type === 'MEMBER_COUNT_UPDATE') {
             console.log(`[Syncine P2P Guest] 收到 30 秒人數校準更新: ${data.count} 人`);
             chrome.runtime.sendMessage({

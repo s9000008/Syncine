@@ -1,11 +1,12 @@
 {
   "name": "syncine-extension",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Syncine - Video sync watch party Chrome Extension",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "node test_i18n_suite.mjs",
     "zip": "tsc && vite build && powershell -Command \"Compress-Archive -Path dist/* -DestinationPath ../extension-build.zip -Force\""
   },
   "dependencies": {

@@ -7,7 +7,7 @@
 export const APP_INFO = {
   NAME: 'Syncine (同映)',
   TAGLINE: '遠端影片同步播放 (Watch Party)',
-  DEFAULT_VERSION: 'v2.1.1',
+  DEFAULT_VERSION: 'v2.1.2',
   /**
    * 自動取得當前 Chrome 擴充套件版本號，若無環境則回退至預設版本
    */

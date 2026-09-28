@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "Syncine (同映) - 遠端影片同步播放 (Watch Party)",
+    "description": "應用程式名稱"
+  },
+  "appDesc": {
+    "message": "即時影片同映套件，支援 YouTube、Bilibili，好友遠端一鍵同步播放。",
+    "description": "應用程式說明"
+  },
+  "actionTitle": {
+    "message": "Syncine (同映) 控制面板",
+    "description": "工具列圖示標題"
+  }
+}

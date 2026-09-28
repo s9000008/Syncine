@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "Syncine - Web Video Watch Party",
+    "description": "The name of the extension"
+  },
+  "appDesc": {
+    "message": "Real-time video sync watch party extension for YouTube & Bilibili. Watch with remote friends seamlessly.",
+    "description": "The description of the extension"
+  },
+  "actionTitle": {
+    "message": "Syncine Control Panel",
+    "description": "Tooltip for the extension button"
+  }
+}

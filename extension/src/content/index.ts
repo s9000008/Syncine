@@ -1,4 +1,5 @@
 import { SyncData, getVideoIdentifier } from '../types/protocol';
+import { getStandaloneText } from '../locales';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
 
@@ -438,7 +439,8 @@ chrome.runtime.onMessage.addListener((request) => {
     roomState.allowGuestControl = payload.allowGuestControl;
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
-    alert(`【Syncine 安全警告】房主嘗試將您導向未授權的網址 (${payload.url})，系統已自動攔截！`);
+    const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL', '【Syncine 安全警告】房主嘗試將您導向未授權的網址，系統已自動攔截！');
+    alert(`${alertMsg} (${payload.url})`);
   }
 });
 

@@ -338,6 +338,11 @@ export interface TogglePermissionMsg {
 * **需求定位**：允許房主選取本機硬碟中的私有影片檔案（`.mp4`, `.mkv`），免上傳第三方雲端，直接端對端串流給好友同步觀看。
 * **技術方案**：利用 WebRTC DataChannel 進行二進位分塊傳輸（File Chunking）或 WebTorrent 技術，結合 MediaSource Extensions (MSE) API 於觀眾端瀏覽器動態解碼組裝播放，落實極致隱私與零伺服器頻寬負載。
 
-### 10.3 多語系介面支援 (Internationalization / i18n)
-* **需求定位**：擴展國際化社群，支援多國語言介面。
-* **技術方案**：建立輕量 i18n 資源庫與切換機制，支援繁體中文（預設）、簡體中文、英文等多語系即時切換。
+### 10.3 多語系介面支援 (Internationalization / i18n - 已實裝)
+* **需求定位**：擴展國際化社群，支援多國語言介面與全球影音同映社群。
+* **技術方案**：
+  * **支援語系**：繁體中文 (`zh-TW`)、English (`en-US`)、日本語 (`ja-JP`)、简体中文 (`zh-CN`) 四國語系。
+  * **智慧自動偵測**：透過 `chrome.i18n.getUILanguage()` 與 `navigator.language` 優先判定瀏覽器語系自動載入；支援 `chrome.storage.sync` 跨裝置持久化偏好。
+  * **前後端解耦 ReturnCode 機制**：後端與核心通道全面以標準化 ReturnCode 溝通，由前端轉譯器 (`translateReturnCode`) 映射至對應語言字典，杜絕硬編碼字串混亂。
+  * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
+

@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Syncine (同映) - 遠端影片同步播放 (Watch Party)",
-  "version": "2.1.1",
-  "description": "即時影片同映套件，支援 YouTube、Bilibili，好友遠端一鍵同步播放。 Real-time video sync watch party extension for YouTube & Bilibili.",
+  "default_locale": "zh_TW",
+  "name": "__MSG_appName__",
+  "version": "2.1.2",
+  "description": "__MSG_appDesc__",
   "permissions": [
     "storage",
     "tabs",
@@ -36,6 +37,6 @@
   ],
   "action": {
     "default_popup": "src/popup/index.html",
-    "default_title": "Syncine (同映) 控制面板"
+    "default_title": "__MSG_actionTitle__"
   }
 }
