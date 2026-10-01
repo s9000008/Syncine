@@ -7,7 +7,8 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "ts-node test_suite.ts"
+    "test": "ts-node test_suite.ts",
+    "security:check": "node ../.agents/skills/security-agent/scripts/scan_secrets.js"
   },
   "keywords": [
     "syncine",

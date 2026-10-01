@@ -35,8 +35,12 @@
 
 ```text
 Syncine/
-├── .env.example             # 專案環境變數範例檔
-├── .gitignore                # 版控排除清單
+├── .agents/                  # Antigravity 代理人客製化系統
+│   └── skills/               # 三大 Agent 專屬 Skills (架構、資安、業務) 與自動化工具
+├── AGENTS.md                 # 專案頂層 Multi-Agent 協作指引 (Antigravity 自動載入)
+├── GEMINI.md                 # 專案核心規範與原則
+├── .env.example              # 專案環境變數範例檔
+├── .gitignore                # 版控排除清單 (嚴格防洩)
 ├── README.md                 # 專案完整說明文件
 ├── Syncine_System_Specification.md # 系統規格書 (v2.3)
 │
@@ -60,6 +64,18 @@ Syncine/
     ├── tailwind.config.js
     └── vite.config.ts
 ```
+
+---
+
+## 🤖 專案專屬 AI 代理人體系 (Multi-Agent System)
+
+專案全面導入 Google Antigravity 專屬協作體系，配置 3 大專責 Agent 協助專案生命週期開發與維護：
+
+| Agent | 角色定位 | 核心職責 | 調用方式 / 工具 |
+| :--- | :--- | :--- | :--- |
+| 🏗️ **架構 Agent** | `@architecture-agent` | 針對現有架構與未來擴張進行分析評估。評估新串流平台適配器（Netflix/Vimeo/巴哈姆特）、WebRTC 拓撲極限、Redis 叢集擴展與產出 ADR 架構決策記錄。 | `.agents/skills/architecture-agent/` |
+| 🛡️ **資安 Agent** | `@security-agent` | 專門審查新代碼安全性，**嚴格杜絕開源專案意外推送隱私資訊、真實測試 IP、金鑰或私鑰**，落實 MV3 最小權限、網域白名單與 Log 清毒。 | `npm run security:check` 或 `.agents/skills/security-agent/` |
+| 💼 **業務 Agent** | `@business-agent` | 針對業務邏輯進行系統性處理與回應。主責 5 秒容差與延遲補償同步演算法、房間狀態機、斷線寬限期無感回魂、以及多語系 ReturnCode 解耦規範。 | `.agents/skills/business-agent/` |
 
 ---
 
@@ -98,6 +114,12 @@ npm install
 # 啟動開發熱重載 (Dev Mode)
 npm run dev
 
+# 執行單元與協定自動化測試
+npm test
+
+# 執行資安與開源隱私防洩檢測 (由資安 Agent 專屬提供)
+npm run security:check
+
 # 測試生產環境建置
 npm run build
 npm start
@@ -116,6 +138,12 @@ npm install
 
 # 啟動 Vite 熱重載開發模式
 npm run dev
+
+# 執行多語系與前端規格自動化測試
+npm test
+
+# 執行擴充套件資安防洩檢測
+npm run security:check
 
 # 打包擴充套件 bundle
 npm run build
