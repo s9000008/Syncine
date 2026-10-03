@@ -34,6 +34,7 @@ export interface CreateRoomReq {
     isSelfHosted?: boolean;
     mode?: ConnectionMode;
     customServerUrl?: string;
+    language?: string;
   };
 }
 
@@ -136,6 +137,7 @@ export interface RoomState {
   roomId: string;
   hostSocketId: string;
   hostUserId: string;
+  hostLanguage?: string;
   currentUrl: string;
   allowGuestControl: boolean;
   isSelfHosted: boolean;

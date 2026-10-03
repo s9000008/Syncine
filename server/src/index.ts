@@ -28,7 +28,7 @@ app.use(express.json());
 
 // 健康檢查 Endpoint
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.1.0' });
+  res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.2.0' });
 });
 
 const server = http.createServer(app);
@@ -58,8 +58,25 @@ io.on('connection', (socket: Socket) => {
 
   // 1. 建立房間
   socket.on('CREATE_ROOM', (payload: CreateRoomReq) => {
-    const { userId, currentUrl, isSelfHosted, mode } = payload.data;
-    const room = roomManager.createRoom(socket.id, userId, currentUrl, isSelfHosted ?? false, mode ?? 'DEFAULT');
+    const { userId, currentUrl, isSelfHosted, mode, language } = payload?.data || {};
+
+    // 資安防護：驗證語系格式 (BCP 47 標籤格式，限制 10 字元內，避免惡意注入)
+    let sanitizedLang: string | undefined = undefined;
+    if (typeof language === 'string') {
+      const trimmed = language.trim();
+      if (/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,4})?$/.test(trimmed) && trimmed.length <= 10) {
+        sanitizedLang = trimmed;
+      }
+    }
+
+    const room = roomManager.createRoom(
+      socket.id,
+      userId,
+      currentUrl,
+      isSelfHosted ?? false,
+      mode ?? 'DEFAULT',
+      sanitizedLang
+    );
 
     socket.join(room.roomId);
 
@@ -86,7 +103,10 @@ io.on('connection', (socket: Socket) => {
     const result = roomManager.joinRoom(roomId, socket.id, data.userId);
 
     if (!result.success || !result.room) {
-      socket.emit('ERROR', { message: result.error || '加入房間失敗' });
+      socket.emit('ERROR', { 
+        message: result.error || '加入房間失敗',
+        code: result.code || 'ERR_ROOM_NOT_FOUND'
+      });
       return;
     }
 

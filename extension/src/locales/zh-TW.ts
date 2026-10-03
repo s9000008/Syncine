@@ -2,7 +2,7 @@ export const zhTW = {
   app: {
     name: 'Syncine (同映)',
     tagline: '遠端影片同步播放 (Watch Party)',
-    defaultVersion: 'v2.1.2',
+    defaultVersion: 'v2.2.0',
     engineLabel: 'Syncine Engine • 支援 YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },
@@ -67,6 +67,13 @@ export const zhTW = {
       placeholder: '輸入房主自架複合碼 (例如: IP:892301|aHR0...)',
       inputHint: '支援複合分享碼，若房主使用自架伺服器，套件將自動切換對應 IP。',
       footerLabel: '🌐 自架主機',
+    },
+    smartDetection: {
+      p2pDetected: '連線方式：⚡ P2P 直連',
+      defaultDetected: '連線方式：🏢 官方中繼伺服器',
+      customIpDetected: '連線方式：🌐 自架主機',
+      legacyRawHint: '連線方式：{mode} (若連線失敗可切換)',
+      legacyCompositeHint: '連線方式：🌐 自架主機',
     },
   },
   roomUi: {

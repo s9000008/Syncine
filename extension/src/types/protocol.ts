@@ -1,5 +1,15 @@
 export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
 
+export type DetectedShareCodeType = 'P2P' | 'DEFAULT' | 'CUSTOM_IP' | 'LEGACY_RAW' | 'LEGACY_COMPOSITE';
+
+export interface ParsedConnectionInfo {
+  roomId: string;
+  mode: ConnectionMode;
+  serverUrl: string;
+  isLegacy: boolean;
+  detectedType: DetectedShareCodeType;
+}
+
 export type P2PStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'FALLBACK';
 
 export type SyncineEvent = 

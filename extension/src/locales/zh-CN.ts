@@ -4,7 +4,7 @@ export const zhCN: TranslationSchema = {
   app: {
     name: 'Syncine (同映)',
     tagline: '远程视频同步播放 (Watch Party)',
-    defaultVersion: 'v2.1.2',
+    defaultVersion: 'v2.2.0',
     engineLabel: 'Syncine Engine • 支持 YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },
@@ -69,6 +69,13 @@ export const zhCN: TranslationSchema = {
       placeholder: '输入房主自建复合码 (例如: IP:892301|aHR0...)',
       inputHint: '支持复合分享码，若房主使用自建服务器，扩展将自动切换对应 IP。',
       footerLabel: '🌐 自建主机',
+    },
+    smartDetection: {
+      p2pDetected: '连接方式：⚡ P2P 直连',
+      defaultDetected: '连接方式：🏢 官方中继服务器',
+      customIpDetected: '连接方式：🌐 自建主机',
+      legacyRawHint: '连接方式：{mode} (若连接失败可切换)',
+      legacyCompositeHint: '连接方式：🌐 自建主机',
     },
   },
   roomUi: {

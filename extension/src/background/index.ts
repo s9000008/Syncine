@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
 import { sanitizeLog } from '../utils/sanitize';
+import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
 // 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇)
 const HOST_WHITELIST = [
@@ -438,30 +439,12 @@ function broadcastToVideoTabs(msg: any) {
 // 5. 解析複合分享碼 (RoomID|Base64(ServerURL))
 // ----------------------------------------------------
 function parseShareCode(inputCode: string): { roomId: string; serverUrl: string; mode: ConnectionMode } {
-  let trimmed = inputCode.trim();
-  let mode: ConnectionMode = 'DEFAULT';
-
-  if (trimmed.startsWith('P2P:')) {
-    mode = 'P2P';
-    trimmed = trimmed.substring(4);
-  } else if (trimmed.startsWith('IP:')) {
-    mode = 'CUSTOM_IP';
-    trimmed = trimmed.substring(3);
-  } else if (trimmed.startsWith('DEF:')) {
-    mode = 'DEFAULT';
-    trimmed = trimmed.substring(4);
-  }
-
-  if (trimmed.includes('|')) {
-    const [roomId, base64Url] = trimmed.split('|');
-    try {
-      const decodedUrl = atob(base64Url);
-      return { roomId: roomId.toUpperCase(), serverUrl: decodedUrl, mode };
-    } catch (e) {
-      console.error('Base64 解碼失敗，使用預設伺服器');
-    }
-  }
-  return { roomId: trimmed.toUpperCase(), serverUrl: DEFAULT_SERVER_URL, mode };
+  const parsed = parseConnectionCode(inputCode, 'DEFAULT', DEFAULT_SERVER_URL);
+  return {
+    roomId: parsed.roomId,
+    serverUrl: parsed.serverUrl || DEFAULT_SERVER_URL,
+    mode: parsed.mode
+  };
 }
 
 // ----------------------------------------------------
@@ -485,6 +468,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               } as ExtensionMessage,
               (res) => {
                 if (res?.success) {
+                  const compositeCode = formatShareCode('P2P', res.roomId);
                   currentRoomState = {
                     roomId: res.roomId,
                     isHost: true,
@@ -496,7 +480,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     connectionStatus: 'CONNECTED',
                     connectedPeerCount: 1,
                     pendingJoinRequests: [],
-                    compositeCode: res.roomId
+                    compositeCode
                   };
                   persistRoomSession(currentRoomState);
                   broadcastToVideoTabs({
@@ -505,7 +489,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   });
                   sendResponse({
                     success: true,
-                    compositeCode: res.roomId,
+                    compositeCode,
                     roomId: res.roomId,
                     roomState: currentRoomState
                   });
@@ -530,7 +514,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               currentUrl: payload.currentUrl,
               isSelfHosted: mode === 'CUSTOM_IP' || !!payload.customServerUrl,
               mode,
-              customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined
+              customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined,
+              language: payload.language
             }
           });
 
@@ -540,11 +525,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
           s.once('CREATE_ROOM_SUCCESS', async (res: any) => {
             clearTimeout(createTimer);
-            const base64Url = btoa(serverUrl);
-            let compositeCode = `${res.roomId}|${base64Url}`;
-            if (mode === 'CUSTOM_IP') {
-              compositeCode = `IP:${res.roomId}|${base64Url}`;
-            }
+            const compositeCode = formatShareCode(mode, res.roomId, serverUrl);
 
             currentRoomState = {
               roomId: res.roomId,
@@ -577,18 +558,23 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
     case 'BG_JOIN_ROOM': {
       const rawInput = payload.shareCode ? payload.shareCode.trim() : '';
+      const fallbackMode: ConnectionMode = payload.mode || 'P2P';
+      const parsed = parseConnectionCode(rawInput, fallbackMode, DEFAULT_SERVER_URL);
+      const { roomId, serverUrl, mode } = parsed;
 
-      // 若為純 6 碼或指名 P2P 模式，走 PeerJS 雲端握手
-      if (
-        payload.mode === 'P2P' ||
-        (!rawInput.includes('|') && !rawInput.startsWith('http') && !rawInput.startsWith('IP:') && !rawInput.startsWith('P2P:'))
-      ) {
+      if (!roomId) {
+        sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
+        return true;
+      }
+
+      // 若判定模式為 P2P，走 PeerJS 雲端握手
+      if (mode === 'P2P') {
         ensureOffscreenDocument()
           .then(() => {
             chrome.runtime.sendMessage(
               {
                 type: 'OFFSCREEN_PEER_JOIN_ROOM',
-                payload: { roomId: rawInput, userId }
+                payload: { roomId, userId }
               } as ExtensionMessage,
               (res) => {
                 if (res?.success) {
@@ -604,7 +590,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                       connectionStatus: 'CONNECTED',
                       guestAwaitingApproval: true,
                       connectedPeerCount: 1,
-                      compositeCode: res.roomId
+                      compositeCode: formatShareCode('P2P', res.roomId)
                     };
                     persistRoomSession(currentRoomState);
                   }
@@ -614,19 +600,18 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   });
                   sendResponse({ success: true, roomId: res.roomId, roomState: currentRoomState });
                 } else {
-                  sendResponse({ success: false, error: res?.error || '加入 P2P 房間失敗' });
+                  sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
                 }
               }
             );
           })
           .catch((err) => {
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: false, error: err.message, code: 'ERR_P2P_SIGNAL_FAILED' });
           });
         return true;
       }
-      const parsed = parseShareCode(payload.shareCode);
-      const { roomId, serverUrl, mode } = parsed;
 
+      // 伺服器模式 (DEFAULT 或 CUSTOM_IP)
       initSocketConnection(serverUrl)
         .then((s) => {
           s.emit('JOIN_ROOM', {
@@ -636,12 +621,12 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           });
 
           const joinTimer = setTimeout(() => {
-            sendResponse({ success: false, error: '伺服器回應逾時 (JOIN_ROOM_SUCCESS 未收到)' });
+            sendResponse({ success: false, error: 'ERR_SERVER_UNREACHABLE', code: 'ERR_SERVER_UNREACHABLE' });
           }, 6000);
 
           s.once('JOIN_ROOM_SUCCESS', async (res: any) => {
             clearTimeout(joinTimer);
-            const actualMode: ConnectionMode = mode === 'P2P' ? 'P2P' : (res.data.mode || 'DEFAULT');
+            const actualMode: ConnectionMode = res.data?.mode || mode;
 
             currentRoomState = {
               roomId: res.roomId,
@@ -650,10 +635,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               serverUrl,
               currentUrl: res.data.currentUrl,
               mode: actualMode,
-              p2pStatus: actualMode === 'P2P' ? 'CONNECTING' : undefined,
+              p2pStatus: undefined,
               connectionStatus: 'CONNECTED',
               connectedPeerCount: 0,
-              compositeCode: payload.shareCode
+              compositeCode: formatShareCode(actualMode, res.roomId, serverUrl)
             };
             persistRoomSession(currentRoomState);
 
@@ -681,15 +666,19 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
           s.once('ERROR', (err: any) => {
             clearTimeout(joinTimer);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({
+              success: false,
+              error: err.message || '加入房間失敗',
+              code: err.code || 'ERR_ROOM_NOT_FOUND'
+            });
           });
         })
         .catch((err) => {
-          console.error('[Background] BG_JOIN_ROOM 失敗:', err);
-          sendResponse({ success: false, error: err.message });
+          sendResponse({ success: false, error: err.message, code: 'ERR_SERVER_UNREACHABLE' });
         });
       return true;
     }
+
 
     // 雙向路由：若 P2P 直連已建立，優先透過 DataChannel 傳送；否則透過 Socket.IO
     case 'BG_SYNC_STATE': {

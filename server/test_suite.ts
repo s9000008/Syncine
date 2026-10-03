@@ -96,6 +96,22 @@ async function runAllTests() {
     assert(rejoinRes.success === true, '成員在寬限期內成功回魂加入房間');
     assert(graceRoom.emptyRoomTimer === undefined, '成員回魂後自動取消 60 秒銷毀倒數計時器');
     assert(graceRoom.members.size === 1, '回魂後成員數恢復正常');
+
+    // 2.6 房間人數上限 100 人測試
+    const fullRoom = manager.createRoom('socket_limit_host', 'user_limit_host', 'https://www.youtube.com/watch?v=limit', false, 'DEFAULT');
+    for (let i = 2; i <= 100; i++) {
+      manager.joinRoom(fullRoom.roomId, `socket_guest_${i}`, `user_guest_${i}`);
+    }
+    assert(fullRoom.members.size === 100, '房間成功容納上限 100 人');
+    const overflowRes = manager.joinRoom(fullRoom.roomId, 'socket_guest_101', 'user_guest_101');
+    assert(overflowRes.success === false && overflowRes.code === 'ERR_ROOM_FULL', '第 101 位成員加入時正確被攔截 (ERR_ROOM_FULL)');
+
+    // 2.7 房主語言支援與全相容測試 (Server Log 觀測專用)
+    const langRoom = manager.createRoom('socket_lang_1', 'user_lang', 'https://www.youtube.com/watch?v=lang', false, 'DEFAULT', 'zh-TW');
+    assert(langRoom.hostLanguage === 'zh-TW', '房主建房時指定語系正確記錄於房間狀態中');
+
+    const legacyRoom = manager.createRoom('socket_legacy_1', 'user_legacy', 'https://www.youtube.com/watch?v=legacy', false, 'DEFAULT');
+    assert(legacyRoom.hostLanguage === undefined, '舊版呼叫未提供語系時正確降級為 undefined 且建房成功');
   }
 
   // ----------------------------------------------------
@@ -106,7 +122,7 @@ async function runAllTests() {
   const app = express();
   app.use(express.json());
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.1.0' });
+    res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.2.0' });
   });
 
   const httpServer = http.createServer(app);
@@ -126,8 +142,24 @@ async function runAllTests() {
 
   ioServer.on('connection', (socket: Socket) => {
     socket.on('CREATE_ROOM', (payload: any) => {
-      const { userId, currentUrl, isSelfHosted, mode } = payload.data;
-      const room = roomManager.createRoom(socket.id, userId, currentUrl, isSelfHosted ?? false, mode ?? 'DEFAULT');
+      const { userId, currentUrl, isSelfHosted, mode, language } = payload?.data || {};
+
+      let sanitizedLang: string | undefined = undefined;
+      if (typeof language === 'string') {
+        const trimmed = language.trim();
+        if (/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,4})?$/.test(trimmed) && trimmed.length <= 10) {
+          sanitizedLang = trimmed;
+        }
+      }
+
+      const room = roomManager.createRoom(
+        socket.id,
+        userId,
+        currentUrl,
+        isSelfHosted ?? false,
+        mode ?? 'DEFAULT',
+        sanitizedLang
+      );
       socket.join(room.roomId);
       socket.emit('CREATE_ROOM_SUCCESS', {
         event: 'CREATE_ROOM_SUCCESS',
@@ -230,7 +262,7 @@ async function runAllTests() {
     });
     assert(hostClient.connected && guestClient.connected, 'Host 與 Guest Socket 客戶端連線成功');
 
-    // 3.3 建房請求測試
+    // 3.3 建房請求測試 (含語系記錄與隱私防護驗證)
     let createdRoomId = '';
     await new Promise<void>((resolve) => {
       hostClient.emit('CREATE_ROOM', {
@@ -238,12 +270,16 @@ async function runAllTests() {
         data: {
           userId: 'host_tester',
           currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-          mode: 'DEFAULT'
+          mode: 'DEFAULT',
+          language: 'zh-TW'
         }
       });
       hostClient.on('CREATE_ROOM_SUCCESS', (res: any) => {
         createdRoomId = res.roomId;
         assert(typeof res.roomId === 'string' && res.roomId.length === 6, '收到 CREATE_ROOM_SUCCESS 攜帶 6 碼 RoomID');
+        assert(res.data?.hostLanguage === undefined && res.hostLanguage === undefined, '建房回應未洩漏房主語言欄位');
+        const roomInServer = roomManager.getRoom(createdRoomId);
+        assert(roomInServer?.hostLanguage === 'zh-TW', '伺服器端記憶體正確保存房主語系 (zh-TW)');
         resolve();
       });
     });
@@ -274,6 +310,7 @@ async function runAllTests() {
 
       guestClient.on('JOIN_ROOM_SUCCESS', (res: any) => {
         assert(res.roomId === createdRoomId && res.data.isHost === false, 'Guest 端收到 JOIN_ROOM_SUCCESS 且確認身分為 Guest');
+        assert(res.data?.hostLanguage === undefined && res.hostLanguage === undefined, '訪客端未收到房主語言資訊，確保隱私');
         joinSuccess = true;
         checkBoth();
       });

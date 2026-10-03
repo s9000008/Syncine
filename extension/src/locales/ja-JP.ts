@@ -4,7 +4,7 @@ export const jaJP: TranslationSchema = {
   app: {
     name: 'Syncine (同映)',
     tagline: 'リモート動画同時視聴 (Watch Party)',
-    defaultVersion: 'v2.1.2',
+    defaultVersion: 'v2.2.0',
     engineLabel: 'Syncine Engine • YouTube / Bilibili 対応',
     supportedPlatforms: 'YouTube / Bilibili',
   },
@@ -69,6 +69,13 @@ export const jaJP: TranslationSchema = {
       placeholder: '複合コードを入力 (例: IP:892301|aHR0...)',
       inputHint: '複合共有コードに対応。ホストのIPに自動切り替えして接続します。',
       footerLabel: '🌐 自宅サーバー',
+    },
+    smartDetection: {
+      p2pDetected: '接続方式：⚡ P2Pダイレクト',
+      defaultDetected: '接続方式：🏢 公式リレーサーバー',
+      customIpDetected: '接続方式：🌐 自宅サーバー',
+      legacyRawHint: '接続方式：{mode} (接続失敗時は切替可能)',
+      legacyCompositeHint: '接続方式：🌐 自宅サーバー',
     },
   },
   roomUi: {

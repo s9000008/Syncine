@@ -4,7 +4,7 @@ export const enUS: TranslationSchema = {
   app: {
     name: 'Syncine',
     tagline: 'Remote Watch Party for Web Videos',
-    defaultVersion: 'v2.1.2',
+    defaultVersion: 'v2.2.0',
     engineLabel: 'Syncine Engine • Supports YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },
@@ -69,6 +69,13 @@ export const enUS: TranslationSchema = {
       placeholder: 'Enter composite code (e.g. IP:892301|aHR0...)',
       inputHint: 'Supports composite share code. Automatically connects to host IP.',
       footerLabel: '🌐 Self-Hosted',
+    },
+    smartDetection: {
+      p2pDetected: 'Mode: ⚡ WebRTC P2P Direct',
+      defaultDetected: 'Mode: 🏢 Official Relay Server',
+      customIpDetected: 'Mode: 🌐 Self-Hosted Server',
+      legacyRawHint: 'Mode: {mode} (Switch above if failed)',
+      legacyCompositeHint: 'Mode: 🌐 Self-Hosted Server',
     },
   },
   roomUi: {

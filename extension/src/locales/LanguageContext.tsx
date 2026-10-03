@@ -27,34 +27,49 @@ const LanguageContext = createContext<LanguageContextType | null>(null);
 const STORAGE_KEY = 'syncine_preferred_language';
 
 export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [language, setLanguageState] = useState<SupportedLanguage>(() => detectBrowserLanguage());
+  const [language, setLanguageState] = useState<SupportedLanguage>(() => {
+    try {
+      const local = localStorage.getItem(STORAGE_KEY) as SupportedLanguage | null;
+      if (local && DICTIONARIES[local]) {
+        return local;
+      }
+    } catch {}
+    return detectBrowserLanguage();
+  });
   const [isReady, setIsReady] = useState<boolean>(false);
 
   useEffect(() => {
-    // 優先從 chrome.storage.sync 讀取使用者自訂語系偏好
-    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-      chrome.storage.sync.get([STORAGE_KEY], (res) => {
+    // 優先從 chrome.storage.local 讀取本機偏好，並回退至 chrome.storage.sync 跨裝置同步
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get([STORAGE_KEY], (res) => {
         const stored = res?.[STORAGE_KEY] as SupportedLanguage | undefined;
         if (stored && DICTIONARIES[stored]) {
           setLanguageState(stored);
-        } else {
-          // 若無紀錄則以瀏覽器預設識別為主
-          setLanguageState(detectBrowserLanguage());
+          try {
+            localStorage.setItem(STORAGE_KEY, stored);
+          } catch {}
+          setIsReady(true);
+          return;
         }
-        setIsReady(true);
+
+        // 若 local 尚未有紀錄，嘗試從 sync 讀取
+        if (chrome.storage?.sync) {
+          chrome.storage.sync.get([STORAGE_KEY], (syncRes) => {
+            const storedSync = syncRes?.[STORAGE_KEY] as SupportedLanguage | undefined;
+            if (storedSync && DICTIONARIES[storedSync]) {
+              setLanguageState(storedSync);
+              chrome.storage.local.set({ [STORAGE_KEY]: storedSync });
+              try {
+                localStorage.setItem(STORAGE_KEY, storedSync);
+              } catch {}
+            }
+            setIsReady(true);
+          });
+        } else {
+          setIsReady(true);
+        }
       });
     } else {
-      // 本地開發 / Web 測試預覽環境降級
-      try {
-        const local = localStorage.getItem(STORAGE_KEY) as SupportedLanguage | null;
-        if (local && DICTIONARIES[local]) {
-          setLanguageState(local);
-        } else {
-          setLanguageState(detectBrowserLanguage());
-        }
-      } catch (e) {
-        setLanguageState(detectBrowserLanguage());
-      }
       setIsReady(true);
     }
   }, []);
@@ -63,14 +78,14 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
     if (!DICTIONARIES[newLang]) return;
     setLanguageState(newLang);
 
-    // 持久化儲存
-    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-      chrome.storage.sync.set({ [STORAGE_KEY]: newLang });
-    }
+    // 三重持久化防線：同步 localStorage (0延遲) + chrome.storage.local + chrome.storage.sync
     try {
       localStorage.setItem(STORAGE_KEY, newLang);
-    } catch (e) {
-      // ignore
+    } catch {}
+
+    if (typeof chrome !== 'undefined') {
+      chrome.storage?.local?.set({ [STORAGE_KEY]: newLang });
+      chrome.storage?.sync?.set({ [STORAGE_KEY]: newLang });
     }
   };
 

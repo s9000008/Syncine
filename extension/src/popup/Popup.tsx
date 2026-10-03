@@ -18,13 +18,14 @@ import {
   UserX,
   Clock
 } from 'lucide-react';
-import { RoomStateInfo, ConnectionMode } from '../types/protocol';
+import { RoomStateInfo, ConnectionMode, DetectedShareCodeType } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
+import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
 export default function Popup() {
-  const { t, translateReturnCode } = useTranslation();
+  const { t, translateReturnCode, language } = useTranslation();
 
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
   const [roomState, setRoomState] = useState<RoomStateInfo | null>(null);
@@ -37,6 +38,10 @@ export default function Popup() {
   const [customServerUrl, setCustomServerUrl] = useState<string>('');
   const [shareCodeInput, setShareCodeInput] = useState<string>('');
   const [compositeCode, setCompositeCode] = useState<string>('');
+  const [detectedCodeInfo, setDetectedCodeInfo] = useState<{
+    detectedType: DetectedShareCodeType;
+    isLegacy: boolean;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
   const [serverHealth, setServerHealth] = useState<'CHECKING' | 'ONLINE' | 'OFFLINE'>('CHECKING');
@@ -144,7 +149,8 @@ export default function Popup() {
         payload: {
           currentUrl: activeTabUrl,
           mode: connectionMode,
-          customServerUrl: connectionMode === 'CUSTOM_IP' ? targetServerUrl : undefined
+          customServerUrl: connectionMode === 'CUSTOM_IP' ? targetServerUrl : undefined,
+          language
         }
       },
       (res) => {
@@ -160,8 +166,38 @@ export default function Popup() {
   };
 
   // ----------------------------------------------------
-  // 2. 加房處理 (貼入同一組邀請碼即可送出審核申請)
+  // 2. 智慧輸入與加房處理 (支援前綴自動識別與全相容對接)
   // ----------------------------------------------------
+  const handleShareCodeChange = (input: string) => {
+    setShareCodeInput(input);
+    if (!input.trim()) {
+      setDetectedCodeInfo(null);
+      return;
+    }
+
+    const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
+    setDetectedCodeInfo({
+      detectedType: parsed.detectedType,
+      isLegacy: parsed.isLegacy
+    });
+
+    // 權威前綴或帶管道之複合分享碼，自動切換對應模式
+    if (parsed.detectedType === 'P2P') {
+      if (connectionMode !== 'P2P') setConnectionMode('P2P');
+    } else if (parsed.detectedType === 'DEFAULT') {
+      if (connectionMode !== 'DEFAULT') setConnectionMode('DEFAULT');
+    } else if (parsed.detectedType === 'CUSTOM_IP' || parsed.detectedType === 'LEGACY_COMPOSITE') {
+      if (parsed.mode === 'CUSTOM_IP') {
+        if (connectionMode !== 'CUSTOM_IP') setConnectionMode('CUSTOM_IP');
+        if (parsed.serverUrl && parsed.serverUrl !== DEFAULT_SERVER_URL) {
+          setCustomServerUrl(parsed.serverUrl);
+        }
+      } else if (parsed.mode === 'DEFAULT') {
+        if (connectionMode !== 'DEFAULT') setConnectionMode('DEFAULT');
+      }
+    }
+  };
+
   const handleJoinRoom = () => {
     const input = shareCodeInput.trim();
     if (!input) {
@@ -172,10 +208,12 @@ export default function Popup() {
     setLoading(true);
     setErrorMessage(null);
 
+    const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
+
     safeSendMessage(
       {
         type: 'BG_JOIN_ROOM',
-        payload: { shareCode: input, mode: connectionMode }
+        payload: { shareCode: input, mode: parsed.mode }
       },
       (res) => {
         setLoading(false);
@@ -628,7 +666,7 @@ export default function Popup() {
                         : t.connectionModes.default.placeholder
                     }
                     value={shareCodeInput}
-                    onChange={(e) => setShareCodeInput(e.target.value)}
+                    onChange={(e) => handleShareCodeChange(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500 transition font-mono tracking-wider"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
@@ -638,6 +676,52 @@ export default function Popup() {
                       ? t.connectionModes.customIp.inputHint
                       : t.connectionModes.default.inputHint}
                   </p>
+
+                  {/* 智慧識別反饋與向下相容引導 */}
+                  {detectedCodeInfo && shareCodeInput.trim() && (
+                    <div className="mt-2 text-[10px] space-y-1">
+                      {detectedCodeInfo.detectedType === 'P2P' && (
+                        <div className="bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
+                          <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{t.connectionModes.smartDetection?.p2pDetected}</span>
+                        </div>
+                      )}
+                      {detectedCodeInfo.detectedType === 'DEFAULT' && (
+                        <div className="bg-teal-950/70 border border-teal-500/40 text-teal-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
+                          <Server className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+                          <span>{t.connectionModes.smartDetection?.defaultDetected}</span>
+                        </div>
+                      )}
+                      {detectedCodeInfo.detectedType === 'CUSTOM_IP' && (
+                        <div className="bg-blue-950/70 border border-blue-500/40 text-blue-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
+                          <Server className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>{t.connectionModes.smartDetection?.customIpDetected}</span>
+                        </div>
+                      )}
+                      {detectedCodeInfo.detectedType === 'LEGACY_COMPOSITE' && (
+                        <div className="bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
+                          <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>{t.connectionModes.smartDetection?.legacyCompositeHint}</span>
+                        </div>
+                      )}
+                      {detectedCodeInfo.detectedType === 'LEGACY_RAW' && (
+                        <div className="bg-amber-950/70 border border-amber-500/40 text-amber-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
+                          <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>
+                            {(t.connectionModes.smartDetection?.legacyRawHint || '')
+                              .replace(
+                                '{mode}',
+                                connectionMode === 'P2P'
+                                  ? t.connectionModes.p2p.footerLabel
+                                  : connectionMode === 'DEFAULT'
+                                  ? t.connectionModes.default.footerLabel
+                                  : t.connectionModes.customIp.footerLabel
+                              )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     id="btn-join-room"
@@ -683,13 +767,13 @@ export default function Popup() {
                   id="btn-copy-room-code"
                   onClick={() => {
                     const codeToCopy =
-                      roomState.mode === 'P2P'
-                        ? roomState.roomId
-                        : compositeCode ||
-                          roomState.compositeCode ||
-                          (roomState.mode === 'CUSTOM_IP'
-                            ? `IP:${roomState.roomId}|${btoa(roomState.serverUrl)}`
-                            : roomState.roomId);
+                      compositeCode ||
+                      roomState.compositeCode ||
+                      formatShareCode(
+                        roomState.mode || connectionMode || 'P2P',
+                        roomState.roomId,
+                        roomState.serverUrl || (connectionMode === 'CUSTOM_IP' ? customServerUrl : DEFAULT_SERVER_URL)
+                      );
                     copyToClipboard(codeToCopy);
                   }}
                   className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition active:scale-95 font-semibold cursor-pointer shadow-sm"

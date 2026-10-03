@@ -88,7 +88,26 @@
   3. **步驟 3 (房主確認)**：房主貼入回執碼，雙方 RTCDataChannel 通道立即開啟 (`open`)。
 * **優點**：完全不需在本機開啟 Node.js 伺服器（不依賴 `localhost:3000`），高頻同步事件完全端對端直連傳輸。
 
-### 3.4 三種連線選項特性對比表
+### 3.4 複合分享碼協定標準化與全版本向下相容矩陣 (Share Code Schema & Backward Compatibility)
+
+為徹底解決「房主使用伺服器模式，但觀眾預設停在 P2P 模式導致無法加入」之連線衝突，系統自 v2.2 起導入「自描述語意分享碼（Self-Describing Share Code）」與「全版本向下相容智慧解析機制」：
+
+#### 3.4.1 分享碼格式與版本相容矩陣
+
+| 分類 | 格式規則 | 範例 | 判定模式 (Resolved Mode) | 向下相容處理策略 |
+| :--- | :--- | :--- | :--- | :--- |
+| **新版 P2P 直連** | `P2P:<RoomID>` | `P2P:X7A9B2` | `P2P` | 權威前綴優先，前端自動切換為 P2P 模式 |
+| **新版 預設伺服器** | `DEF:<RoomID>\|<Base64Url>` 或 `DEF:<RoomID>` | `DEF:X7A9B2\|aHR0cDovL2xvY2FsaG9zdDozMDAw` | `DEFAULT` | 權威前綴優先，前端自動切換為預設伺服器 |
+| **新版/自架主機** | `IP:<RoomID>\|<Base64Url>` | `IP:X7A9B2\|aHR0cDovLzE5Mi4xNjguMS4xMDA6MzAwMA==` | `CUSTOM_IP` | 權威前綴優先，前端自動切換並填入解碼網址 |
+| **舊版 複合分享碼** | `<RoomID>\|<Base64Url>` | `X7A9B2\|aHR0cDovL2xvY2FsaG9zdDozMDAw` | `DEFAULT` 或 `CUSTOM_IP` | 依解碼網址是否等同預設伺服器自動分流，覆蓋選單設定 |
+| **舊版 純 6 碼代碼** | `<RoomID>` (6 碼英數) | `X7A9B2` | 遵從當前 UI 選定模式 (`P2P` / `DEFAULT`) | 前端顯示舊版提示；若連線失敗提供雙向一鍵重試引導 |
+
+#### 3.4.2 觀眾端「智慧輸入偵測 (Smart Auto-Detection)」行為規範
+1. **即時解析切換**：觀眾於輸入框輸入或貼上字串時，前端即時執行非破壞性解析。若偵測到 `P2P:`、`DEF:`、`IP:` 或包含 `|` 之複合碼，自動鎖定或切換上方模式選單，並展示即時識別徽章（⚡ P2P 直連 / 🌐 預設伺服器 / 🖥️ 自架主機）。
+2. **乾淨 Room ID 提取**：前後端提取 Room ID 時，一律過濾 `P2P:` / `DEF:` / `IP:` 前綴並截取管道符號前段，保證送入 PeerJS 與 Socket.IO 之房間識別碼均為標準大寫 6 碼英數字。
+3. **舊版代碼容錯引導**：針對純 6 碼無前綴字串，前端允許使用者手動自由切換連線模式；若 P2P 逾時或伺服器查無房間，回饋貼心之雙向模式互換重試建議。
+
+### 3.5 三種連線選項特性對比表
 
 | 比較項目 | 1. 預設連線模式 | 2. 自行輸入 IP (自架) | 3. ⚡ Serverless P2P 直連 (方案 C) |
 | :--- | :--- | :--- | :--- |
@@ -209,7 +228,16 @@ AI 在編寫 Content Script 時，請針對當前核心支援平台採用以下�
 
 ```typescript
 // 連線模式列舉
-export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP';
+export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
+
+// 分享碼解析結果結構 (全版本向下相容)
+export interface ParsedConnectionInfo {
+  roomId: string;             // 6 碼大寫 Room ID (例如 "IW7OL7")
+  mode: ConnectionMode;       // 判定之連線模式
+  serverUrl?: string;         // 目標伺服器網址 (適用於 DEFAULT / CUSTOM_IP)
+  isLegacy: boolean;          // 是否為舊版格式 (無前綴純 6 碼或舊版複合碼)
+  detectedType: 'P2P' | 'DEFAULT' | 'CUSTOM_IP' | 'LEGACY_RAW' | 'LEGACY_COMPOSITE';
+}
 
 export type SyncineEvent = 
   | 'CREATE_ROOM' 
@@ -236,6 +264,7 @@ export interface CreateRoomReq {
     currentUrl: string;
     mode: ConnectionMode;
     customServerUrl?: string; // 僅在 mode === 'CUSTOM_IP' 時填寫
+    language?: string;        // 房主客戶端語系 (選填，長度限制 <= 10，供伺服器端日誌統計，不向其他成員廣播以保障隱私)
   };
 }
 

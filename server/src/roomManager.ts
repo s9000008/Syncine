@@ -1,6 +1,8 @@
 import { RoomState, RoomMember, ConnectionMode } from './types';
 import { sanitizeLog } from './utils';
 
+export const MAX_ROOM_MEMBERS = 100;
+
 export class RoomManager {
   private rooms: Map<string, RoomState> = new Map();
   private socketToRoom: Map<string, string> = new Map();
@@ -36,7 +38,8 @@ export class RoomManager {
     userId: string,
     currentUrl: string,
     isSelfHosted: boolean,
-    mode: ConnectionMode = 'DEFAULT'
+    mode: ConnectionMode = 'DEFAULT',
+    hostLanguage?: string
   ): RoomState {
     const roomId = this.generateRoomId();
     const hostMember: RoomMember = {
@@ -50,6 +53,7 @@ export class RoomManager {
       roomId,
       hostSocketId: socketId,
       hostUserId: userId,
+      hostLanguage,
       currentUrl,
       allowGuestControl: false,
       isSelfHosted,
@@ -60,7 +64,8 @@ export class RoomManager {
     this.rooms.set(roomId, room);
     this.socketToRoom.set(socketId, roomId);
 
-    console.log(`[RoomManager] 房間建立成功: ${sanitizeLog(roomId)} (Host: ${sanitizeLog(userId)}, Socket: ${sanitizeLog(socketId)})`);
+    const langStr = hostLanguage ? `語系: ${sanitizeLog(hostLanguage)}` : '語系: 未提供';
+    console.log(`[RoomManager] 房間建立成功: ${sanitizeLog(roomId)} (Host: ${sanitizeLog(userId)}, Socket: ${sanitizeLog(socketId)}, ${langStr})`);
     return room;
   }
 
@@ -71,10 +76,17 @@ export class RoomManager {
     roomId: string,
     socketId: string,
     userId: string
-  ): { success: boolean; room?: RoomState; error?: string } {
+  ): { success: boolean; room?: RoomState; error?: string; code?: string } {
     const room = this.rooms.get(roomId.toUpperCase());
     if (!room) {
-      return { success: false, error: '房間不存在或已關閉' };
+      return { success: false, error: '房間不存在或已關閉', code: 'ERR_ROOM_NOT_FOUND' };
+    }
+
+    // 檢查房間人數上限 (上限 100 人，若為原房成員或房主重連回魂則不受限制)
+    const isExistingMember = room.members.has(socketId) || userId === room.hostUserId;
+    if (!isExistingMember && room.members.size >= MAX_ROOM_MEMBERS) {
+      console.warn(`[RoomManager] 房間 ${sanitizeLog(room.roomId)} 已達人數上限 (${MAX_ROOM_MEMBERS} 人)，拒絕新成員加入: ${sanitizeLog(userId)}`);
+      return { success: false, error: '房間已滿員，無法加入。', code: 'ERR_ROOM_FULL' };
     }
 
     // 若房間正在處於全空 60 秒寬限倒數，有成員重連進來時立即解除倒數
