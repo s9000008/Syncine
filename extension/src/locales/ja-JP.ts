@@ -127,6 +127,7 @@ export const jaJP: TranslationSchema = {
     ERR_UNAUTHORIZED_URL: '【セキュリティ警告】未承認の外部URLへのリダイレクトが検出されたためブロックしました！',
     ERR_SERVER_UNREACHABLE: 'サーバーに接続できません。インターネット環境をご確認ください。',
     ERR_SERVER_TIMEOUT: 'サーバーの応答がタイムアウトしました。状態をご確認ください。',
+    ERR_RATE_LIMITED: 'リクエストが頻繁すぎます。しばらく待ってから再試行してください。',
     ERR_P2P_TIMEOUT: 'P2P接続がタイムアウトしました。コードを確認するかリレーをお使いください。',
     ERR_HOST_ONLY: '権限がありません：ホストのみがこの操作を実行できます。',
     ERR_SEND_MESSAGE_FAILED: 'メッセージの送信に失敗しました。拡張機能を再起動してください。',

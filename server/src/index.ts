@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
+import { RateLimiter } from './rateLimiter';
 import { sanitizeLog } from './utils';
 import {
   CreateRoomReq,
@@ -45,6 +46,8 @@ const io = new Server(server, {
 });
 
 const roomManager = new RoomManager();
+const rateLimiter = new RateLimiter();
+
 roomManager.setHostTimeoutCallback((updatedRoom) => {
   io.to(updatedRoom.roomId).emit('HOST_CHANGED', {
     newHostUserId: updatedRoom.hostUserId,
@@ -61,16 +64,44 @@ roomManager.setHostTimeoutCallback((updatedRoom) => {
 });
 
 // ----------------------------------------------------
-// 安全事件註冊輔助函式 (P0: 防止畸形 Payload 導致伺服器崩潰)
+// 安全事件註冊輔助函式 (P0: 防畸形崩潰 + P1: 頻率限制防洪)
 // ----------------------------------------------------
+type RateLimitType = 'GENERAL' | 'SYNC' | 'SENSITIVE';
+
 function registerSafeHandler<T>(
   socket: Socket,
   eventName: string,
   handler: (payload: T) => void | Promise<void>,
-  requirePayloadObject: boolean = true
+  requirePayloadObject: boolean = true,
+  rateLimitType: RateLimitType = 'GENERAL'
 ) {
   socket.on(eventName, async (payload: any) => {
     try {
+      // 1. 頻率限制 (Rate Limiting) 與 DoS 防洪保護
+      const check = rateLimitType === 'SYNC'
+        ? rateLimiter.checkSync(socket.id)
+        : rateLimitType === 'SENSITIVE'
+        ? rateLimiter.checkSensitive(socket.id)
+        : rateLimiter.checkGeneral(socket.id);
+
+      if (check.isMalicious) {
+        console.warn(`[RateLimit DoS Blocked] 偵測到惡意洪水攻擊 (${eventName}) 來自: ${sanitizeLog(socket.id)}，強制斷線`);
+        socket.emit('ERROR', { code: 'ERR_RATE_LIMITED', message: '請求過於頻繁，連線已中斷' });
+        socket.disconnect(true);
+        return;
+      }
+
+      if (!check.allowed) {
+        if (rateLimitType === 'SYNC') {
+          // 高頻同步信號超限採取靜默丟棄 (Silent Drop)，杜絕廣播風暴
+          return;
+        }
+        console.warn(`[RateLimit Blocked] 事件頻率超限 (${eventName}) 來自: ${sanitizeLog(socket.id)}`);
+        socket.emit('ERROR', { code: 'ERR_RATE_LIMITED', message: '操作過於頻繁，請稍候再試' });
+        return;
+      }
+
+      // 2. 畸形 Payload 校驗
       if (requirePayloadObject && (!payload || typeof payload !== 'object')) {
         console.warn(`[SafeHandler Blocked] 收到非法畸形 Payload (${eventName}) 來自: ${sanitizeLog(socket.id)}`);
         socket.emit('ERROR', { code: 'ERR_INVALID_CODE', message: '請求格式錯誤' });
@@ -122,7 +153,7 @@ io.on('connection', (socket: Socket) => {
     };
 
     socket.emit('CREATE_ROOM_SUCCESS', response);
-  });
+  }, true, 'SENSITIVE');
 
   // 2. 加入房間
   registerSafeHandler<JoinRoomReq>(socket, 'JOIN_ROOM', (payload) => {
@@ -186,7 +217,7 @@ io.on('connection', (socket: Socket) => {
         targetGuestSocketId: socket.id
       });
     }
-  });
+  }, true, 'SENSITIVE');
 
   // 人數校準查詢
   registerSafeHandler<{ roomId: string }>(socket, 'GET_ROOM_MEMBER_COUNT', ({ roomId }) => {
@@ -233,7 +264,7 @@ io.on('connection', (socket: Socket) => {
       // 廣播給房間內其他所有成員
       socket.to(actualRoom.roomId).emit('SYNC_STATE', payload);
     }
-  });
+  }, true, 'SYNC');
 
   // 4. 強制網頁跳轉廣播 (REDIRECT_ROOM)
   registerSafeHandler<RedirectRoomMsg>(socket, 'REDIRECT_ROOM', (payload) => {
@@ -370,6 +401,7 @@ io.on('connection', (socket: Socket) => {
   // 9. 離線處理 (非主動，支援 60 秒寬限期)
   socket.on('disconnect', () => {
     try {
+      rateLimiter.removeSocket(socket.id);
       console.log(`[Socket.IO] 用戶斷開連線: ${sanitizeLog(socket.id)}`);
       const result = roomManager.handleDisconnect(socket.id, undefined, false);
 

@@ -127,6 +127,7 @@ export const enUS: TranslationSchema = {
     ERR_UNAUTHORIZED_URL: '【Security Alert】Host attempted to redirect you to an untrusted URL. Blocked!',
     ERR_SERVER_UNREACHABLE: 'Cannot reach server. Please check your internet connection.',
     ERR_SERVER_TIMEOUT: 'Server response timed out. Please check server status.',
+    ERR_RATE_LIMITED: 'Too many requests. Please wait a moment and try again.',
     ERR_P2P_TIMEOUT: 'P2P signaling timed out. Please check the code or switch to Relay.',
     ERR_HOST_ONLY: 'Permission denied: Only the host can perform this action.',
     ERR_SEND_MESSAGE_FAILED: 'Failed to send message. Please reopen extension.',

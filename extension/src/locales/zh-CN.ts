@@ -127,6 +127,7 @@ export const zhCN: TranslationSchema = {
     ERR_UNAUTHORIZED_URL: '【安全警告】房主尝试将您导向未授权的网址，系统已自动拦截！',
     ERR_SERVER_UNREACHABLE: '无法连接至服务器，请检查网络连接。',
     ERR_SERVER_TIMEOUT: '服务器响应超时，请确认服务器连接状态后再试。',
+    ERR_RATE_LIMITED: '操作过于频繁，请稍后再试。',
     ERR_P2P_TIMEOUT: 'P2P 信令连接超时，请确认邀请码或改用中继模式。',
     ERR_HOST_ONLY: '权限不足：仅房主可发起此项操作。',
     ERR_SEND_MESSAGE_FAILED: '发送消息失败，请重新打开扩展。',

@@ -347,6 +347,14 @@ export interface TogglePermissionMsg {
 * [x] **P2P 房主權威與特權指令安全過濾 (P0 權限防禦)**：房主端 Offscreen Document 監聽觀眾 DataChannel 時，嚴格丟棄任何觀眾發起之 `REDIRECT_ROOM` 與 `TOGGLE_PERMISSION` 特權指令；當房主關閉「允許觀眾操作」時，一律丟棄觀眾之播放動作（PLAY/PAUSE/SEEK），確保房主權威不被繞過。
 * [x] **房主身分識別防劫持 (P1 resumeToken 機制)**：伺服器建房時簽發不可預測之安全憑證 `resumeToken`，僅房主本地持有；斷線重連寬限期 (Grace Period) 內，客戶端必須攜帶有效之 `resumeToken` 方可重申房主身分，若無 Token 或 Token 不符則一律降級為普通觀眾；原房主離線逾時轉移新房主時，透過私有事件 `HOST_PRIVILEGE_GRANTED` 獨立發送新 Token 給繼任房主，徹底杜絕公開 `userId` 冒名劫持。
 * [x] **密碼學安全隨機亂數 (P1 加密安全)**：後端房號生成全面淘汰 `Math.random()` 改採 Node.js 原生 `crypto.randomInt`；擴充套件端房號與使用者識別碼改採 Web Crypto API `crypto.getRandomValues()`，根除可預測亂數與碰撞風險。
+* [x] **伺服器頻率限制與防洪保護 (P1 Rate Limiting)**：
+    1. **高頻播放同步限流**：`SYNC_STATE` 限制單一 Socket 每秒最多 15 次，超限靜默丟棄 (Silent Drop)，杜絕巨量播放進度廣播風暴。
+    2. **低頻敏感操作限流**：`CREATE_ROOM` / `JOIN_ROOM` 限制單一 Socket 10 秒內最多 6 次，超限即時拋出 `ERR_RATE_LIMITED`。
+    3. **惡意攻擊強制斷線**：若單一 Socket 於 1 秒內累積請求突破 50 次，伺服器判定為惡意 DoS 攻擊，主動強制斷開連線 (`socket.disconnect(true)`)。
+* [x] **WebRTC P2P ICE 連線失敗重試與備援機制 (P1 ICE Retry)**：
+    1. **多重 STUN 伺服器節點池**：配置 Google 與 Cloudflare 多組 STUN 伺服器，提升受限 NAT 網絡下 Candidate 收集成功率。
+    2. **指數退避重試狀態機**：觀眾端握手超時或 ICE 連線失敗時觸發自動重試（最多 2 次，間隔 1.5s / 3s），重試期間保持介面連線狀態同步。
+    3. **友好引導降級**：重試耗盡仍無法打洞穿透時，回報 `ERR_P2P_TIMEOUT` 並引導使用者切換至預設伺服器或自架主機模式。
 * [x] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
 * [x] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
 * [x] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並升級加入時間最早之 Guest 為新房主。
@@ -389,7 +397,7 @@ export interface TogglePermissionMsg {
     - 通用狀態：`SUCCESS`、`ERR_UNKNOWN`
     - 房間生命週期：`ERR_ROOM_NOT_FOUND`、`ERR_ROOM_FULL`、`ERR_ROOM_CLOSED`、`ERR_INVALID_CODE`
     - 權限管理：`ERR_PERMISSION_DENIED`、`ERR_HOST_ONLY`、`ERR_AUDIT_REJECTED`
-    - 網路與伺服器：`ERR_SERVER_UNREACHABLE`、`ERR_SERVER_TIMEOUT`、`ERR_CUSTOM_IP_REQUIRED`、`ERR_NETWORK_DISCONNECTED`、`ERR_SEND_MESSAGE_FAILED`
+    - 網路與伺服器：`ERR_SERVER_UNREACHABLE`、`ERR_SERVER_TIMEOUT`、`ERR_RATE_LIMITED`、`ERR_CUSTOM_IP_REQUIRED`、`ERR_NETWORK_DISCONNECTED`、`ERR_SEND_MESSAGE_FAILED`
     - WebRTC P2P 連線：`ERR_P2P_SIGNAL_FAILED`、`ERR_P2P_TIMEOUT`、`ERR_P2P_CONNECTION_LOST`
     - 安全防護：`ERR_UNAUTHORIZED_URL`
   * **去硬編碼展示原則**：入房審核申請之預設稱謂由 UI 層函式 `defaultGuestName(id)` 依用戶目前語系動態渲染，通道僅傳遞使用者 ID 或代碼。

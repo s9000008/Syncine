@@ -95,3 +95,64 @@ console.log('  ✅ [PASS] 逾時被撤換之舊房主拿舊 Token 無法奪權�
 console.log('====================================================');
 console.log('🎉 P1-5 & P1-11 所有防奪權、CSPRNG 與憑證回魂測試 100% 通過！');
 console.log('====================================================');
+
+// ----------------------------------------------------
+// 8. 驗證 P1-6 伺服器頻率限制器 (RateLimiter)
+// ----------------------------------------------------
+console.log('\n====================================================');
+console.log('🧪 執行 P1-6 伺服器端連線頻率限制器 (RateLimiter) 測試');
+console.log('====================================================');
+
+import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
+  const limiter = new RateLimiter();
+  const testSocket = 'socket-spam-test';
+
+  // (1) SYNC_STATE 每秒最多 15 次
+  console.log('1. 測試 SYNC_STATE 高頻限流 (上限 15 次/秒)...');
+  for (let i = 1; i <= 15; i++) {
+    const res = limiter.checkSync(testSocket);
+    assert.strictEqual(res.allowed, true, `第 ${i} 次同步信號應被允許`);
+  }
+  const overflowSync = limiter.checkSync(testSocket);
+  assert.strictEqual(overflowSync.allowed, false, '第 16 次同步信號必須被限流丟棄');
+  assert.strictEqual(overflowSync.reason, 'RATE_LIMIT_SYNC');
+  console.log('  ✅ [PASS] SYNC_STATE 超過 15 次/秒成功被限流攔截 (Silent Drop 保護)');
+
+  // (2) 敏感操作 (CREATE_ROOM / JOIN_ROOM) 10 秒最多 6 次
+  console.log('2. 測試建房/加房敏感操作限流 (上限 6 次/10秒)...');
+  const sensitiveSocket = 'socket-sensitive-test';
+  for (let i = 1; i <= 6; i++) {
+    const res = limiter.checkSensitive(sensitiveSocket);
+    assert.strictEqual(res.allowed, true, `第 ${i} 次敏感操作應被允許`);
+  }
+  const overflowSensitive = limiter.checkSensitive(sensitiveSocket);
+  assert.strictEqual(overflowSensitive.allowed, false, '第 7 次敏感操作必須被限流');
+  assert.strictEqual(overflowSensitive.reason, 'RATE_LIMIT_SENSITIVE');
+  console.log('  ✅ [PASS] CREATE_ROOM / JOIN_ROOM 超過 6 次/10秒成功拋出限流');
+
+  // (3) 偵測惡意 DoS 爆破 (1 秒內超過 50 次)
+  console.log('3. 測試惡意 DoS 攻擊偵測 (超過 50 次/秒觸發強制斷線)...');
+  const dosSocket = 'socket-dos-attacker';
+  for (let i = 1; i <= 50; i++) {
+    limiter.checkGeneral(dosSocket);
+  }
+  const dosRes = limiter.checkGeneral(dosSocket);
+  assert.strictEqual(dosRes.allowed, false);
+  assert.strictEqual(dosRes.isMalicious, true, '超過 50 次必須被標記為惡意 DoS 攻擊');
+  assert.strictEqual(dosRes.reason, 'DOS_ATTACK');
+  console.log('  ✅ [PASS] 惡意 DoS 攻擊成功被判定 (isMalicious = true, 觸發斷線保護)');
+
+  // (4) 斷線記憶體清理
+  console.log('4. 測試 Socket 離線記憶體清理...');
+  assert.ok(limiter.getTrackedCount() >= 3);
+  limiter.removeSocket(testSocket);
+  limiter.removeSocket(sensitiveSocket);
+  limiter.removeSocket(dosSocket);
+  assert.strictEqual(limiter.getTrackedCount(), 0, '所有 Socket 離線後追蹤記錄應全數清空');
+  console.log('  ✅ [PASS] 離線記憶體清理驗證成功 (Zero Memory Leak)');
+
+  console.log('====================================================');
+  console.log('🎉 P1-6 RateLimiter 頻率限制防護全部測試通過！');
+  console.log('====================================================');
+});
+

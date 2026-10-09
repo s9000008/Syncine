@@ -125,6 +125,7 @@ export const zhTW = {
     ERR_UNAUTHORIZED_URL: '【安全警告】房主嘗試將您導向未授權的網址，系統已自動攔截！',
     ERR_SERVER_UNREACHABLE: '無法連線至伺服器，請檢查網路連線。',
     ERR_SERVER_TIMEOUT: '伺服器回應逾時，請確認伺服器連線狀態後再試。',
+    ERR_RATE_LIMITED: '操作過於頻繁，請稍候再試。',
     ERR_P2P_TIMEOUT: 'P2P 信令連線逾時，請確認邀請碼正確或改用中繼模式。',
     ERR_HOST_ONLY: '權限不足：僅房主可發起此項操作。',
     ERR_SEND_MESSAGE_FAILED: '傳送訊息失敗，請重新開啟擴充套件。',

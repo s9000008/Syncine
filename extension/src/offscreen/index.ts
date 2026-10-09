@@ -10,7 +10,8 @@ const PEER_CONFIG = {
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' }
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' }
     ],
     iceCandidatePoolSize: 10
   }
@@ -339,9 +340,9 @@ class PeerJSWebRTCManager {
   }
 
   // ----------------------------------------------------
-  // 3. 觀眾加入房間 (只需同一組 6 碼代碼，送出申請等審核)
+  // 3. 觀眾加入房間 (只需同一組 6 碼代碼，送出申請等審核，支援 2 次退避重試)
   // ----------------------------------------------------
-  public joinRoom(roomId: string, userId: string): Promise<{ roomId: string }> {
+  public joinRoom(roomId: string, userId: string, retryCount: number = 0): Promise<{ roomId: string }> {
     return new Promise((resolve, reject) => {
       this.close();
       this.userId = userId;
@@ -349,22 +350,39 @@ class PeerJSWebRTCManager {
       this.roomId = roomId.toUpperCase();
       this.updateStatus('CONNECTING');
 
+      const MAX_RETRIES = 2;
+      const handleRetry = (reason: string, error: Error) => {
+        if (retryCount < MAX_RETRIES) {
+          const delayMs = retryCount === 0 ? 1500 : 3000;
+          console.warn(`[Syncine P2P Guest] 握手/ICE 未就緒 (${reason})，正在啟動第 ${retryCount + 1}/${MAX_RETRIES} 次自動重試 (退避 ${delayMs}ms)...`);
+          this.close();
+          setTimeout(() => {
+            this.joinRoom(roomId, userId, retryCount + 1)
+              .then(resolve)
+              .catch(reject);
+          }, delayMs);
+        } else {
+          console.error(`[Syncine P2P Guest] 重試已達上限 (${MAX_RETRIES} 次)，P2P 穿透失敗，建議改用官方伺服器中繼模式`);
+          this.close();
+          reject(error);
+        }
+      };
+
       const peer = new Peer(PEER_CONFIG);
       this.peer = peer;
 
       peer.on('open', () => {
         const targetHostPeerId = `syncine-${this.roomId}`;
-        console.log(`[Syncine P2P Guest] 正在向房主 ${targetHostPeerId} 送出入房申請...`);
+        console.log(`[Syncine P2P Guest] 正在向房主 ${targetHostPeerId} 送出入房申請 (嘗試: ${retryCount + 1})...`);
 
         let isSettled = false;
         const connectTimeoutTimer = setTimeout(() => {
           if (!isSettled) {
             isSettled = true;
-            console.warn('[Syncine P2P Guest] WebRTC DataChannel 握手連線逾時 (12s)');
-            this.close();
-            reject(new Error('ERR_P2P_TIMEOUT'));
+            console.warn('[Syncine P2P Guest] WebRTC DataChannel 握手連線逾時 (10s)');
+            handleRetry('握手逾時', new Error('ERR_P2P_TIMEOUT'));
           }
-        }, 12000);
+        }, 10000);
 
         const shortId = this.userId.slice(-4);
         const conn = peer.connect(targetHostPeerId, {
@@ -486,7 +504,7 @@ class PeerJSWebRTCManager {
           if (!isSettled) {
             isSettled = true;
             clearTimeout(connectTimeoutTimer);
-            reject(new Error('ERR_P2P_SIGNAL_FAILED'));
+            handleRetry('連線異常', new Error('ERR_P2P_SIGNAL_FAILED'));
           }
         });
       });
@@ -497,7 +515,7 @@ class PeerJSWebRTCManager {
         if (err.type === 'peer-unavailable') {
           reject(new Error('ERR_ROOM_NOT_FOUND'));
         } else {
-          reject(new Error(err.message || 'ERR_P2P_SIGNAL_FAILED'));
+          handleRetry(err.type || '信令錯誤', new Error(err.message || 'ERR_P2P_SIGNAL_FAILED'));
         }
       });
     });
