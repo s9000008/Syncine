@@ -103,6 +103,7 @@ export const zhTW = {
     awaitingTitle: '入房申請已送出',
     awaitingDesc: '正在等待房主確認同意，房主批准後雙方將自動無縫連線開播！',
     cancelAndBack: '✕ 取消申請並返回',
+    defaultGuestName: (id: string) => `訪客 (${id})`,
   },
   languageSelector: {
     label: '語言 / Language',
@@ -123,6 +124,9 @@ export const zhTW = {
     ERR_P2P_CONNECTION_LOST: '與房主之 P2P 連線已中斷。',
     ERR_UNAUTHORIZED_URL: '【安全警告】房主嘗試將您導向未授權的網址，系統已自動攔截！',
     ERR_SERVER_UNREACHABLE: '無法連線至伺服器，請檢查網路連線。',
+    ERR_SERVER_TIMEOUT: '伺服器回應逾時，請確認伺服器連線狀態後再試。',
+    ERR_P2P_TIMEOUT: 'P2P 信令連線逾時，請確認邀請碼正確或改用中繼模式。',
+    ERR_HOST_ONLY: '權限不足：僅房主可發起此項操作。',
     ERR_SEND_MESSAGE_FAILED: '傳送訊息失敗，請重新開啟擴充套件。',
     ERR_CUSTOM_IP_REQUIRED: '請輸入自架伺服器網址 (例如: https://syncine.fly.dev 或 http://192.168.1.100:3000)。',
     ERR_NETWORK_DISCONNECTED: '網路連線已中斷，正在嘗試重新連線...',

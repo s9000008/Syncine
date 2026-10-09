@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { RoomState, RoomMember, ConnectionMode } from './types';
 import { sanitizeLog } from './utils';
 
@@ -16,7 +17,7 @@ export class RoomManager {
   }
 
   /**
-   * 產生 6 碼大寫英數字 Room ID
+   * 產生 6 碼大寫英數字 Room ID (使用密碼學安全隨機亂數)
    */
   private generateRoomId(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -24,10 +25,17 @@ export class RoomManager {
     do {
       result = '';
       for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+        result += chars.charAt(crypto.randomInt(0, chars.length));
       }
     } while (this.rooms.has(result));
     return result;
+  }
+
+  /**
+   * 簽發不可預測之 48 位元 hex 房主身分安全憑證
+   */
+  public generateResumeToken(): string {
+    return crypto.randomBytes(24).toString('hex');
   }
 
   /**
@@ -42,6 +50,7 @@ export class RoomManager {
     hostLanguage?: string
   ): RoomState {
     const roomId = this.generateRoomId();
+    const hostResumeToken = this.generateResumeToken();
     const hostMember: RoomMember = {
       socketId,
       userId,
@@ -53,6 +62,7 @@ export class RoomManager {
       roomId,
       hostSocketId: socketId,
       hostUserId: userId,
+      hostResumeToken,
       hostLanguage,
       currentUrl,
       allowGuestControl: false,
@@ -75,15 +85,23 @@ export class RoomManager {
   public joinRoom(
     roomId: string,
     socketId: string,
-    userId: string
-  ): { success: boolean; room?: RoomState; error?: string; code?: string } {
+    userId: string,
+    resumeToken?: string
+  ): { success: boolean; room?: RoomState; error?: string; code?: string; isHost?: boolean } {
     const room = this.rooms.get(roomId.toUpperCase());
     if (!room) {
       return { success: false, error: '房間不存在或已關閉', code: 'ERR_ROOM_NOT_FOUND' };
     }
 
-    // 檢查房間人數上限 (上限 100 人，若為原房成員或房主重連回魂則不受限制)
-    const isExistingMember = room.members.has(socketId) || userId === room.hostUserId;
+    // 檢查是否為合法持有效 Token 之 Host 重連回魂
+    const isAuthenticHost = Boolean(
+      room.hostResumeToken &&
+      resumeToken &&
+      resumeToken === room.hostResumeToken
+    );
+
+    // 檢查房間人數上限 (上限 100 人，若為原房成員或合法房主重連回魂則不受限制)
+    const isExistingMember = room.members.has(socketId) || isAuthenticHost;
     if (!isExistingMember && room.members.size >= MAX_ROOM_MEMBERS) {
       console.warn(`[RoomManager] 房間 ${sanitizeLog(room.roomId)} 已達人數上限 (${MAX_ROOM_MEMBERS} 人)，拒絕新成員加入: ${sanitizeLog(userId)}`);
       return { success: false, error: '房間已滿員，無法加入。', code: 'ERR_ROOM_FULL' };
@@ -96,20 +114,26 @@ export class RoomManager {
       console.log(`[RoomManager] 成員回歸房間 ${sanitizeLog(room.roomId)}，取消空房銷毀倒數`);
     }
 
-    // 若為原 Host 重連，取消 Host 離線計時器並恢復 hostSocketId
-    if (userId === room.hostUserId) {
+    // P1 防劫持：只有持有效 resumeToken 者方可申領/恢復 Host 身分
+    if (isAuthenticHost) {
       if (room.hostDisconnectTimer) {
         clearTimeout(room.hostDisconnectTimer);
         room.hostDisconnectTimer = undefined;
-        console.log(`[RoomManager] 房主重連，取消離線倒數: ${sanitizeLog(room.roomId)}`);
+        console.log(`[RoomManager] 房主驗證憑證成功，取消離線倒數並恢復房主身分: ${sanitizeLog(room.roomId)}`);
       }
       room.hostSocketId = socketId;
+      room.hostUserId = userId;
+    } else if (userId === room.hostUserId && !isAuthenticHost) {
+      console.warn(`[Security Alert] 偵測到未持有效憑證之使用者 ${sanitizeLog(userId)} 嘗試以房主 ID 入房，強制降級為普通觀眾`);
+      if (!room.members.has(room.hostSocketId) && !room.hostDisconnectTimer) {
+        this.startHostDisconnectTimer(room);
+      }
     } else if (!room.members.has(room.hostSocketId) && !room.hostDisconnectTimer) {
       // 若原房主不在線且尚未啟動 30 秒替換計時器，啟動 30 秒倒數準備提升 Guest 為 Host
       this.startHostDisconnectTimer(room);
     }
 
-    const isHost = userId === room.hostUserId;
+    const isHost = isAuthenticHost;
     const member: RoomMember = {
       socketId,
       userId,
@@ -121,7 +145,7 @@ export class RoomManager {
     this.socketToRoom.set(socketId, room.roomId);
 
     console.log(`[RoomManager] 使用者 ${sanitizeLog(userId)} (${isHost ? 'Host' : 'Guest'}) 加入房間 ${sanitizeLog(room.roomId)} (當前人數: ${room.members.size})`);
-    return { success: true, room };
+    return { success: true, room, isHost };
   }
 
   /**
@@ -192,7 +216,8 @@ export class RoomManager {
         newHost.isHost = true;
         currentRoom.hostSocketId = newHost.socketId;
         currentRoom.hostUserId = newHost.userId;
-        console.log(`[RoomManager] 30秒逾時！房間 ${sanitizeLog(room.roomId)} 新 Host 提升為: ${sanitizeLog(newHost.userId)}`);
+        currentRoom.hostResumeToken = this.generateResumeToken();
+        console.log(`[RoomManager] 30秒逾時！房間 ${sanitizeLog(room.roomId)} 新 Host 提升為: ${sanitizeLog(newHost.userId)} (已簽發新憑證)`);
         if (this.onHostTimeoutCallback) {
           this.onHostTimeoutCallback(currentRoom);
         }

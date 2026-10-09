@@ -88,12 +88,16 @@ export default function Popup() {
       }
     });
 
-    // 監聽房間狀態即時變更
+    // 監聽房間狀態即時變更與連線錯誤
     const handleMessage = (msg: any) => {
       if (msg.type === 'CS_ROOM_STATE_CHANGED') {
         setRoomState(msg.payload);
         if (msg.payload?.compositeCode) {
           setCompositeCode(msg.payload.compositeCode);
+        }
+      } else if (msg.type === 'CS_CONNECTION_STATUS_CHANGED') {
+        if (msg.payload?.error || msg.payload?.code) {
+          setErrorMessage(translateReturnCode(msg.payload.code || msg.payload.error));
         }
       }
     };
@@ -823,7 +827,11 @@ export default function Popup() {
                     >
                       <div className="truncate max-w-[170px]">
                         <span className="text-xs font-medium text-slate-200 block truncate">
-                          {req.guestName}
+                          {req.guestShortId
+                            ? t.roomUi.defaultGuestName(req.guestShortId)
+                            : req.guestName && !req.guestName.startsWith('訪客')
+                            ? req.guestName
+                            : t.roomUi.defaultGuestName(req.requestId.slice(-4))}
                         </span>
                         <span className="text-[9px] text-slate-500">
                           {t.roomUi.appliedAt(new Date(req.timestamp).toLocaleTimeString())}

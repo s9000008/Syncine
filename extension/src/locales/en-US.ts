@@ -105,6 +105,7 @@ export const enUS: TranslationSchema = {
     awaitingTitle: 'Request Sent',
     awaitingDesc: 'Waiting for host approval. Streaming will sync seamlessly once approved!',
     cancelAndBack: '✕ Cancel & Return',
+    defaultGuestName: (id: string) => `Guest (${id})`,
   },
   languageSelector: {
     label: 'Language',
@@ -125,6 +126,9 @@ export const enUS: TranslationSchema = {
     ERR_P2P_CONNECTION_LOST: 'P2P direct connection to host has been lost.',
     ERR_UNAUTHORIZED_URL: '【Security Alert】Host attempted to redirect you to an untrusted URL. Blocked!',
     ERR_SERVER_UNREACHABLE: 'Cannot reach server. Please check your internet connection.',
+    ERR_SERVER_TIMEOUT: 'Server response timed out. Please check server status.',
+    ERR_P2P_TIMEOUT: 'P2P signaling timed out. Please check the code or switch to Relay.',
+    ERR_HOST_ONLY: 'Permission denied: Only the host can perform this action.',
     ERR_SEND_MESSAGE_FAILED: 'Failed to send message. Please reopen extension.',
     ERR_CUSTOM_IP_REQUIRED: 'Please enter server URL (e.g. https://syncine.fly.dev or http://192.168.1.100:3000).',
     ERR_NETWORK_DISCONNECTED: 'Network disconnected. Attempting to reconnect...',

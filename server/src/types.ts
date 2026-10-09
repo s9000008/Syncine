@@ -14,6 +14,7 @@ export type SyncineEvent =
   | 'SIGNAL_ANSWER'
   | 'SIGNAL_ICE_CANDIDATE'
   | 'P2P_FALLBACK'
+  | 'HOST_PRIVILEGE_GRANTED'
   | 'ERROR';
 
 export type CoViewEvent = SyncineEvent;
@@ -45,6 +46,7 @@ export interface CreateRoomRes {
     allowGuestControl: boolean;
     mode?: ConnectionMode;
     shareCode?: string;
+    resumeToken?: string;
   };
 }
 
@@ -54,6 +56,21 @@ export interface JoinRoomReq {
   data: {
     userId: string;
     mode?: ConnectionMode;
+    isReconnecting?: boolean;
+    resumeToken?: string;
+  };
+}
+
+export interface JoinRoomRes {
+  event: 'JOIN_ROOM_SUCCESS';
+  roomId: string;
+  data: {
+    allowGuestControl: boolean;
+    currentUrl: string;
+    isHost: boolean;
+    mode?: ConnectionMode;
+    hostSocketId: string;
+    resumeToken?: string;
   };
 }
 
@@ -142,6 +159,7 @@ export interface RoomState {
   allowGuestControl: boolean;
   isSelfHosted: boolean;
   mode?: ConnectionMode;
+  hostResumeToken?: string;
   members: Map<string, RoomMember>;
   hostDisconnectTimer?: NodeJS.Timeout;
   emptyRoomTimer?: NodeJS.Timeout;

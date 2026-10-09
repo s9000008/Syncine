@@ -33,6 +33,8 @@ let roomState: {
 };
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let bufferingTimer: ReturnType<typeof setTimeout> | null = null;
+// 房主「已確認卡頓 (>5s)」旗標：期間心跳一律回報 paused:true，避免暫停被下一次心跳抵銷 (規格 9.1)
+let hostStallActive = false;
 let seekDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isUserSeeking = false;
 let wasPlayingBeforeSeek = false;
@@ -105,7 +107,7 @@ function startHeartbeat() {
       data: {
         action: 'HEARTBEAT',
         currentTime: targetVideo.currentTime,
-        paused: targetVideo.paused,
+        paused: targetVideo.paused || hostStallActive,
         timestamp: Date.now()
       }
     });
@@ -236,6 +238,9 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (!isCurrentActiveVideoTab()) return;
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
+    // 房主手動暫停，卡頓狀態隨之結束 (不再於恢復時自動發送 PLAY)
+    hostStallActive = false;
+
     if (!roomState.isHost && !roomState.allowGuestControl) {
       console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態');
       markProgrammatic(400);
@@ -302,32 +307,67 @@ function attachVideoListeners(video: HTMLVideoElement) {
     }, 50);
   });
 
-  // 規格 9: 緩衝卡頓處理 (waiting) - 5 秒防抖，避免網路輕微波動造成過度頻繁暫停
+  // 規格 9.1: 緩衝卡頓處理 (waiting) - 僅「房主」卡頓超過 5 秒才廣播全房暫停
+  // 觀眾 (含已授權觀眾) 自身卡頓不外發任何指令，僅本機緩衝，落後進度交由心跳 5 秒容差校正
   video.addEventListener('waiting', () => {
     if (!roomState.isInRoom) return;
+    if (!roomState.isHost) return;
     if (!isCurrentActiveVideoTab()) return;
     if (isProgrammatic() || isYouTubeAdPlaying() || video.paused) return;
-    if (!roomState.isHost && !roomState.allowGuestControl) return;
 
-    // 只有在真正卡頓持續超過 5 秒時才廣播暫停
+    // 只有在真正卡頓持續超過 5 秒時才廣播暫停 (5 秒防抖，避免網路輕微波動造成過度頻繁暫停)
     if (bufferingTimer) clearTimeout(bufferingTimer);
     bufferingTimer = setTimeout(() => {
-      if (!video.paused && !isProgrammatic()) {
-        console.log('[Syncine] 偵測到嚴重網路卡頓 (>5s)，廣播全房暫停');
-        chrome.runtime.sendMessage({
-          type: 'BG_SYNC_STATE',
-          data: {
-            action: 'PAUSE',
-            currentTime: video.currentTime,
-            paused: true,
-            timestamp: Date.now()
-          }
-        });
-      }
+      bufferingTimer = null;
+      if (!roomState.isInRoom || !roomState.isHost) return;
+      if (video.paused || isProgrammatic() || isYouTubeAdPlaying()) return;
+
+      console.log('[Syncine] 房主偵測到嚴重網路卡頓 (>5s)，廣播全房暫停');
+      hostStallActive = true;
+      chrome.runtime.sendMessage({
+        type: 'BG_SYNC_STATE',
+        data: {
+          action: 'PAUSE',
+          currentTime: video.currentTime,
+          paused: true,
+          timestamp: Date.now()
+        }
+      });
     }, 5000);
   });
 
   video.addEventListener('playing', () => {
+    if (bufferingTimer) {
+      clearTimeout(bufferingTimer);
+      bufferingTimer = null;
+    }
+
+    // 房主自卡頓恢復：主動發送 PLAY 恢復全房 (若期間被手動暫停，hostStallActive 已被重置，不會發送)
+    if (hostStallActive) {
+      hostStallActive = false;
+      if (
+        roomState.isInRoom &&
+        roomState.isHost &&
+        isCurrentActiveVideoTab() &&
+        !video.paused &&
+        !isYouTubeAdPlaying()
+      ) {
+        console.log('[Syncine] 房主卡頓恢復，發送 PLAY 恢復全房');
+        chrome.runtime.sendMessage({
+          type: 'BG_SYNC_STATE',
+          data: {
+            action: 'PLAY',
+            currentTime: video.currentTime,
+            paused: false,
+            timestamp: Date.now()
+          }
+        });
+      }
+    }
+  });
+
+  video.addEventListener('canplay', () => {
+    // 僅取消尚在倒數中的卡頓判定；已確認的卡頓由 playing 事件負責恢復
     if (bufferingTimer) {
       clearTimeout(bufferingTimer);
       bufferingTimer = null;
@@ -418,6 +458,11 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     } else {
       roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
+      hostStallActive = false;
+      if (bufferingTimer) {
+        clearTimeout(bufferingTimer);
+        bufferingTimer = null;
+      }
       stopHeartbeat();
       console.log('[Syncine] 已退出房間，完全釋放播放器控制權限');
     }
@@ -439,7 +484,7 @@ chrome.runtime.onMessage.addListener((request) => {
     roomState.allowGuestControl = payload.allowGuestControl;
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
-    const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL', '【Syncine 安全警告】房主嘗試將您導向未授權的網址，系統已自動攔截！');
+    const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
     alert(`${alertMsg} (${payload.url})`);
   }
 });

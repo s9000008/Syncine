@@ -28,6 +28,7 @@ export type SyncineEvent =
   | 'P2P_FALLBACK'
   | 'GET_ROOM_MEMBER_COUNT'
   | 'MEMBER_COUNT_UPDATED'
+  | 'HOST_PRIVILEGE_GRANTED'
   | 'ERROR';
 
 export type CoViewEvent = SyncineEvent;
@@ -42,6 +43,7 @@ export interface SyncData {
 export interface JoinRequest {
   requestId: string;
   guestName: string;
+  guestShortId?: string;
   timestamp: number;
 }
 
@@ -63,6 +65,7 @@ export interface RoomStateInfo {
   compositeCode?: string;
   pendingJoinRequests?: JoinRequest[];
   guestAwaitingApproval?: boolean;
+  resumeToken?: string;
 }
 
 export interface SignalOfferData {
@@ -124,6 +127,7 @@ export interface ExtensionMessage {
     | 'OFFSCREEN_PEER_JOIN_ROOM'
     | 'OFFSCREEN_APPROVE_JOIN_REQUEST'
     | 'OFFSCREEN_REJECT_JOIN_REQUEST'
+    | 'OFFSCREEN_UPDATE_PERMISSION'
     | 'BG_P2P_GUEST_APPROVED'
     // 相容性保留
     | 'BG_SERVERLESS_CREATE_OFFER'

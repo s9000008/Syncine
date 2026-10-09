@@ -105,6 +105,7 @@ export const jaJP: TranslationSchema = {
     awaitingTitle: '参加リクエスト送信済み',
     awaitingDesc: 'ホストの承認を待っています。承認されると自動的に同期再生が開始されます！',
     cancelAndBack: '✕ リクエストをキャンセルして戻る',
+    defaultGuestName: (id: string) => `ゲスト (${id})`,
   },
   languageSelector: {
     label: '言語 / Language',
@@ -125,6 +126,9 @@ export const jaJP: TranslationSchema = {
     ERR_P2P_CONNECTION_LOST: 'ホストとのP2Pダイレクト接続が切断されました。',
     ERR_UNAUTHORIZED_URL: '【セキュリティ警告】未承認の外部URLへのリダイレクトが検出されたためブロックしました！',
     ERR_SERVER_UNREACHABLE: 'サーバーに接続できません。インターネット環境をご確認ください。',
+    ERR_SERVER_TIMEOUT: 'サーバーの応答がタイムアウトしました。状態をご確認ください。',
+    ERR_P2P_TIMEOUT: 'P2P接続がタイムアウトしました。コードを確認するかリレーをお使いください。',
+    ERR_HOST_ONLY: '権限がありません：ホストのみがこの操作を実行できます。',
     ERR_SEND_MESSAGE_FAILED: 'メッセージの送信に失敗しました。拡張機能を再起動してください。',
     ERR_CUSTOM_IP_REQUIRED: 'サーバーURLを入力してください (例: https://syncine.fly.dev または http://192.168.1.100:3000)。',
     ERR_NETWORK_DISCONNECTED: 'ネットワークが切断されました。再接続を試行しています...',

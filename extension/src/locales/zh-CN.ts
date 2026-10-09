@@ -105,6 +105,7 @@ export const zhCN: TranslationSchema = {
     awaitingTitle: '入房申请已发送',
     awaitingDesc: '正在等待房主确认同意，房主批准后双方将自动无缝连接开播！',
     cancelAndBack: '✕ 取消申请并返回',
+    defaultGuestName: (id: string) => `访客 (${id})`,
   },
   languageSelector: {
     label: '语言 / Language',
@@ -125,6 +126,9 @@ export const zhCN: TranslationSchema = {
     ERR_P2P_CONNECTION_LOST: '与房主之 P2P 连接已中断。',
     ERR_UNAUTHORIZED_URL: '【安全警告】房主尝试将您导向未授权的网址，系统已自动拦截！',
     ERR_SERVER_UNREACHABLE: '无法连接至服务器，请检查网络连接。',
+    ERR_SERVER_TIMEOUT: '服务器响应超时，请确认服务器连接状态后再试。',
+    ERR_P2P_TIMEOUT: 'P2P 信令连接超时，请确认邀请码或改用中继模式。',
+    ERR_HOST_ONLY: '权限不足：仅房主可发起此项操作。',
     ERR_SEND_MESSAGE_FAILED: '发送消息失败，请重新打开扩展。',
     ERR_CUSTOM_IP_REQUIRED: '请输入自建服务器网址 (例如: https://syncine.fly.dev 或 http://192.168.1.100:3000)。',
     ERR_NETWORK_DISCONNECTED: '网络连接已中断，正在尝试重新连接...',

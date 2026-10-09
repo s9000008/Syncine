@@ -276,6 +276,7 @@ export interface CreateRoomRes {
     mode: ConnectionMode;
     shareCode: string; // 預設 6 碼或自架複合碼 (IP:RoomID|Base64)
     allowGuestControl: boolean;
+    resumeToken?: string; // 房主專屬身分憑證 (32 位元安全隨機字串，僅房主持有，防冒名劫持)
   };
 }
 
@@ -286,6 +287,8 @@ export interface JoinRoomReq {
   data: {
     userId: string;
     mode: ConnectionMode;
+    isReconnecting?: boolean;
+    resumeToken?: string; // 斷線回魂申領房主權限之憑證
   };
 }
 
@@ -332,8 +335,18 @@ export interface TogglePermissionMsg {
 ## 9. 異常處理與短中期優化項目
 
 ### 9.1 核心異常邊界條件 (已實裝覆蓋)
-* [x] **緩衝卡頓處理**：當某一觀影者觸發瀏覽器原生 `waiting` (Buffering) 事件並持續超過 5 秒時，向房間發送 `PAUSE`，避免成員進度嚴重落後，同時防止網路輕微波動造成過度頻繁暫停。
+* [x] **緩衝卡頓處理（僅房主觸發，v2.3.1 修訂）**：
+    1. **觸發條件**：僅當 **房主 (Host)** 的 `<video>` 觸發 `waiting` (Buffering) 並持續超過 5 秒（防抖，且非廣告期間、非程式化操作）時，向房間發送 `PAUSE`，讓全房等待房主，避免觀眾進度領先過多。
+    2. **觀眾端卡頓不外發任何指令**（含已獲授權操作之觀眾）：觀眾自身網路卡頓僅在本機緩衝，不得暫停全房；落後進度由心跳之 5 秒容差機制校正。
+    3. **心跳一致性**：房主處於「已確認卡頓」期間，心跳 `HEARTBEAT.paused` 一律回報 `true`，避免觀眾被下一次心跳（`paused:false`）立即恢復播放而使暫停失效。
+    4. **自動恢復**：房主影片恢復（`playing` 事件）且未被手動暫停時，房主主動發送一次 `PLAY`（附當前 `currentTime`）以恢復全房；若房主於卡頓期間手動暫停，則不發送 `PLAY`。
 * [x] **時間軸跳轉對齊**：主動 SEEK 事件除校準時間戳外，雙向同步發送端之 `paused` 狀態，避免跳轉後接收端定格暫停。
+* [x] **伺服器執行期異常防護與邊界驗證 (P0 防崩潰)**：全面以 `safeHandler` 包裝所有 Socket 事件回呼函式，嚴格校驗 Payload 為非空物件，並配置全域 `uncaughtException` 與 `unhandledRejection` 保護，防止單一惡意/畸形封包崩潰整個 Node.js 伺服器程序。
+* [x] **嚴格房間隔離與防跨房廣播注入 (P0 房間安全)**：伺服器處理 `SYNC_STATE`、`REDIRECT_ROOM`、`TOGGLE_PERMISSION` 與信令轉發時，一律以 `socketToRoom` 映射為唯一房間真理來源，嚴格比對客戶端上報之 `roomId`；若帶有 `targetGuestSocketId`，必須確認目標連線同處於同一房間，徹底杜絕跨房操作與指令注入。
+* [x] **P2P 多人連線競爭修復與 15 秒連線逾時機制 (P0 連線穩定)**：觀眾端修復核准狀態輪詢（`guestPollTimer` 不再因短暫未 open 提早中止），房主端自動清理超過 30 秒之懸掛待審核申請；當 ICE 穿透或握手超過 15 秒時主動觸發 `ERR_P2P_TIMEOUT`，解鎖介面轉圈並引導改用中繼模式。
+* [x] **P2P 房主權威與特權指令安全過濾 (P0 權限防禦)**：房主端 Offscreen Document 監聽觀眾 DataChannel 時，嚴格丟棄任何觀眾發起之 `REDIRECT_ROOM` 與 `TOGGLE_PERMISSION` 特權指令；當房主關閉「允許觀眾操作」時，一律丟棄觀眾之播放動作（PLAY/PAUSE/SEEK），確保房主權威不被繞過。
+* [x] **房主身分識別防劫持 (P1 resumeToken 機制)**：伺服器建房時簽發不可預測之安全憑證 `resumeToken`，僅房主本地持有；斷線重連寬限期 (Grace Period) 內，客戶端必須攜帶有效之 `resumeToken` 方可重申房主身分，若無 Token 或 Token 不符則一律降級為普通觀眾；原房主離線逾時轉移新房主時，透過私有事件 `HOST_PRIVILEGE_GRANTED` 獨立發送新 Token 給繼任房主，徹底杜絕公開 `userId` 冒名劫持。
+* [x] **密碼學安全隨機亂數 (P1 加密安全)**：後端房號生成全面淘汰 `Math.random()` 改採 Node.js 原生 `crypto.randomInt`；擴充套件端房號與使用者識別碼改採 Web Crypto API `crypto.getRandomValues()`，根除可預測亂數與碰撞風險。
 * [x] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
 * [x] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
 * [x] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並升級加入時間最早之 Guest 為新房主。
@@ -372,6 +385,14 @@ export interface TogglePermissionMsg {
 * **技術方案**：
   * **支援語系**：繁體中文 (`zh-TW`)、English (`en-US`)、日本語 (`ja-JP`)、简体中文 (`zh-CN`) 四國語系。
   * **智慧自動偵測**：透過 `chrome.i18n.getUILanguage()` 與 `navigator.language` 優先判定瀏覽器語系自動載入；支援 `chrome.storage.sync` 跨裝置持久化偏好。
-  * **前後端解耦 ReturnCode 機制**：後端與核心通道全面以標準化 ReturnCode 溝通，由前端轉譯器 (`translateReturnCode`) 映射至對應語言字典，杜絕硬編碼字串混亂。
+  * **前後端解耦 ReturnCode 機制**：後端、Background Service Worker 與 Offscreen 通道全面以標準化 ReturnCode 溝通，杜絕硬編碼中文回傳字串。全域標準代碼定義如下：
+    - 通用狀態：`SUCCESS`、`ERR_UNKNOWN`
+    - 房間生命週期：`ERR_ROOM_NOT_FOUND`、`ERR_ROOM_FULL`、`ERR_ROOM_CLOSED`、`ERR_INVALID_CODE`
+    - 權限管理：`ERR_PERMISSION_DENIED`、`ERR_HOST_ONLY`、`ERR_AUDIT_REJECTED`
+    - 網路與伺服器：`ERR_SERVER_UNREACHABLE`、`ERR_SERVER_TIMEOUT`、`ERR_CUSTOM_IP_REQUIRED`、`ERR_NETWORK_DISCONNECTED`、`ERR_SEND_MESSAGE_FAILED`
+    - WebRTC P2P 連線：`ERR_P2P_SIGNAL_FAILED`、`ERR_P2P_TIMEOUT`、`ERR_P2P_CONNECTION_LOST`
+    - 安全防護：`ERR_UNAUTHORIZED_URL`
+  * **去硬編碼展示原則**：入房審核申請之預設稱謂由 UI 層函式 `defaultGuestName(id)` 依用戶目前語系動態渲染，通道僅傳遞使用者 ID 或代碼。
   * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
+
 

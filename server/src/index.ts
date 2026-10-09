@@ -51,13 +51,44 @@ roomManager.setHostTimeoutCallback((updatedRoom) => {
     message: '原房主離線逾時，系統已轉移房主權限給新成員'
   });
   io.to(updatedRoom.roomId).emit('MEMBER_COUNT_UPDATED', { count: updatedRoom.members.size });
+
+  // P1: 私下通知新房主被提升為房主，並發送新生成的 resumeToken (單播發送，絕不公開廣播)
+  if (updatedRoom.hostResumeToken && updatedRoom.hostSocketId) {
+    io.to(updatedRoom.hostSocketId).emit('HOST_PRIVILEGE_GRANTED', {
+      resumeToken: updatedRoom.hostResumeToken
+    });
+  }
 });
+
+// ----------------------------------------------------
+// 安全事件註冊輔助函式 (P0: 防止畸形 Payload 導致伺服器崩潰)
+// ----------------------------------------------------
+function registerSafeHandler<T>(
+  socket: Socket,
+  eventName: string,
+  handler: (payload: T) => void | Promise<void>,
+  requirePayloadObject: boolean = true
+) {
+  socket.on(eventName, async (payload: any) => {
+    try {
+      if (requirePayloadObject && (!payload || typeof payload !== 'object')) {
+        console.warn(`[SafeHandler Blocked] 收到非法畸形 Payload (${eventName}) 來自: ${sanitizeLog(socket.id)}`);
+        socket.emit('ERROR', { code: 'ERR_INVALID_CODE', message: '請求格式錯誤' });
+        return;
+      }
+      await handler(payload);
+    } catch (err: any) {
+      console.error(`[SafeHandler Catched] 執行事件 ${eventName} 拋出未預期例外:`, err);
+      socket.emit('ERROR', { code: 'ERR_UNKNOWN', message: '伺服器內部錯誤' });
+    }
+  });
+}
 
 io.on('connection', (socket: Socket) => {
   console.log(`[Socket.IO] 新用戶連線: ${sanitizeLog(socket.id)}`);
 
   // 1. 建立房間
-  socket.on('CREATE_ROOM', (payload: CreateRoomReq) => {
+  registerSafeHandler<CreateRoomReq>(socket, 'CREATE_ROOM', (payload) => {
     const { userId, currentUrl, isSelfHosted, mode, language } = payload?.data || {};
 
     // 資安防護：驗證語系格式 (BCP 47 標籤格式，限制 10 字元內，避免惡意注入)
@@ -85,7 +116,8 @@ io.on('connection', (socket: Socket) => {
       roomId: room.roomId,
       data: {
         allowGuestControl: room.allowGuestControl,
-        mode: room.mode
+        mode: room.mode,
+        resumeToken: room.hostResumeToken
       }
     };
 
@@ -93,14 +125,22 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 2. 加入房間
-  socket.on('JOIN_ROOM', (payload: JoinRoomReq) => {
+  registerSafeHandler<JoinRoomReq>(socket, 'JOIN_ROOM', (payload) => {
     const { roomId, data } = payload;
+    if (!roomId || typeof roomId !== 'string' || !data || typeof data.userId !== 'string') {
+      socket.emit('ERROR', {
+        message: '加入房間參數不合法',
+        code: 'ERR_INVALID_CODE'
+      });
+      return;
+    }
+
     const isReconnecting = (data as any)?.isReconnecting;
     if (isReconnecting) {
       console.log(`[Socket.IO] 偵測到斷線回魂加入請求: ${sanitizeLog(data.userId)} (Room: ${sanitizeLog(roomId)})`);
     }
 
-    const result = roomManager.joinRoom(roomId, socket.id, data.userId);
+    const result = roomManager.joinRoom(roomId, socket.id, data.userId, data.resumeToken);
 
     if (!result.success || !result.room) {
       socket.emit('ERROR', { 
@@ -119,9 +159,10 @@ io.on('connection', (socket: Socket) => {
       data: {
         allowGuestControl: room.allowGuestControl,
         currentUrl: room.currentUrl,
-        isHost: socket.id === room.hostSocketId,
+        isHost: result.isHost,
         mode: room.mode,
-        hostSocketId: room.hostSocketId
+        hostSocketId: room.hostSocketId,
+        resumeToken: result.isHost ? room.hostResumeToken : undefined
       }
     });
 
@@ -148,7 +189,8 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 人數校準查詢
-  socket.on('GET_ROOM_MEMBER_COUNT', ({ roomId }: { roomId: string }) => {
+  registerSafeHandler<{ roomId: string }>(socket, 'GET_ROOM_MEMBER_COUNT', ({ roomId }) => {
+    if (!roomId || typeof roomId !== 'string') return;
     const room = roomManager.getRoom(roomId);
     if (room) {
       socket.emit('MEMBER_COUNT_UPDATED', { count: room.members.size });
@@ -156,59 +198,82 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 3. 狀態同步廣播 (PLAY / PAUSE / SEEK / HEARTBEAT)
-  socket.on('SYNC_STATE', (payload: SyncStateMsg) => {
-    const { roomId, data } = payload;
-    const room = roomManager.getRoom(roomId);
+  // P0 防禦：嚴格以伺服器端 socketToRoom 為準，杜絕跨房注入攻擊
+  registerSafeHandler<SyncStateMsg>(socket, 'SYNC_STATE', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom) {
+      socket.emit('ERROR', { code: 'ERR_ROOM_NOT_FOUND', message: '您尚未加入任何房間' });
+      return;
+    }
 
-    if (!room) {
-      socket.emit('ERROR', { message: '房間不存在' });
+    if (payload.roomId && payload.roomId.toUpperCase() !== actualRoom.roomId) {
+      console.warn(`[Security Alert] 偵測到跨房注入攻擊！Socket: ${sanitizeLog(socket.id)}, 試圖操控: ${sanitizeLog(payload.roomId)}`);
+      socket.emit('ERROR', { code: 'ERR_PERMISSION_DENIED', message: '無權限操作非所屬房間' });
       return;
     }
 
     // 後端二重安全檢查：未授權之 Guest 廣播直接 Drop
     if (!roomManager.canExecuteAction(socket.id)) {
       console.warn(`[Security Check Drop] Socket ${sanitizeLog(socket.id)} 嘗試觸發 SYNC_STATE 但無權限！`);
-      socket.emit('ERROR', { message: '權限不足：目前房主已停用觀眾操作權限' });
+      socket.emit('ERROR', { code: 'ERR_PERMISSION_DENIED', message: '權限不足：目前房主已停用觀眾操作權限' });
       return;
     }
 
     // 若包含目標 Guest Socket ID，代表是單向回傳狀態給新進觀眾
     if ((payload as any).targetGuestSocketId) {
       const targetId = (payload as any).targetGuestSocketId;
+      const targetRoom = roomManager.getRoomBySocketId(targetId);
+      if (!targetRoom || targetRoom.roomId !== actualRoom.roomId) {
+        console.warn(`[Security Alert] 目標 Socket ${sanitizeLog(targetId)} 不在同一房間內，拒絕單向發送`);
+        return;
+      }
       console.log(`[Socket.IO] 將拉取的初始化狀態獨立回傳給新觀眾: ${sanitizeLog(targetId)}`);
       io.to(targetId).emit('SYNC_STATE', payload);
     } else {
       // 廣播給房間內其他所有成員
-      socket.to(room.roomId).emit('SYNC_STATE', payload);
+      socket.to(actualRoom.roomId).emit('SYNC_STATE', payload);
     }
   });
 
   // 4. 強制網頁跳轉廣播 (REDIRECT_ROOM)
-  socket.on('REDIRECT_ROOM', (payload: RedirectRoomMsg) => {
-    const { roomId, data } = payload;
-    const room = roomManager.getRoom(roomId);
+  registerSafeHandler<RedirectRoomMsg>(socket, 'REDIRECT_ROOM', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom) return;
 
-    if (!room) return;
-
-    // 僅 Host 可發起網頁跳轉
-    if (room.hostSocketId !== socket.id) {
-      console.warn(`[Security Check Drop] 非 Host (${sanitizeLog(socket.id)}) 嘗試觸發 REDIRECT_ROOM`);
-      socket.emit('ERROR', { message: '僅房主可進行網頁同步跳轉' });
+    if (payload.roomId && payload.roomId.toUpperCase() !== actualRoom.roomId) {
+      console.warn(`[Security Alert] 阻絕跨房 REDIRECT_ROOM 操作`);
       return;
     }
 
-    room.currentUrl = data.targetUrl;
-    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${sanitizeLog(data.targetUrl)} (Room: ${sanitizeLog(roomId)})`);
-    socket.to(room.roomId).emit('REDIRECT_ROOM', payload);
+    // 僅 Host 可發起網頁跳轉
+    if (actualRoom.hostSocketId !== socket.id) {
+      console.warn(`[Security Check Drop] 非 Host (${sanitizeLog(socket.id)}) 嘗試觸發 REDIRECT_ROOM`);
+      socket.emit('ERROR', { code: 'ERR_HOST_ONLY', message: '僅房主可進行網頁同步跳轉' });
+      return;
+    }
+
+    if (!payload.data?.targetUrl || typeof payload.data.targetUrl !== 'string') {
+      return;
+    }
+
+    actualRoom.currentUrl = payload.data.targetUrl;
+    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${sanitizeLog(payload.data.targetUrl)} (Room: ${sanitizeLog(actualRoom.roomId)})`);
+    socket.to(actualRoom.roomId).emit('REDIRECT_ROOM', payload);
   });
 
   // 5. 房主權限變更廣播 (TOGGLE_PERMISSION)
-  socket.on('TOGGLE_PERMISSION', (payload: TogglePermissionMsg) => {
-    const { allowGuestControl } = payload.data;
+  registerSafeHandler<TogglePermissionMsg>(socket, 'TOGGLE_PERMISSION', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom || actualRoom.hostSocketId !== socket.id) {
+      socket.emit('ERROR', { code: 'ERR_HOST_ONLY', message: '僅房主可修改權限' });
+      return;
+    }
+
+    const allowGuestControl = Boolean(payload?.data?.allowGuestControl);
     const result = roomManager.togglePermission(socket.id, allowGuestControl);
 
     if (!result.success || !result.room) {
-      socket.emit('ERROR', { message: result.error });
+      socket.emit('ERROR', { code: 'ERR_UNKNOWN', message: result.error });
       return;
     }
 
@@ -219,54 +284,72 @@ io.on('connection', (socket: Socket) => {
     });
   });
 
-  // 6. WebRTC 信令轉發 (P2P DataChannel 握手)
-  socket.on('SIGNAL_OFFER', (payload: SignalOfferMsg) => {
-    const { roomId, data } = payload;
-    data.senderSocketId = socket.id;
-    if (data.targetSocketId) {
-      console.log(`[WebRTC Signaling] 轉發 SIGNAL_OFFER 至 targetSocketId: ${sanitizeLog(data.targetSocketId)}`);
-      io.to(data.targetSocketId).emit('SIGNAL_OFFER', payload);
+  // 6. WebRTC 信令轉發 (P2P DataChannel 握手) - 需確保同房成員
+  registerSafeHandler<SignalOfferMsg>(socket, 'SIGNAL_OFFER', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
+
+    payload.roomId = actualRoom.roomId;
+    payload.data.senderSocketId = socket.id;
+    if (payload.data.targetSocketId) {
+      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
+      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
+        console.log(`[WebRTC Signaling] 轉發 SIGNAL_OFFER 至 targetSocketId: ${sanitizeLog(payload.data.targetSocketId)}`);
+        io.to(payload.data.targetSocketId).emit('SIGNAL_OFFER', payload);
+      }
     } else {
-      socket.to(roomId).emit('SIGNAL_OFFER', payload);
+      socket.to(actualRoom.roomId).emit('SIGNAL_OFFER', payload);
     }
   });
 
-  socket.on('SIGNAL_ANSWER', (payload: SignalAnswerMsg) => {
-    const { roomId, data } = payload;
-    data.senderSocketId = socket.id;
-    if (data.targetSocketId) {
-      console.log(`[WebRTC Signaling] 轉發 SIGNAL_ANSWER 至 targetSocketId: ${sanitizeLog(data.targetSocketId)}`);
-      io.to(data.targetSocketId).emit('SIGNAL_ANSWER', payload);
+  registerSafeHandler<SignalAnswerMsg>(socket, 'SIGNAL_ANSWER', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
+
+    payload.roomId = actualRoom.roomId;
+    payload.data.senderSocketId = socket.id;
+    if (payload.data.targetSocketId) {
+      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
+      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
+        console.log(`[WebRTC Signaling] 轉發 SIGNAL_ANSWER 至 targetSocketId: ${sanitizeLog(payload.data.targetSocketId)}`);
+        io.to(payload.data.targetSocketId).emit('SIGNAL_ANSWER', payload);
+      }
     } else {
-      socket.to(roomId).emit('SIGNAL_ANSWER', payload);
+      socket.to(actualRoom.roomId).emit('SIGNAL_ANSWER', payload);
     }
   });
 
-  socket.on('SIGNAL_ICE_CANDIDATE', (payload: SignalIceCandidateMsg) => {
-    const { roomId, data } = payload;
-    data.senderSocketId = socket.id;
-    if (data.targetSocketId) {
-      io.to(data.targetSocketId).emit('SIGNAL_ICE_CANDIDATE', payload);
+  registerSafeHandler<SignalIceCandidateMsg>(socket, 'SIGNAL_ICE_CANDIDATE', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
+
+    payload.roomId = actualRoom.roomId;
+    payload.data.senderSocketId = socket.id;
+    if (payload.data.targetSocketId) {
+      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
+      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
+        io.to(payload.data.targetSocketId).emit('SIGNAL_ICE_CANDIDATE', payload);
+      }
     } else {
-      socket.to(roomId).emit('SIGNAL_ICE_CANDIDATE', payload);
+      socket.to(actualRoom.roomId).emit('SIGNAL_ICE_CANDIDATE', payload);
     }
   });
 
   // 7. WebRTC 連線受阻時的降級回退廣播
-  socket.on('P2P_FALLBACK', (payload: { roomId: string; reason?: string }) => {
-    console.log(`[WebRTC Signaling] 房間 ${sanitizeLog(payload.roomId)} 收到 P2P_FALLBACK 請求，通知全體成員切換為中繼模式`);
-    const room = roomManager.getRoom(payload.roomId);
-    if (room) {
-      room.mode = 'DEFAULT';
-      io.to(room.roomId).emit('P2P_FALLBACK', {
-        roomId: room.roomId,
-        message: payload.reason || 'WebRTC 直連受阻，系統已自動降級回退至伺服器中繼模式'
-      });
-    }
+  registerSafeHandler<{ roomId: string; reason?: string }>(socket, 'P2P_FALLBACK', (payload) => {
+    const actualRoom = roomManager.getRoomBySocketId(socket.id);
+    if (!actualRoom) return;
+
+    console.log(`[WebRTC Signaling] 房間 ${sanitizeLog(actualRoom.roomId)} 收到 P2P_FALLBACK 請求，通知全體成員切換為中繼模式`);
+    actualRoom.mode = 'DEFAULT';
+    io.to(actualRoom.roomId).emit('P2P_FALLBACK', {
+      roomId: actualRoom.roomId,
+      message: payload?.reason || 'WebRTC 直連受阻，系統已自動降級回退至伺服器中繼模式'
+    });
   });
 
   // 8. 主動退出房間 (用戶手動點擊退房)
-  socket.on('LEAVE_ROOM', () => {
+  registerSafeHandler<void>(socket, 'LEAVE_ROOM', () => {
     console.log(`[Socket.IO] 用戶主動退出房間: ${sanitizeLog(socket.id)}`);
     const result = roomManager.handleDisconnect(socket.id, undefined, true);
     if (result.roomId) {
@@ -282,22 +365,26 @@ io.on('connection', (socket: Socket) => {
         }
       }
     }
-  });
+  }, false);
 
   // 9. 離線處理 (非主動，支援 60 秒寬限期)
   socket.on('disconnect', () => {
-    console.log(`[Socket.IO] 用戶斷開連線: ${sanitizeLog(socket.id)}`);
-    const result = roomManager.handleDisconnect(socket.id, undefined, false);
+    try {
+      console.log(`[Socket.IO] 用戶斷開連線: ${sanitizeLog(socket.id)}`);
+      const result = roomManager.handleDisconnect(socket.id, undefined, false);
 
-    if (result.roomId && !result.roomClosed) {
-      const room = roomManager.getRoom(result.roomId);
-      io.to(result.roomId).emit('MEMBER_LEFT', {
-        socketId: socket.id,
-        isHost: result.isHost
-      });
-      if (room) {
-        io.to(result.roomId).emit('MEMBER_COUNT_UPDATED', { count: room.members.size });
+      if (result.roomId && !result.roomClosed) {
+        const room = roomManager.getRoom(result.roomId);
+        io.to(result.roomId).emit('MEMBER_LEFT', {
+          socketId: socket.id,
+          isHost: result.isHost
+        });
+        if (room) {
+          io.to(result.roomId).emit('MEMBER_COUNT_UPDATED', { count: room.members.size });
+        }
       }
+    } catch (err) {
+      console.error('[Socket.IO] 處理 disconnect 異常:', err);
     }
   });
 });
@@ -345,3 +432,14 @@ function handleGracefulShutdown(signal: string) {
 
 process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
+
+// ----------------------------------------------------
+// 全域例外防護 (P0: 防止任何未預期例外擊垮 Node.js 程序)
+// ----------------------------------------------------
+process.on('uncaughtException', (err) => {
+  console.error('💥 [CRITICAL] 捕獲未處理異常 (避免程序崩潰):', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 [CRITICAL] 捕獲未處理 Promise Rejection:', reason);
+});
+

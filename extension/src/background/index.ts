@@ -14,7 +14,17 @@ const HOST_WHITELIST = [
 
 let socket: Socket | null = null;
 let currentRoomState: RoomStateInfo | null = null;
-let userId: string = 'user_' + Math.random().toString(36).substring(2, 9);
+
+/**
+ * 密碼學安全隨機 User ID 產生器 (杜絕偽造與預測)
+ */
+function generateSecureUserId(prefix: string = 'user_', byteLength: number = 8): string {
+  const array = new Uint8Array(byteLength);
+  crypto.getRandomValues(array);
+  return prefix + Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+let userId: string = generateSecureUserId();
 
 const SESSION_STORAGE_KEY = 'syncine_active_session';
 
@@ -177,7 +187,7 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
     const connectTimer = setTimeout(() => {
       if (!isSettled) {
         isSettled = true;
-        reject(new Error(`連線逾時：無法連線至伺服器 (${serverUrl})，請確認伺服器已啟動且 Port 正確`));
+        reject(new Error('ERR_SERVER_TIMEOUT'));
       }
     }, 8000);
 
@@ -203,7 +213,8 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
             data: {
               userId,
               mode: currentRoomState.mode,
-              isReconnecting: true
+              isReconnecting: true,
+              resumeToken: currentRoomState.resumeToken
             }
           });
         }
@@ -224,7 +235,7 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
         isSettled = true;
         clearTimeout(connectTimer);
         console.error(`[Background] Socket.IO 首連失敗 (${serverUrl}):`, err.message);
-        reject(new Error(`連線失敗：無法連線至 ${serverUrl} (${err.message || '請確認伺服器已啟動'})`));
+        reject(new Error('ERR_SERVER_UNREACHABLE'));
       }
     });
 
@@ -374,7 +385,32 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
         if (res.data.currentUrl) {
           currentRoomState.currentUrl = res.data.currentUrl;
         }
+        if (res.data.resumeToken) {
+          currentRoomState.resumeToken = res.data.resumeToken;
+        } else if (!res.data.isHost) {
+          currentRoomState.resumeToken = undefined;
+        }
         currentRoomState.connectionStatus = 'CONNECTED';
+        persistRoomSession(currentRoomState);
+        broadcastToVideoTabs({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: currentRoomState
+        });
+        chrome.runtime.sendMessage({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: currentRoomState
+        }).catch(() => {});
+      }
+    });
+
+    // 接收 HOST_PRIVILEGE_GRANTED (原房主離線逾時換人，新房主獲頒權限與 Token)
+    socket.on('HOST_PRIVILEGE_GRANTED', (res: { resumeToken?: string }) => {
+      console.log('[Background] 收到 HOST_PRIVILEGE_GRANTED，被正式提升為房主');
+      if (currentRoomState) {
+        currentRoomState.isHost = true;
+        if (res?.resumeToken) {
+          currentRoomState.resumeToken = res.resumeToken;
+        }
         persistRoomSession(currentRoomState);
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
@@ -390,8 +426,10 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
     // 監聽伺服器錯誤（若重連回魂時房間已被銷毀或過期）
     socket.on('ERROR', (err: any) => {
       console.warn('[Background] 收到伺服器錯誤通知:', err);
+      const code = err?.code;
+      const msg = err?.message || '';
       if (
-        (err?.message?.includes('房間不存在') || err?.message?.includes('房間已關閉')) &&
+        (code === 'ERR_ROOM_NOT_FOUND' || code === 'ERR_ROOM_CLOSED' || msg.includes('房間不存在') || msg.includes('房間已關閉')) &&
         currentRoomState
       ) {
         console.warn(`[Background] 房間 ${currentRoomState.roomId} 已過期銷毀，自動重置房間狀態`);
@@ -473,7 +511,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     roomId: res.roomId,
                     isHost: true,
                     allowGuestControl: false,
-                    serverUrl: 'WebRTC P2P (純端對端直連)',
+                    serverUrl: 'P2P',
                     currentUrl: payload.currentUrl,
                     mode: 'P2P',
                     p2pStatus: 'CONNECTED',
@@ -494,7 +532,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     roomState: currentRoomState
                   });
                 } else {
-                  sendResponse({ success: false, error: res?.error || '建立 P2P 房間失敗' });
+                  sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
                 }
               }
             );
@@ -520,7 +558,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           });
 
           const createTimer = setTimeout(() => {
-            sendResponse({ success: false, error: '伺服器回應逾時 (CREATE_ROOM_SUCCESS 未收到)' });
+            sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
           }, 6000);
 
           s.once('CREATE_ROOM_SUCCESS', async (res: any) => {
@@ -537,7 +575,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               p2pStatus: undefined,
               connectionStatus: 'CONNECTED',
               connectedPeerCount: 1,
-              compositeCode
+              compositeCode,
+              resumeToken: res.data?.resumeToken
             };
             persistRoomSession(currentRoomState);
 
@@ -584,7 +623,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                       roomId: res.roomId,
                       isHost: false,
                       allowGuestControl: false,
-                      serverUrl: 'WebRTC P2P (純端對端直連)',
+                      serverUrl: 'P2P',
                       mode: 'P2P',
                       p2pStatus: 'CONNECTING',
                       connectionStatus: 'CONNECTED',
@@ -617,11 +656,15 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           s.emit('JOIN_ROOM', {
             event: 'JOIN_ROOM',
             roomId,
-            data: { userId, mode }
+            data: {
+              userId,
+              mode,
+              resumeToken: (currentRoomState?.roomId === roomId) ? currentRoomState.resumeToken : undefined
+            }
           });
 
           const joinTimer = setTimeout(() => {
-            sendResponse({ success: false, error: 'ERR_SERVER_UNREACHABLE', code: 'ERR_SERVER_UNREACHABLE' });
+            sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
           }, 6000);
 
           s.once('JOIN_ROOM_SUCCESS', async (res: any) => {
@@ -630,7 +673,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
             currentRoomState = {
               roomId: res.roomId,
-              isHost: false,
+              isHost: res.data?.isHost ?? false,
               allowGuestControl: res.data.allowGuestControl,
               serverUrl,
               currentUrl: res.data.currentUrl,
@@ -638,7 +681,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               p2pStatus: undefined,
               connectionStatus: 'CONNECTED',
               connectedPeerCount: 0,
-              compositeCode: formatShareCode(actualMode, res.roomId, serverUrl)
+              compositeCode: formatShareCode(actualMode, res.roomId, serverUrl),
+              resumeToken: res.data?.resumeToken
             };
             persistRoomSession(currentRoomState);
 
@@ -666,10 +710,11 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
           s.once('ERROR', (err: any) => {
             clearTimeout(joinTimer);
+            const code = err.code || 'ERR_ROOM_NOT_FOUND';
             sendResponse({
               success: false,
-              error: err.message || '加入房間失敗',
-              code: err.code || 'ERR_ROOM_NOT_FOUND'
+              error: code,
+              code
             });
           });
         })
@@ -740,7 +785,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
         }
         sendResponse({ success: true });
       } else {
-        sendResponse({ success: false, error: '非 Host 無法發起跳轉' });
+        sendResponse({ success: false, error: 'ERR_HOST_ONLY', code: 'ERR_HOST_ONLY' });
       }
       return true;
     }
@@ -753,14 +798,21 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           payload: { allowGuestControl: payload.allowGuestControl }
         });
 
-        if (currentRoomState.mode === 'P2P' && currentRoomState.p2pStatus === 'CONNECTED') {
+        if (currentRoomState.mode === 'P2P') {
           chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_SEND_DATA',
-            payload: {
-              type: 'TOGGLE_PERMISSION',
-              allowGuestControl: payload.allowGuestControl
-            }
+            type: 'OFFSCREEN_UPDATE_PERMISSION',
+            payload: { allowGuestControl: payload.allowGuestControl }
           } as ExtensionMessage).catch(() => {});
+
+          if (currentRoomState.p2pStatus === 'CONNECTED') {
+            chrome.runtime.sendMessage({
+              type: 'OFFSCREEN_SEND_DATA',
+              payload: {
+                type: 'TOGGLE_PERMISSION',
+                allowGuestControl: payload.allowGuestControl
+              }
+            } as ExtensionMessage).catch(() => {});
+          }
         }
 
         if (socket) {
@@ -994,6 +1046,20 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     case 'OFFSCREEN_DATA_RECEIVED': {
       // 來自 DataChannel 直連同步事件
       const syncData = payload;
+      if (!syncData || typeof syncData !== 'object') break;
+
+      // 房主端二重防禦：若房主已關閉觀眾控制，且為播放操作 (PLAY/PAUSE/SEEK)，直接忽略
+      if (currentRoomState?.isHost && !currentRoomState.allowGuestControl && syncData.action) {
+        console.warn('[Background Security Drop] 房主已關閉觀眾操作，忽略 DataChannel 傳入的播放操作');
+        break;
+      }
+
+      // 觀眾端不可發起 REDIRECT_ROOM 或 TOGGLE_PERMISSION
+      if (currentRoomState?.isHost && (syncData.type === 'REDIRECT_ROOM' || syncData.type === 'TOGGLE_PERMISSION')) {
+        console.warn('[Background Security Drop] 拒絕處理 DataChannel 傳入之偽造特權指令:', syncData.type);
+        break;
+      }
+
       if (syncData.action) {
         broadcastToVideoTabs({
           type: 'CS_SYNC_RECEIVED',
@@ -1033,7 +1099,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     roomId: res.roomId,
                     isHost: true,
                     allowGuestControl: false,
-                    serverUrl: 'WebRTC P2P (純端對端直連)',
+                    serverUrl: 'P2P',
                     currentUrl: payload?.currentUrl,
                     mode: 'P2P',
                     p2pStatus: 'CONNECTING',
@@ -1056,7 +1122,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   roomState: currentRoomState
                 });
               } else {
-                sendResponse({ success: false, error: res?.error || '產生 P2P 邀請碼失敗' });
+                sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
               }
             }
           );
@@ -1081,7 +1147,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   roomId: res.roomId,
                   isHost: false,
                   allowGuestControl: false,
-                  serverUrl: 'WebRTC P2P (純端對端直連)',
+                  serverUrl: 'P2P',
                   currentUrl: payload?.currentUrl,
                   mode: 'P2P',
                   p2pStatus: 'CONNECTING',
@@ -1100,7 +1166,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   roomState: currentRoomState
                 });
               } else {
-                sendResponse({ success: false, error: res?.error || '解析邀請碼失敗，請確認代碼格式完整' });
+                sendResponse({ success: false, error: res?.error || 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
               }
             }
           );
@@ -1134,7 +1200,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             }
             sendResponse({ success: true, roomState: currentRoomState });
           } else {
-            sendResponse({ success: false, error: res?.error || '套用回執碼失敗，請確認代碼完整性' });
+            sendResponse({ success: false, error: res?.error || 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
           }
         }
       );
