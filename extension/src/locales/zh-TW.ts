@@ -104,6 +104,9 @@ export const zhTW = {
     awaitingDesc: '正在等待房主確認同意，房主批准後雙方將自動無縫連線開播！',
     cancelAndBack: '✕ 取消申請並返回',
     defaultGuestName: (id: string) => `訪客 (${id})`,
+    reportIssueGithub: '🛠️ 回報問題至 GitHub',
+    copyDiagnosticReport: '📋 複製診斷報告',
+    reportCopiedToast: '診斷報告已複製至剪貼簿！',
   },
   languageSelector: {
     label: '語言 / Language',

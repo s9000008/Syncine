@@ -355,6 +355,10 @@ export interface TogglePermissionMsg {
     1. **多重 STUN 伺服器節點池**：配置 Google 與 Cloudflare 多組 STUN 伺服器，提升受限 NAT 網絡下 Candidate 收集成功率。
     2. **指數退避重試狀態機**：觀眾端握手超時或 ICE 連線失敗時觸發自動重試（最多 2 次，間隔 1.5s / 3s），重試期間保持介面連線狀態同步。
     3. **友好引導降級**：重試耗盡仍無法打洞穿透時，回報 `ERR_P2P_TIMEOUT` 並引導使用者切換至預設伺服器或自架主機模式。
+* [x] **P2P 結構化診斷日誌與 GitHub Issue 一鍵回報 (P1 觀測與隱私安全)**：
+    1. **環形記憶體日誌緩衝區**：Offscreen Document 維護長度固定為 60 筆之記憶體 FIFO 佇列，嚴格追蹤 PeerJS 初始化、STUN 探測、信令握手、DataChannel 開啟與重試階段之結構化事件。
+    2. **開源隱私零洩漏脫敏 (Privacy First)**：匯出前強制將所有 IPv4（遮蔽後兩段如 `192.168.*.*`）、IPv6、Token 與私有代碼進行遮蔽清毒，僅記錄 Candidate 類型（host/srflx/relay）與協定。
+    3. **GitHub Issue 預填與剪貼簿備援**：連線異常時於 Popup 動態呈現「回報問題至 GitHub」按鈕，點擊後自動生成結構化 Markdown 報告、預填 Issue 標題/標籤並新開分頁，同時複製至剪貼簿，兼具極致安全性與無摩擦回報體驗。
 * [x] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
 * [x] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
 * [x] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並升級加入時間最早之 Guest 為新房主。

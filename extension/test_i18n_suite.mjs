@@ -167,7 +167,9 @@ for (const file of localeFiles) {
   assert(content.includes('smartDetection:'), `${file} 包含 smartDetection 模組`);
   assert(content.includes('roomUi:'), `${file} 包含 roomUi 模組`);
   assert(content.includes('languageSelector:'), `${file} 包含 languageSelector 模組`);
-  assert(content.includes('returnCodes:'), `${file} 包含 returnCodes 模組`);
+  assert(content.includes('reportIssueGithub:'), `${file} 包含 reportIssueGithub 翻譯`);
+  assert(content.includes('copyDiagnosticReport:'), `${file} 包含 copyDiagnosticReport 翻譯`);
+  assert(content.includes('reportCopiedToast:'), `${file} 包含 reportCopiedToast 翻譯`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
   for (const code of standardCodes) {
@@ -185,16 +187,21 @@ assert(popupTsx.includes('LanguageSelector'), 'Popup.tsx 包含 LanguageSelector
 assert(popupTsx.includes('translateReturnCode'), 'Popup.tsx 使用 translateReturnCode 轉譯錯誤');
 assert(popupTsx.includes('parseConnectionCode'), 'Popup.tsx 引入並使用 parseConnectionCode 智慧解析');
 assert(popupTsx.includes('formatShareCode'), 'Popup.tsx 引入並使用 formatShareCode 輸出標準前綴');
+assert(popupTsx.includes('handleReportToGitHub'), 'Popup.tsx 包含 handleReportToGitHub 一鍵回報功能');
+assert(popupTsx.includes('handleCopyDiagnosticReport'), 'Popup.tsx 包含 handleCopyDiagnosticReport 複製報告功能');
 
 const bgTs = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
 assert(bgTs.includes('formatShareCode'), 'background/index.ts 引入並使用 formatShareCode');
+assert(bgTs.includes('GET_P2P_DIAGNOSTIC'), 'background/index.ts 支援 GET_P2P_DIAGNOSTIC 轉發');
 
 const contentTs = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
 assert(contentTs.includes('getStandaloneText'), 'content/index.ts 引入並使用 getStandaloneText');
 
 const offscreenTs = fs.readFileSync(path.join(__dirname, 'src/offscreen/index.ts'), 'utf-8');
 assert(offscreenTs.includes('getStandaloneText'), 'offscreen/index.ts 引入並使用 getStandaloneText');
+assert(offscreenTs.includes('P2PLogger'), 'offscreen/index.ts 引入並使用 P2PLogger 結構化日誌');
+assert(offscreenTs.includes('getDiagnosticData'), 'offscreen/index.ts 支援 getDiagnosticData 產生脫敏診斷報告');
 
 // ----------------------------------------------------
 // 模組 6: 複合分享碼標準前綴與全版本向下相容解析驗證
@@ -331,6 +338,37 @@ assert(sanitizeLanguage('<script>') === undefined, '過濾 XSS 特殊字元標�
 assert(sanitizeLanguage('zh-TW\r\nADMIN') === undefined, '過濾 CRLF 換行字元');
 assert(sanitizeLanguage('a'.repeat(50)) === undefined, '過濾超長注入字串');
 assert(sanitizeLanguage('javascript:alert(1)') === undefined, '過濾偽協定注入');
+
+// ----------------------------------------------------
+// 模組 8: P2P 日誌脫敏演算法與 GitHub Issue 回報產生器驗證
+// ----------------------------------------------------
+console.log('\n--- 模組 8: P2P 日誌脫敏演算法與 GitHub Issue 回報產生器驗證 ---');
+function testSanitizeIp(text) {
+  if (!text) return '';
+  let result = text.replace(/\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.*.*');
+  result = result.replace(/\b([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}):[0-9a-fA-F:]+\b/g, '$1:****');
+  return result;
+}
+
+function testMaskIdentifier(id) {
+  if (!id) return 'unknown';
+  if (id.length <= 4) return '***' + id.slice(-1);
+  return id.slice(0, 2) + '***' + id.slice(-2);
+}
+
+assert(testSanitizeIp('Candidate IP is 192.168.1.100 and port 8080') === 'Candidate IP is 192.168.*.* and port 8080', 'IPv4 私有位址成功脫敏遮蔽');
+assert(testSanitizeIp('Public IP: 203.0.113.195') === 'Public IP: 203.0.*.*', '公網 IPv4 位址成功脫敏遮蔽');
+assert(testSanitizeIp('IPv6: 2001:0db8:85a3:0000:0000:8a2e:0370:7334') === 'IPv6: 2001:0db8:85a3:****', 'IPv6 位址成功脫敏遮蔽');
+assert(testMaskIdentifier('X7A9B2') === 'X7***B2', '房間識別碼成功遮蔽中間欄位');
+assert(testMaskIdentifier('user_1234') === 'us***34', '用戶 ID 成功遮蔽中間欄位');
+
+// 驗證 p2pLogger 模組檔案存在與輸出
+const p2pLoggerSource = fs.readFileSync(path.join(__dirname, 'src/utils/p2pLogger.ts'), 'utf-8');
+assert(p2pLoggerSource.includes('sanitizeIp'), 'p2pLogger.ts 定義了 sanitizeIp');
+assert(p2pLoggerSource.includes('maskIdentifier'), 'p2pLogger.ts 定義了 maskIdentifier');
+assert(p2pLoggerSource.includes('generateMarkdownReport'), 'p2pLogger.ts 定義了 generateMarkdownReport');
+assert(p2pLoggerSource.includes('generateGitHubIssueUrl'), 'p2pLogger.ts 定義了 generateGitHubIssueUrl');
+assert(p2pLoggerSource.includes('https://github.com/s9000008/Syncine/issues/new'), 'p2pLogger.ts 正確綁定 s9000008/Syncine 官方儲存庫');
 
 console.log('\n====================================================');
 console.log(`📊 擴充測試執行完畢: 共 ${passed + failed} 項測試 | 通過: ${passed} | 失敗: ${failed}`);

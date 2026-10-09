@@ -106,6 +106,9 @@ export const jaJP: TranslationSchema = {
     awaitingDesc: 'ホストの承認を待っています。承認されると自動的に同期再生が開始されます！',
     cancelAndBack: '✕ リクエストをキャンセルして戻る',
     defaultGuestName: (id: string) => `ゲスト (${id})`,
+    reportIssueGithub: '🛠️ GitHub に問題を報告',
+    copyDiagnosticReport: '📋 診断レポートをコピー',
+    reportCopiedToast: '診断レポートがクリップボードにコピーされました！',
   },
   languageSelector: {
     label: '言語 / Language',

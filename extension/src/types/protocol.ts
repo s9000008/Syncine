@@ -129,6 +129,8 @@ export interface ExtensionMessage {
     | 'OFFSCREEN_REJECT_JOIN_REQUEST'
     | 'OFFSCREEN_UPDATE_PERMISSION'
     | 'BG_P2P_GUEST_APPROVED'
+    | 'GET_P2P_DIAGNOSTIC'
+    | 'OFFSCREEN_GET_DIAGNOSTIC'
     // 相容性保留
     | 'BG_SERVERLESS_CREATE_OFFER'
     | 'BG_SERVERLESS_ACCEPT_OFFER'
@@ -137,6 +139,26 @@ export interface ExtensionMessage {
     | 'OFFSCREEN_SERVERLESS_ACCEPT_OFFER'
     | 'OFFSCREEN_SERVERLESS_ACCEPT_ANSWER';
   payload?: any;
+}
+
+export interface P2PLogEvent {
+  timestamp: number;
+  stage: 'INIT' | 'STUN_GATHER' | 'SIGNALING' | 'DATA_CHANNEL' | 'AUDIT' | 'CONNECTED' | 'RETRY' | 'DISCONNECTED' | 'ERROR';
+  level: 'INFO' | 'WARN' | 'ERROR';
+  event: string;
+  details?: Record<string, any>;
+}
+
+export interface P2PDiagnosticData {
+  version: string;
+  roomId?: string;
+  role?: 'HOST' | 'GUEST';
+  status: P2PStatus;
+  retryCount: number;
+  candidatesSummary: { host: number; srflx: number; relay: number };
+  recentLogs: P2PLogEvent[];
+  markdownReport: string;
+  githubIssueUrl: string;
 }
 
 /**

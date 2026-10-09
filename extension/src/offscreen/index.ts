@@ -1,6 +1,7 @@
 import { Peer, DataConnection } from 'peerjs';
-import { P2PStatus, ExtensionMessage, JoinRequest } from '../types/protocol';
+import { P2PStatus, ExtensionMessage, JoinRequest, P2PDiagnosticData } from '../types/protocol';
 import { getStandaloneText } from '../locales';
+import { P2PLogger } from '../utils/p2pLogger';
 
 console.log('[Syncine Offscreen] WebRTC Offscreen Document (PeerJS Engine) 已啟動');
 
@@ -50,6 +51,10 @@ class PeerJSWebRTCManager {
   private activeConnections: Map<string, DataConnection> = new Map();
   private hostCurrentUrl?: string;
 
+  // 診斷日誌與重試追蹤
+  private logger = P2PLogger.getInstance();
+  private retryCount: number = 0;
+
   // 觀眾專屬：與房主的直連通道
   private guestConnection: DataConnection | null = null;
   private guestPollTimer?: ReturnType<typeof setInterval>;
@@ -59,6 +64,32 @@ class PeerJSWebRTCManager {
 
   constructor() {
     this.start30sHeartbeat();
+  }
+
+  public getDiagnosticData(errorCode?: string): P2PDiagnosticData {
+    const report = this.logger.generateMarkdownReport({
+      version: 'v2.2.0',
+      roomId: this.roomId,
+      role: this.role || undefined,
+      status: this.status,
+      retryCount: this.retryCount,
+      errorCode
+    });
+    const githubUrl = this.logger.generateGitHubIssueUrl({
+      errorCode,
+      markdownReport: report
+    });
+    return {
+      version: 'v2.2.0',
+      roomId: this.roomId,
+      role: this.role || undefined,
+      status: this.status,
+      retryCount: this.retryCount,
+      candidatesSummary: this.logger.getCandidatesSummary(),
+      recentLogs: this.logger.getRecentLogs(30),
+      markdownReport: report,
+      githubIssueUrl: githubUrl
+    };
   }
 
   public updatePermission(allowGuestControl: boolean) {
@@ -175,6 +206,7 @@ class PeerJSWebRTCManager {
       // 產生 6 碼英數字代碼 (密碼學安全隨機亂數 CSPRNG)
       const roomId = generateSecureRoomCode(6);
       this.roomId = roomId;
+      this.logger.record('INIT', '房主建立房間', 'INFO', { roomId });
 
       console.log(`[Syncine P2P Host] 正在向信令網路註冊房間 ID: ${roomId}...`);
       const peerId = `syncine-${roomId}`;
@@ -183,6 +215,7 @@ class PeerJSWebRTCManager {
 
       peer.on('open', (id) => {
         console.log(`[Syncine P2P Host] 🎉 房間建立成功！房間代碼: ${roomId} (PeerID: ${id})`);
+        this.logger.record('SIGNALING', 'PeerJS 信令服務器註冊就緒', 'INFO', { peerId: id });
         this.updateStatus('CONNECTED');
         resolve({ roomId });
       });
@@ -348,10 +381,13 @@ class PeerJSWebRTCManager {
       this.userId = userId;
       this.role = 'GUEST';
       this.roomId = roomId.toUpperCase();
+      this.retryCount = retryCount;
       this.updateStatus('CONNECTING');
+      this.logger.record('INIT', '觀眾發起加入房間', 'INFO', { roomId: this.roomId, retryCount });
 
       const MAX_RETRIES = 2;
       const handleRetry = (reason: string, error: Error) => {
+        this.logger.record('RETRY', `退避重試 (${reason})`, 'WARN', { retryCount: retryCount + 1, error: error.message });
         if (retryCount < MAX_RETRIES) {
           const delayMs = retryCount === 0 ? 1500 : 3000;
           console.warn(`[Syncine P2P Guest] 握手/ICE 未就緒 (${reason})，正在啟動第 ${retryCount + 1}/${MAX_RETRIES} 次自動重試 (退避 ${delayMs}ms)...`);
@@ -363,6 +399,7 @@ class PeerJSWebRTCManager {
           }, delayMs);
         } else {
           console.error(`[Syncine P2P Guest] 重試已達上限 (${MAX_RETRIES} 次)，P2P 穿透失敗，建議改用官方伺服器中繼模式`);
+          this.logger.record('ERROR', '重試次數已達上限，P2P 穿透失敗', 'ERROR');
           this.close();
           reject(error);
         }
@@ -635,6 +672,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, _sender, sendRe
     case 'OFFSCREEN_CLOSE_P2P':
       manager.close();
       sendResponse({ success: true });
+      break;
+
+    case 'OFFSCREEN_GET_DIAGNOSTIC':
+      sendResponse({ success: true, data: manager.getDiagnosticData(payload?.errorCode) });
       break;
   }
   return true;

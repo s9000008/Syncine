@@ -106,6 +106,9 @@ export const enUS: TranslationSchema = {
     awaitingDesc: 'Waiting for host approval. Streaming will sync seamlessly once approved!',
     cancelAndBack: '✕ Cancel & Return',
     defaultGuestName: (id: string) => `Guest (${id})`,
+    reportIssueGithub: '🛠️ Report Issue to GitHub',
+    copyDiagnosticReport: '📋 Copy Diagnostic Report',
+    reportCopiedToast: 'Diagnostic report copied to clipboard!',
   },
   languageSelector: {
     label: 'Language',

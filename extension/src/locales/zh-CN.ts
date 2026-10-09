@@ -106,6 +106,9 @@ export const zhCN: TranslationSchema = {
     awaitingDesc: '正在等待房主确认同意，房主批准后双方将自动无缝连接开播！',
     cancelAndBack: '✕ 取消申请并返回',
     defaultGuestName: (id: string) => `访客 (${id})`,
+    reportIssueGithub: '🛠️ 反馈问题至 GitHub',
+    copyDiagnosticReport: '📋 复制诊断报告',
+    reportCopiedToast: '诊断报告已复制到剪贴板！',
   },
   languageSelector: {
     label: '语言 / Language',

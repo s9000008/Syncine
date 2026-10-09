@@ -43,6 +43,8 @@ export default function Popup() {
     isLegacy: boolean;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastErrorCode, setLastErrorCode] = useState<string | null>(null);
+  const [diagnosticToast, setDiagnosticToast] = useState<boolean>(false);
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
   const [serverHealth, setServerHealth] = useState<'CHECKING' | 'ONLINE' | 'OFFLINE'>('CHECKING');
 
@@ -163,7 +165,9 @@ export default function Popup() {
           setRoomState(res.roomState);
           setCompositeCode(res.compositeCode);
         } else {
-          setErrorMessage(translateReturnCode(res?.code || res?.error, t.returnCodes.ERR_P2P_SIGNAL_FAILED));
+          const code = res?.code || res?.error || 'ERR_P2P_SIGNAL_FAILED';
+          setLastErrorCode(code);
+          setErrorMessage(translateReturnCode(code, t.returnCodes.ERR_P2P_SIGNAL_FAILED));
         }
       }
     );
@@ -224,7 +228,9 @@ export default function Popup() {
         if (res?.success) {
           setRoomState(res.roomState);
         } else {
-          setErrorMessage(translateReturnCode(res?.code || res?.error, t.returnCodes.ERR_INVALID_CODE));
+          const code = res?.code || res?.error || 'ERR_INVALID_CODE';
+          setLastErrorCode(code);
+          setErrorMessage(translateReturnCode(code, t.returnCodes.ERR_INVALID_CODE));
         }
       }
     );
@@ -292,6 +298,62 @@ export default function Popup() {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const fetchDiagnosticReport = (callback: (data: { markdownReport: string; githubIssueUrl: string }) => void) => {
+    safeSendMessage(
+      {
+        type: 'GET_P2P_DIAGNOSTIC',
+        payload: { errorCode: lastErrorCode || 'ERR_P2P_TIMEOUT' }
+      },
+      (res) => {
+        if (res?.success && res.data) {
+          callback(res.data);
+        } else {
+          // 本機脫敏診斷備援 (Fallback)
+          const fallbackReport = [
+            '### 🛠️ Syncine 連線診斷報告 (Diagnostic Report)',
+            `- **擴充套件版本**: Syncine ${getVersion()} (Chrome MV3)`,
+            `- **連線模式**: ${connectionMode}`,
+            `- **錯誤代碼**: ${lastErrorCode || 'ERR_UNKNOWN'}`,
+            `- **時間戳**: ${new Date().toISOString()}`,
+            '',
+            `> 💡 錯誤詳情: ${errorMessage || '連線逾時或中斷'}`
+          ].join('\n');
+          const repoBase = 'https://github.com/s9000008/Syncine/issues/new';
+          const query = new URLSearchParams({
+            title: `[Connection Issue] ${lastErrorCode || 'ERR_UNKNOWN'}`,
+            labels: 'bug,p2p',
+            body: fallbackReport
+          });
+          callback({
+            markdownReport: fallbackReport,
+            githubIssueUrl: `${repoBase}?${query.toString()}`
+          });
+        }
+      }
+    );
+  };
+
+  const handleReportToGitHub = () => {
+    fetchDiagnosticReport(({ markdownReport, githubIssueUrl }) => {
+      // 1. 同步複製至剪貼簿 (防止網址過長被瀏覽器截斷)
+      navigator.clipboard.writeText(markdownReport).catch(() => {});
+      // 2. 開啟 GitHub Issue 預填網址
+      chrome.tabs?.create?.({ url: githubIssueUrl });
+      // 3. 顯示 Toast 反饋
+      setDiagnosticToast(true);
+      setTimeout(() => setDiagnosticToast(false), 3000);
+    });
+  };
+
+  const handleCopyDiagnosticReport = () => {
+    fetchDiagnosticReport(({ markdownReport }) => {
+      navigator.clipboard.writeText(markdownReport).then(() => {
+        setDiagnosticToast(true);
+        setTimeout(() => setDiagnosticToast(false), 2500);
+      });
+    });
   };
 
   const pendingRequests = roomState?.pendingJoinRequests || [];
@@ -406,13 +468,44 @@ export default function Popup() {
           <span className="truncate">{t.tabStatus.singleTabHint}</span>
         </div>
 
-        {/* 錯誤提示 */}
+        {/* 錯誤提示與 GitHub Issue 回報 */}
         {errorMessage && (
-          <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs flex items-center justify-between">
-            <span className="leading-relaxed">{errorMessage}</span>
-            <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-300 px-1 font-bold">
-              ✕
-            </button>
+          <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs space-y-2 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <span className="leading-relaxed font-medium">{errorMessage}</span>
+              <button
+                onClick={() => setErrorMessage(null)}
+                className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 一鍵回報至 GitHub 與複製診斷按鈕 */}
+            <div className="pt-1.5 border-t border-red-500/20 flex items-center gap-2">
+              <button
+                onClick={handleReportToGitHub}
+                className="flex-1 py-1.5 px-2 bg-red-950/60 hover:bg-red-900/60 text-red-200 border border-red-500/40 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <ExternalLink className="w-3 h-3 text-red-300" />
+                <span>{t.roomUi.reportIssueGithub}</span>
+              </button>
+              <button
+                onClick={handleCopyDiagnosticReport}
+                className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+                title={t.roomUi.copyDiagnosticReport}
+              >
+                <Copy className="w-3 h-3 text-slate-400" />
+                <span>{t.roomUi.copyDiagnosticReport}</span>
+              </button>
+            </div>
+
+            {diagnosticToast && (
+              <div className="text-[10px] text-emerald-400 bg-emerald-950/80 p-1.5 rounded border border-emerald-500/40 text-center animate-fade-in flex items-center justify-center gap-1 font-semibold">
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span>{t.roomUi.reportCopiedToast}</span>
+              </div>
+            )}
           </div>
         )}
 

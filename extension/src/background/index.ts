@@ -935,6 +935,25 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       break;
     }
 
+    case 'GET_P2P_DIAGNOSTIC': {
+      ensureOffscreenDocument()
+        .then(() => {
+          chrome.runtime.sendMessage(
+            {
+              type: 'OFFSCREEN_GET_DIAGNOSTIC',
+              payload: { errorCode: payload?.errorCode }
+            } as ExtensionMessage,
+            (res) => {
+              sendResponse(res || { success: false });
+            }
+          );
+        })
+        .catch((err) => {
+          sendResponse({ success: false, error: err.message });
+        });
+      return true;
+    }
+
     // ----------------------------------------------------
     // Offscreen WebRTC 消息與信令轉發
     // ----------------------------------------------------
