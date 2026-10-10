@@ -28,7 +28,15 @@ export function sanitizeDetails(details?: Record<string, any>): Record<string, a
   if (!details) return undefined;
   const sanitized: Record<string, any> = {};
   for (const [k, v] of Object.entries(details)) {
-    if (k.toLowerCase().includes('token') || k.toLowerCase().includes('auth') || k.toLowerCase().includes('key')) {
+    const lower = k.toLowerCase();
+    if (
+      lower.includes('token') ||
+      lower.includes('auth') ||
+      lower.includes('key') ||
+      lower.includes('pass') ||
+      lower.includes('secret') ||
+      lower.includes('cred')
+    ) {
       sanitized[k] = '[REDACTED]';
     } else if (typeof v === 'string') {
       sanitized[k] = sanitizeIp(v);
