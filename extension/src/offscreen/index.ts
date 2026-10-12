@@ -67,8 +67,11 @@ class PeerJSWebRTCManager {
   }
 
   public getDiagnosticData(errorCode?: string): P2PDiagnosticData {
+    const version = (typeof chrome !== 'undefined' && chrome?.runtime?.getManifest?.()?.version)
+      ? `v${chrome.runtime.getManifest().version}`
+      : 'v2.3.0';
     const report = this.logger.generateMarkdownReport({
-      version: 'v2.2.0',
+      version,
       roomId: this.roomId,
       role: this.role || undefined,
       status: this.status,
@@ -80,7 +83,7 @@ class PeerJSWebRTCManager {
       markdownReport: report
     });
     return {
-      version: 'v2.2.0',
+      version,
       roomId: this.roomId,
       role: this.role || undefined,
       status: this.status,

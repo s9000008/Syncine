@@ -29,7 +29,7 @@ app.use(express.json());
 
 // 健康檢查 Endpoint
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.2.0' });
+  res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.3.0' });
 });
 
 const server = http.createServer(app);

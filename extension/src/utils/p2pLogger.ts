@@ -121,7 +121,7 @@ export class P2PLogger {
     errorCode?: string;
   }): string {
     const {
-      version = 'v2.2.0',
+      version = 'v2.3.0',
       roomId,
       role = 'GUEST',
       status = 'DISCONNECTED',

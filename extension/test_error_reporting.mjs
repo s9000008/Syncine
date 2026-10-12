@@ -58,7 +58,7 @@ assert(
 assert(sanitizeIp('') === '', '空字串安全返回空字串');
 assert(sanitizeIp(null) === '', 'null 安全返回空字串');
 assert(sanitizeIp(undefined) === '', 'undefined 安全返回空字串');
-assert(sanitizeIp('Syncine v2.2.0 is running') === 'Syncine v2.2.0 is running', '非 IP 之版本號不被誤殺');
+assert(sanitizeIp('Syncine v2.3.0 is running') === 'Syncine v2.3.0 is running', '非 IP 之版本號不被誤殺');
 assert(sanitizeIp('Video buffer: 12.34s') === 'Video buffer: 12.34s', '非 IP 之小數點數字不被誤殺');
 
 // ----------------------------------------------------
@@ -145,7 +145,7 @@ assert(currentLogs[0].event === 'Event packet 40', '隊列前端為最早保留�
 console.log('\n--- 測試套件 5: Markdown 診斷報告生成與隱私驗證 ---');
 
 const markdownReport = logger.generateMarkdownReport({
-  version: 'v2.2.0',
+  version: 'v2.3.0',
   roomId: 'X7A9B2',
   role: 'GUEST',
   status: 'DISCONNECTED',
@@ -154,7 +154,7 @@ const markdownReport = logger.generateMarkdownReport({
 });
 
 assert(markdownReport.includes('### 🛠️ Syncine P2P 連線診斷報告'), '包含報告主標題');
-assert(markdownReport.includes('Syncine v2.2.0 (Chrome MV3)'), '包含正確版本號');
+assert(markdownReport.includes('Syncine v2.3.0 (Chrome MV3)'), '包含正確版本號');
 assert(markdownReport.includes('WebRTC P2P (PeerJS DataChannel)'), '包含正確連線模式');
 assert(markdownReport.includes('GUEST'), '包含身分角色');
 assert(markdownReport.includes('X7***B2'), '包含已遮蔽目標房號 (無未遮蔽原始房號)');
@@ -215,7 +215,7 @@ console.log('\n--- 測試套件 7: Popup 本機脫敏備援邏輯 (Fallback) ---
 function generatePopupFallback(lastErrorCode, connectionMode, errorMessage) {
   const fallbackReport = [
     '### 🛠️ Syncine 連線診斷報告 (Diagnostic Report)',
-    `- **擴充套件版本**: Syncine v2.2.0 (Chrome MV3)`,
+    `- **擴充套件版本**: Syncine v2.3.0 (Chrome MV3)`,
     `- **連線模式**: ${connectionMode}`,
     `- **錯誤代碼**: ${lastErrorCode || 'ERR_UNKNOWN'}`,
     `- **時間戳**: ${new Date().toISOString()}`,
