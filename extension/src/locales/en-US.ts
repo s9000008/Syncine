@@ -1,10 +1,11 @@
 import { TranslationSchema } from './schema';
+import { APP_VERSION } from '../version';
 
 export const enUS: TranslationSchema = {
   app: {
     name: 'Syncine',
     tagline: 'Remote Watch Party for Web Videos',
-    defaultVersion: 'v2.3.0',
+    defaultVersion: APP_VERSION,
     engineLabel: 'Syncine Engine • Supports YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },

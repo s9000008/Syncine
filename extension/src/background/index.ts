@@ -423,6 +423,23 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
       }
     });
 
+    // 接收 HOST_CHANGED (原房主離線逾時轉移廣播，同步校準房間內成員之房主狀態)
+    socket.on('HOST_CHANGED', (res: { newHostUserId?: string }) => {
+      console.log('[Background] 收到 HOST_CHANGED 房主轉移通知:', sanitizeLog(res?.newHostUserId));
+      if (currentRoomState && res?.newHostUserId) {
+        currentRoomState.isHost = res.newHostUserId === userId;
+        persistRoomSession(currentRoomState);
+        broadcastToVideoTabs({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: currentRoomState
+        });
+        chrome.runtime.sendMessage({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: currentRoomState
+        }).catch(() => {});
+      }
+    });
+
     // 監聽伺服器錯誤（若重連回魂時房間已被銷毀或過期）
     socket.on('ERROR', (err: any) => {
       console.warn('[Background] 收到伺服器錯誤通知:', err);
@@ -639,7 +656,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   });
                   sendResponse({ success: true, roomId: res.roomId, roomState: currentRoomState });
                 } else {
-                  sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
+                  const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED';
+                  sendResponse({ success: false, error: errCode, code: errCode });
                 }
               }
             );
@@ -1012,11 +1030,19 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
 
     case 'CS_ROOM_STATE_CHANGED': {
-      if (payload) {
+      if (payload === null) {
+        currentRoomState = null;
+        persistRoomSession(null);
+        broadcastToVideoTabs({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: null
+        });
+      } else if (payload) {
         currentRoomState = {
           ...(currentRoomState || {}),
           ...payload
         };
+        persistRoomSession(currentRoomState);
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
           payload: currentRoomState

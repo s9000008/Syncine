@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "zh_TW",
   "name": "__MSG_appName__",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "description": "__MSG_appDesc__",
   "permissions": [
     "storage",
@@ -29,7 +29,9 @@
         "https://www.bilibili.com/video/*",
         "https://www.bilibili.com/bangumi/play/*"
       ],
-      "js": ["src/content/index.ts"],
+      "js": [
+        "src/content/index.ts"
+      ],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_end"

@@ -1,10 +1,11 @@
 import { TranslationSchema } from './schema';
+import { APP_VERSION } from '../version';
 
 export const jaJP: TranslationSchema = {
   app: {
     name: 'Syncine (同映)',
     tagline: 'リモート動画同時視聴 (Watch Party)',
-    defaultVersion: 'v2.3.0',
+    defaultVersion: APP_VERSION,
     engineLabel: 'Syncine Engine • YouTube / Bilibili 対応',
     supportedPlatforms: 'YouTube / Bilibili',
   },

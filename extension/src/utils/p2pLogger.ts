@@ -1,4 +1,5 @@
 import { P2PLogEvent, P2PDiagnosticData, P2PStatus } from '../types/protocol';
+import { APP_VERSION } from '../version';
 
 /**
  * IP 位址遮蔽與隱私清毒 (Zero-Leakage Privacy Sanitizer)
@@ -22,7 +23,7 @@ export function maskIdentifier(id?: string): string {
 }
 
 /**
- * 脫敏詳細細節物件 (防洩漏 Token 與真實 IP)
+ * 脫敏詳細細節物件 (防洩漏 Token、識別碼與真實 IP)
  */
 export function sanitizeDetails(details?: Record<string, any>): Record<string, any> | undefined {
   if (!details) return undefined;
@@ -38,6 +39,11 @@ export function sanitizeDetails(details?: Record<string, any>): Record<string, a
       lower.includes('cred')
     ) {
       sanitized[k] = '[REDACTED]';
+    } else if (
+      (lower === 'roomid' || lower === 'peerid' || lower === 'userid' || lower === 'requestid') &&
+      typeof v === 'string'
+    ) {
+      sanitized[k] = maskIdentifier(v);
     } else if (typeof v === 'string') {
       sanitized[k] = sanitizeIp(v);
     } else if (typeof v === 'object' && v !== null) {
@@ -121,7 +127,7 @@ export class P2PLogger {
     errorCode?: string;
   }): string {
     const {
-      version = 'v2.3.0',
+      version = APP_VERSION,
       roomId,
       role = 'GUEST',
       status = 'DISCONNECTED',

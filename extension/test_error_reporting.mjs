@@ -24,13 +24,14 @@ console.log('====================================================\n');
 
 import { execSync } from 'child_process';
 
-// 自動編譯 p2pLogger.ts 到 dist_test/p2pLogger.mjs (零相依執行)
+const extPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+const CURRENT_APP_VERSION = `v${extPkg.version}`;
+
+// 自動編譯 p2pLogger.ts 到 dist_test/p2pLogger.mjs (零相依執行，確保每次同步最新原始碼與版本號)
 const p2pModulePath = path.join(__dirname, 'dist_test/p2pLogger.mjs');
-if (!fs.existsSync(p2pModulePath)) {
-  const srcPath = path.join(__dirname, 'src/utils/p2pLogger.ts');
-  fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
-  execSync(`npx esbuild "${srcPath}" --format=esm --outfile="${p2pModulePath}"`, { stdio: 'pipe' });
-}
+const srcPath = path.join(__dirname, 'src/utils/p2pLogger.ts');
+fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
+execSync(`npx esbuild "${srcPath}" --bundle --format=esm --outfile="${p2pModulePath}"`, { stdio: 'pipe' });
 
 const { sanitizeIp, maskIdentifier, sanitizeDetails, P2PLogger } = await import(
   `file://${p2pModulePath.replace(/\\/g, '/')}`
@@ -145,7 +146,6 @@ assert(currentLogs[0].event === 'Event packet 40', '隊列前端為最早保留�
 console.log('\n--- 測試套件 5: Markdown 診斷報告生成與隱私驗證 ---');
 
 const markdownReport = logger.generateMarkdownReport({
-  version: 'v2.3.0',
   roomId: 'X7A9B2',
   role: 'GUEST',
   status: 'DISCONNECTED',
@@ -154,7 +154,7 @@ const markdownReport = logger.generateMarkdownReport({
 });
 
 assert(markdownReport.includes('### 🛠️ Syncine P2P 連線診斷報告'), '包含報告主標題');
-assert(markdownReport.includes('Syncine v2.3.0 (Chrome MV3)'), '包含正確版本號');
+assert(markdownReport.includes(`Syncine ${CURRENT_APP_VERSION} (Chrome MV3)`), `包含正確動態版本號 (${CURRENT_APP_VERSION})`);
 assert(markdownReport.includes('WebRTC P2P (PeerJS DataChannel)'), '包含正確連線模式');
 assert(markdownReport.includes('GUEST'), '包含身分角色');
 assert(markdownReport.includes('X7***B2'), '包含已遮蔽目標房號 (無未遮蔽原始房號)');
@@ -215,7 +215,7 @@ console.log('\n--- 測試套件 7: Popup 本機脫敏備援邏輯 (Fallback) ---
 function generatePopupFallback(lastErrorCode, connectionMode, errorMessage) {
   const fallbackReport = [
     '### 🛠️ Syncine 連線診斷報告 (Diagnostic Report)',
-    `- **擴充套件版本**: Syncine v2.3.0 (Chrome MV3)`,
+    `- **擴充套件版本**: Syncine ${CURRENT_APP_VERSION} (Chrome MV3)`,
     `- **連線模式**: ${connectionMode}`,
     `- **錯誤代碼**: ${lastErrorCode || 'ERR_UNKNOWN'}`,
     `- **時間戳**: ${new Date().toISOString()}`,
@@ -290,6 +290,41 @@ for (const loc of locales) {
   assert(content.includes('copyDiagnosticReport'), `${loc} 定義了 copyDiagnosticReport 複製按鈕文案`);
   assert(content.includes('reportCopiedToast'), `${loc} 定義了 reportCopiedToast 提示文案`);
 }
+
+// ----------------------------------------------------
+// 測試套件 10: 識別碼欄位脫敏、錯誤碼透傳與拒絕入房免回報按鈕防護
+// ----------------------------------------------------
+console.log('\n--- 測試套件 10: 識別碼遮蔽、錯誤碼透傳與 ERR_AUDIT_REJECTED 免回報按鈕驗證 ---');
+
+const detailWithIds = sanitizeDetails({
+  roomId: 'WNM6RQ',
+  peerId: 'syncine-WNM6RQ',
+  userId: 'user_987654',
+  requestId: 'req_123456',
+  retryCount: 0
+});
+assert(detailWithIds.roomId === 'WN***RQ', 'sanitizeDetails 自動遮蔽 roomId 為 WN***RQ');
+assert(detailWithIds.peerId === 'sy***RQ', 'sanitizeDetails 自動遮蔽 peerId 為 sy***RQ');
+assert(detailWithIds.userId === 'us***54', 'sanitizeDetails 自動遮蔽 userId 為 us***54');
+assert(detailWithIds.requestId === 're***56', 'sanitizeDetails 自動遮蔽 requestId 為 re***56');
+
+const popupSource = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+assert(
+  popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'"),
+  'Popup.tsx 在 ERR_AUDIT_REJECTED (被拒絕加入 P2P) 時隱藏回報與複製診斷按鈕'
+);
+assert(
+  popupSource.includes("msg.type === 'CS_CONNECTION_STATUS_CHANGED'") &&
+    popupSource.includes('setLastErrorCode(code)'),
+  'Popup.tsx 收到 CS_CONNECTION_STATUS_CHANGED 時同步寫入 lastErrorCode'
+);
+
+const bgSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+assert(
+  bgSource.includes("const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED'") &&
+    bgSource.includes('sendResponse({ success: false, error: errCode, code: errCode })'),
+  'background/index.ts 完整保留 Offscreen 回傳之具體錯誤碼 (如 ERR_ROOM_NOT_FOUND)'
+);
 
 // ----------------------------------------------------
 // 總結報告

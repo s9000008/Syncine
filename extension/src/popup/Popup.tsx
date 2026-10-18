@@ -99,7 +99,9 @@ export default function Popup() {
         }
       } else if (msg.type === 'CS_CONNECTION_STATUS_CHANGED') {
         if (msg.payload?.error || msg.payload?.code) {
-          setErrorMessage(translateReturnCode(msg.payload.code || msg.payload.error));
+          const code = msg.payload.code || msg.payload.error;
+          setLastErrorCode(code);
+          setErrorMessage(translateReturnCode(code));
         }
       }
     };
@@ -133,11 +135,13 @@ export default function Popup() {
   const handleCreateRoom = () => {
     setLoading(true);
     setErrorMessage(null);
+    setLastErrorCode(null);
 
     let targetServerUrl = DEFAULT_SERVER_URL;
     if (connectionMode === 'CUSTOM_IP') {
       let input = customServerUrl.trim();
       if (!input) {
+        setLastErrorCode('ERR_CUSTOM_IP_REQUIRED');
         setErrorMessage(translateReturnCode('ERR_CUSTOM_IP_REQUIRED'));
         setLoading(false);
         return;
@@ -209,12 +213,14 @@ export default function Popup() {
   const handleJoinRoom = () => {
     const input = shareCodeInput.trim();
     if (!input) {
+      setLastErrorCode('ERR_INVALID_CODE');
       setErrorMessage(translateReturnCode('ERR_INVALID_CODE'));
       return;
     }
 
     setLoading(true);
     setErrorMessage(null);
+    setLastErrorCode(null);
 
     const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
 
@@ -474,37 +480,44 @@ export default function Popup() {
             <div className="flex items-start justify-between gap-2">
               <span className="leading-relaxed font-medium">{errorMessage}</span>
               <button
-                onClick={() => setErrorMessage(null)}
+                onClick={() => {
+                  setErrorMessage(null);
+                  setLastErrorCode(null);
+                }}
                 className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            {/* 一鍵回報至 GitHub 與複製診斷按鈕 */}
-            <div className="pt-1.5 border-t border-red-500/20 flex items-center gap-2">
-              <button
-                onClick={handleReportToGitHub}
-                className="flex-1 py-1.5 px-2 bg-red-950/60 hover:bg-red-900/60 text-red-200 border border-red-500/40 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <ExternalLink className="w-3 h-3 text-red-300" />
-                <span>{t.roomUi.reportIssueGithub}</span>
-              </button>
-              <button
-                onClick={handleCopyDiagnosticReport}
-                className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
-                title={t.roomUi.copyDiagnosticReport}
-              >
-                <Copy className="w-3 h-3 text-slate-400" />
-                <span>{t.roomUi.copyDiagnosticReport}</span>
-              </button>
-            </div>
+            {/* 一鍵回報至 GitHub 與複製診斷按鈕 (房主拒絕入房申請屬正常權限決策，不顯示回報按鈕) */}
+            {lastErrorCode !== 'ERR_AUDIT_REJECTED' && (
+              <>
+                <div className="pt-1.5 border-t border-red-500/20 flex items-center gap-2">
+                  <button
+                    onClick={handleReportToGitHub}
+                    className="flex-1 py-1.5 px-2 bg-red-950/60 hover:bg-red-900/60 text-red-200 border border-red-500/40 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                  >
+                    <ExternalLink className="w-3 h-3 text-red-300" />
+                    <span>{t.roomUi.reportIssueGithub}</span>
+                  </button>
+                  <button
+                    onClick={handleCopyDiagnosticReport}
+                    className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+                    title={t.roomUi.copyDiagnosticReport}
+                  >
+                    <Copy className="w-3 h-3 text-slate-400" />
+                    <span>{t.roomUi.copyDiagnosticReport}</span>
+                  </button>
+                </div>
 
-            {diagnosticToast && (
-              <div className="text-[10px] text-emerald-400 bg-emerald-950/80 p-1.5 rounded border border-emerald-500/40 text-center animate-fade-in flex items-center justify-center gap-1 font-semibold">
-                <Check className="w-3 h-3 text-emerald-400" />
-                <span>{t.roomUi.reportCopiedToast}</span>
-              </div>
+                {diagnosticToast && (
+                  <div className="text-[10px] text-emerald-400 bg-emerald-950/80 p-1.5 rounded border border-emerald-500/40 text-center animate-fade-in flex items-center justify-center gap-1 font-semibold">
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span>{t.roomUi.reportCopiedToast}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -545,6 +558,7 @@ export default function Popup() {
                 onClick={() => {
                   setActiveTab('create');
                   setErrorMessage(null);
+                  setLastErrorCode(null);
                 }}
                 className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   activeTab === 'create'
@@ -560,6 +574,7 @@ export default function Popup() {
                 onClick={() => {
                   setActiveTab('join');
                   setErrorMessage(null);
+                  setLastErrorCode(null);
                 }}
                 className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   activeTab === 'join'

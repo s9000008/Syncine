@@ -63,7 +63,7 @@
 
 ### 3.1 選項一：預設連線模式 (Default Relay Mode)
 * **定位**：適合一般大眾使用者，開箱即用、零配置。
-* **連線端點**：套件預設連線至伺服器（本地端為 `http://localhost:3000`，生產環境為官方託管端點 `https://api.syncine-official.com`）。
+* **連線端點**：套件預設透過環境變數 `VITE_DEFAULT_SERVER_URL` 連線至伺服器（本地開發端為 `http://localhost:3000`，生產環境預設為官方託管端點 `https://syncine.fly.dev`）。
 * **傳輸機制**：WebSocket (Socket.IO) 集中式房間中繼轉發。
 * **房間代碼**：標準 6 碼代碼（如 `X7A9B2`）或含前綴之 `DEF:X7A9B2`。
 * **優點**：無需任何額外配置，即使處於嚴格 NAT 或行動網路皆可順暢連線。
@@ -190,7 +190,7 @@ function verifyAndRedirect(targetUrl) {
 ### 5.2 房主權限控制與雙重攔截機制
 房主控制面板設有 `[允許觀眾操作播放器]`（`allow_guest_control: boolean`）開關（預設為關閉）。
 * **當開關為 False（禁用觀眾操作）時**：
-    1. **前端防線**：當 Guest 嘗試點擊或操作播放器時，Content Script 捕捉到本地事件，立即將影片狀態還原或覆蓋防點擊層阻止操作。
+    1. **前端防線**：當 Guest 嘗試點擊或操作播放器（包含播放 `play`、暫停 `pause` 與拖曳進度條 `seeking`）時，Content Script 捕捉到本地事件，立即將影片播放狀態與時間軸（回滾至 `lastSyncedTime`）強制還原，阻止私自快轉或暫停脫節。
     2. **後端/通道防線（核心安全）**：
        - **伺服器模式**：若 Guest 強行發送 `SYNC_STATE` 請求，後端伺服器校驗其 Socket 身分。若發送者非 Host，後端**直接丟棄（Drop）該請求**。
        - **P2P 模式**：房主端（Host Peer）在 DataChannel 監聽來自 Guest 的事件時，若 `allow_guest_control === false`，房主直接丟棄該訊息，不予本地執行與轉發。
@@ -357,8 +357,8 @@ export interface TogglePermissionMsg {
     3. **友好引導降級**：重試耗盡仍無法打洞穿透時，回報 `ERR_P2P_TIMEOUT` 並引導使用者切換至預設伺服器或自架主機模式。
 * [x] **P2P 結構化診斷日誌與 GitHub Issue 一鍵回報 (P1 觀測與隱私安全)**：
     1. **環形記憶體日誌緩衝區**：Offscreen Document 維護長度固定為 60 筆之記憶體 FIFO 佇列，嚴格追蹤 PeerJS 初始化、STUN 探測、信令握手、DataChannel 開啟與重試階段之結構化事件。
-    2. **開源隱私零洩漏脫敏 (Privacy First)**：匯出前強制將所有 IPv4（遮蔽後兩段如 `192.168.*.*`）、IPv6、Token 與私有代碼進行遮蔽清毒，僅記錄 Candidate 類型（host/srflx/relay）與協定。
-    3. **GitHub Issue 預填與剪貼簿備援**：連線異常時於 Popup 動態呈現「回報問題至 GitHub」按鈕，點擊後自動生成結構化 Markdown 報告、預填 Issue 標題/標籤並新開分頁，同時複製至剪貼簿，兼具極致安全性與無摩擦回報體驗。
+    2. **開源隱私零洩漏脫敏 (Privacy First)**：匯出前強制將所有 IPv4（遮蔽後兩段如 `192.168.*.*`）、IPv6、Token 與識別碼（`roomId`、`peerId`、`userId`、`requestId` 遮蔽中間碼如 `WN***RQ`）進行遮蔽清毒，僅記錄 Candidate 類型（host/srflx/relay）與協定。
+    3. **GitHub Issue 預填與剪貼簿備援**：連線異常時於 Popup 動態呈現「回報問題至 GitHub」與「複製診斷報告」按鈕（若為房主主動拒絕入房申請 `ERR_AUDIT_REJECTED`，屬正常權限決策，不提供錯誤回報按鈕），點擊後自動生成結構化 Markdown 報告、預填 Issue 標題/標籤並新開分頁，同時複製至剪貼簿，兼具極致安全性與無摩擦回報體驗。
 * [x] **廣告干擾隔離**：在 YouTube 等平台廣告播放期間，嚴格暫停發送與接收同步事件，避免廣告時長干擾正片進度。
 * [x] **斷線重連機制**：`socket.io` 實作指數型退避重連；重連成功後自動攜帶 Room ID 重新註冊。
 * [x] **房主離線處理**：當 Host 斷線超過 30 秒未恢復，通知房間成員並升級加入時間最早之 Guest 為新房主。

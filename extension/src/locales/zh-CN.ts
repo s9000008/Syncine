@@ -1,10 +1,11 @@
 import { TranslationSchema } from './schema';
+import { APP_VERSION } from '../version';
 
 export const zhCN: TranslationSchema = {
   app: {
     name: 'Syncine (同映)',
     tagline: '远程视频同步播放 (Watch Party)',
-    defaultVersion: 'v2.3.0',
+    defaultVersion: APP_VERSION,
     engineLabel: 'Syncine Engine • 支持 YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },

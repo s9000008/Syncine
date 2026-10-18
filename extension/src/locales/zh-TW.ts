@@ -1,8 +1,10 @@
+import { APP_VERSION } from '../version';
+
 export const zhTW = {
   app: {
     name: 'Syncine (同映)',
     tagline: '遠端影片同步播放 (Watch Party)',
-    defaultVersion: 'v2.3.0',
+    defaultVersion: APP_VERSION,
     engineLabel: 'Syncine Engine • 支援 YouTube / Bilibili',
     supportedPlatforms: 'YouTube / Bilibili',
   },

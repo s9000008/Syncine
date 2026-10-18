@@ -119,10 +119,11 @@ async function runAllTests() {
   // ----------------------------------------------------
   console.log('\n--- 模組 3: 伺服器端點與即時協定整合測試 ---');
 
+  const serverPkg = require('./package.json');
   const app = express();
   app.use(express.json());
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.3.0' });
+    res.json({ status: 'ok', service: 'Syncine Socket Server', version: serverPkg.version });
   });
 
   const httpServer = http.createServer(app);
@@ -397,6 +398,7 @@ async function runAllTests() {
     process.exit(1);
   } else {
     console.log('🎉 所有單元與整合測試皆 100% 通過！\n');
+    process.exit(0);
   }
 }
 

@@ -370,6 +370,41 @@ assert(p2pLoggerSource.includes('generateMarkdownReport'), 'p2pLogger.ts 定義�
 assert(p2pLoggerSource.includes('generateGitHubIssueUrl'), 'p2pLogger.ts 定義了 generateGitHubIssueUrl');
 assert(p2pLoggerSource.includes('https://github.com/s9000008/Syncine/issues/new'), 'p2pLogger.ts 正確綁定 s9000008/Syncine 官方儲存庫');
 
+// ----------------------------------------------------
+// 9. Content Script 無權限 Seeking 強制回滾與 Background 狀態同步驗證
+// ----------------------------------------------------
+console.log('\n--- 模組 9: 無權限觀眾 Seeking 回滾與 Background 狀態對接驗證 ---');
+
+const contentScriptSource = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+assert(contentScriptSource.includes('let lastSyncedTime = 0'), 'Content Script 定義了 lastSyncedTime 同步時間追蹤基準');
+assert(
+  contentScriptSource.includes('video.currentTime = lastSyncedTime'),
+  'Content Script 實作了無權限觀眾拖曳進度條 (seeking) 時強制回滾至 lastSyncedTime'
+);
+assert(
+  (contentScriptSource.match(/video\.addEventListener\('canplay'/g) || []).length === 1,
+  'Content Script 確保 canplay 事件監聽器無重複註冊'
+);
+
+const backgroundScriptSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+assert(
+  backgroundScriptSource.includes('payload?.data ?? (request as any).data'),
+  'Background 實作了 BG_SYNC_STATE 新舊版本雙格式兼容解析'
+);
+assert(
+  backgroundScriptSource.includes("socket.on('HOST_CHANGED'") &&
+    backgroundScriptSource.includes("socket.on('HOST_PRIVILEGE_GRANTED'"),
+  'Background 同時監聽 HOST_CHANGED 與 HOST_PRIVILEGE_GRANTED 確保房主逾時轉移狀態一致'
+);
+
+const extPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+const manifestJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'src/manifest.json'), 'utf-8'));
+const versionTsSource = fs.readFileSync(path.join(__dirname, 'src/version.ts'), 'utf-8');
+const zhTwSource = fs.readFileSync(path.join(__dirname, 'src/locales/zh-TW.ts'), 'utf-8');
+assert(extPkg.version === manifestJson.version, `package.json 與 manifest.json 版本號一致 (${extPkg.version})`);
+assert(versionTsSource.includes("import pkg from '../package.json'"), 'version.ts 作為單一真理來源自動讀取 package.json');
+assert(zhTwSource.includes('defaultVersion: APP_VERSION'), '語系 defaultVersion 自動引用 APP_VERSION 免除硬編碼');
+
 console.log('\n====================================================');
 console.log(`📊 擴充測試執行完畢: 共 ${passed + failed} 項測試 | 通過: ${passed} | 失敗: ${failed}`);
 console.log('====================================================');

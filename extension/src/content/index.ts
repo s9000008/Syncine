@@ -38,6 +38,7 @@ let hostStallActive = false;
 let seekDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isUserSeeking = false;
 let wasPlayingBeforeSeek = false;
+let lastSyncedTime = 0;
 
 function markProgrammatic(durationMs = 800) {
   programmaticUntilTimestamp = Date.now() + durationMs;
@@ -155,6 +156,7 @@ function applySyncState(data: SyncData) {
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
     }
+    lastSyncedTime = targetVideo.currentTime;
     if (targetVideo.paused) {
       targetVideo.play().catch((err) => console.log('[Syncine Play Intercepted]:', err));
     }
@@ -163,10 +165,12 @@ function applySyncState(data: SyncData) {
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
     }
+    lastSyncedTime = targetVideo.currentTime;
     targetVideo.pause();
   } else if (action === 'SEEK') {
     // 主動 Seek 事件無視容差，強制作業更新時間軸
     targetVideo.currentTime = targetServerTime;
+    lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
@@ -192,6 +196,9 @@ function applySyncState(data: SyncData) {
     if (timeDiff > 5) {
       console.log(`[Syncine Heartbeat] 時間差為 ${timeDiff.toFixed(2)} 秒 (>5秒)，強制同步位移至: ${targetServerTime}`);
       targetVideo.currentTime = targetServerTime;
+      lastSyncedTime = targetServerTime;
+    } else {
+      lastSyncedTime = targetVideo.currentTime;
     }
   }
 }
@@ -203,8 +210,23 @@ function attachVideoListeners(video: HTMLVideoElement) {
   if ((video as any).__syncine_attached || (video as any).__coview_attached) return;
   (video as any).__syncine_attached = true;
   targetVideo = video;
+  lastSyncedTime = video.currentTime || 0;
 
   console.log('[Syncine] 成功綁定 Target Video DOM');
+
+  // 持續追蹤合法播放推進時間，供無權限觀眾私自拖曳進度條時回滾基準使用
+  video.addEventListener('timeupdate', () => {
+    if (!video.seeking && !isUserSeeking) {
+      if (
+        !roomState.isInRoom ||
+        roomState.isHost ||
+        roomState.allowGuestControl ||
+        Math.abs(video.currentTime - lastSyncedTime) < 1.5
+      ) {
+        lastSyncedTime = video.currentTime;
+      }
+    }
+  });
 
   video.addEventListener('play', () => {
     // 未在房間內，徹底放行使用者原生播放！
@@ -263,6 +285,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (!targetVideo || !roomState.isInRoom) return;
     if (!isCurrentActiveVideoTab()) return;
 
+    lastSyncedTime = targetVideo.currentTime;
     // 若跳轉前處於播放狀態，或當前已開播，則目標狀態認定為播放中 (paused: false)
     const isPaused = targetVideo.paused && !wasPlayingBeforeSeek;
 
@@ -281,7 +304,15 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (!roomState.isInRoom) return;
     if (!isCurrentActiveVideoTab()) return;
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
-    if (!roomState.isHost && !roomState.allowGuestControl) return;
+
+    if (!roomState.isHost && !roomState.allowGuestControl) {
+      if (Math.abs(video.currentTime - lastSyncedTime) > 0.5) {
+        console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
+        markProgrammatic(400);
+        video.currentTime = lastSyncedTime;
+      }
+      return;
+    }
 
     if (!isUserSeeking) {
       isUserSeeking = true;
@@ -368,13 +399,6 @@ function attachVideoListeners(video: HTMLVideoElement) {
 
   video.addEventListener('canplay', () => {
     // 僅取消尚在倒數中的卡頓判定；已確認的卡頓由 playing 事件負責恢復
-    if (bufferingTimer) {
-      clearTimeout(bufferingTimer);
-      bufferingTimer = null;
-    }
-  });
-
-  video.addEventListener('canplay', () => {
     if (bufferingTimer) {
       clearTimeout(bufferingTimer);
       bufferingTimer = null;

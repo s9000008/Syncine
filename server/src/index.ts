@@ -1,5 +1,7 @@
 import express from 'express';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 import { Server, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import cors from 'cors';
@@ -20,6 +22,11 @@ import {
 
 dotenv.config();
 
+const serverPkg = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8')
+);
+const SERVER_VERSION: string = serverPkg.version;
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -29,7 +36,7 @@ app.use(express.json());
 
 // 健康檢查 Endpoint
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'Syncine Socket Server', version: '2.3.0' });
+  res.json({ status: 'ok', service: 'Syncine Socket Server', version: SERVER_VERSION });
 });
 
 const server = http.createServer(app);

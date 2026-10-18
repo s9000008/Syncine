@@ -1,13 +1,13 @@
 {
   "name": "syncine-server",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "description": "Syncine Video Sync WebSocket Server",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "ts-node test_suite.ts",
+    "test": "ts-node -P tsconfig.json --transpile-only test_suite.ts && node test_security_p1.mjs",
     "security:check": "node ../.agents/skills/security-agent/scripts/scan_secrets.js"
   },
   "keywords": [
