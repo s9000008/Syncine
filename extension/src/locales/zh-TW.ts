@@ -24,9 +24,9 @@ export const zhTW = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube 影片分頁已連線',
     bilibiliConnected: '📺 Bilibili 影片分頁已連線',
-    notSupported: '💡 請開啟 YouTube 或 Bilibili 網頁以進行同步觀影',
+    notSupported: '請開啟 YouTube 或 Bilibili 網頁以進行同步觀影',
     supportBadge: '支援',
-    singleTabHint: '建議瀏覽器同時僅開啟一個支援的影片分頁，以避免同步干擾。',
+    singleTabHint: '建議同時僅開啟一個支援的影片分頁，避免同步干擾。',
     hintPrefix: '💡 提示',
   },
   connectionModes: {
@@ -54,7 +54,7 @@ export const zhTW = {
       serverOffline: '連線異常 (請檢查網路)',
       serverProbing: '連線探測中...',
       description: '連線至官方中繼伺服器，提供穩定開箱即用的房間同步服務，適用於任何網路環境。',
-      joinFeedback: '已選定官方中繼：透過官方中繼伺服器快速同步。',
+      joinFeedback: '已選官方中繼：透過雲端伺服器快速同步',
       placeholder: '輸入房主提供的 6 碼代碼 (例如: 892301)',
       inputHint: '輸入 6 碼代碼連線至官方中繼伺服器同步觀影。',
       btnCreate: '🚀 立即建立房間',
@@ -106,8 +106,8 @@ export const zhTW = {
     awaitingDesc: '正在等待房主確認同意，房主批准後雙方將自動無縫連線開播！',
     cancelAndBack: '✕ 取消申請並返回',
     defaultGuestName: (id: string) => `訪客 (${id})`,
-    reportIssueGithub: '🛠️ 回報問題至 GitHub',
-    copyDiagnosticReport: '📋 複製診斷報告',
+    reportIssueGithub: '回報問題至 GitHub',
+    copyDiagnosticReport: '複製診斷報告',
     reportCopiedToast: '診斷報告已複製至剪貼簿！',
   },
   languageSelector: {

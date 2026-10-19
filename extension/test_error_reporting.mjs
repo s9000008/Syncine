@@ -161,8 +161,13 @@ assert(markdownReport.includes('X7***B2'), '包含已遮蔽目標房號 (無未�
 assert(markdownReport.includes('ERR_P2P_TIMEOUT'), '包含標準錯誤代碼');
 assert(markdownReport.includes('3 次重試'), '包含退避重試計數');
 assert(markdownReport.includes('ICE 候選者收集摘要'), '包含 ICE 收集摘要');
+assert(markdownReport.includes('#### 📜 日誌'), '日誌區段標題精簡為「#### 📜 日誌」');
 assert(markdownReport.includes('```text'), '包含日誌代碼區塊');
 assert(markdownReport.includes('💡 備註：所有 IP 位址與機敏識別碼已通過本機零洩漏演算法脫敏'), '包含隱私保護宣告');
+assert(
+  sanitizeIp('Could not connect to peer syncine-AB12CD') === 'Could not connect to peer syncine-AB***CD',
+  '錯誤訊息內嵌之 syncine-XXXXXX 房號自動脫敏'
+);
 
 // 嚴格掃描報告全文是否存在洩漏的完整 IP
 const rawIpRegex = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
