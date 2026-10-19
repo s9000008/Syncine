@@ -25,9 +25,9 @@ export const jaJP: TranslationSchema = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube タブ接続完了',
     bilibiliConnected: '📺 Bilibili タブ接続完了',
-    notSupported: '💡 同時視聴を開始するには YouTube または Bilibili を開いてください',
+    notSupported: 'YouTube / Bilibili を開いて開始',
     supportBadge: '対応',
-    singleTabHint: '同期の乱れを防ぐため、対象の動画タブは1つのみ開くことを推奨します。',
+    singleTabHint: '同期ズレ防止のため動画タブは1つのみ推奨',
     hintPrefix: '💡 ヒント',
   },
   connectionModes: {

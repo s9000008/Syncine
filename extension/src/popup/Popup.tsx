@@ -450,6 +450,13 @@ export default function Popup() {
               ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
               : 'bg-amber-950/30 text-amber-300 border-amber-800/40'
           }`}
+          title={
+            isYouTube
+              ? t.tabStatus.youtubeConnected
+              : isBilibili
+              ? t.tabStatus.bilibiliConnected
+              : t.tabStatus.notSupported
+          }
         >
           <div className="flex items-center gap-1.5 truncate max-w-[280px]">
             <Video className="w-3.5 h-3.5 flex-shrink-0" />
@@ -469,7 +476,10 @@ export default function Popup() {
         </div>
 
         {/* 建議僅開啟單一分頁防護提示 */}
-        <div className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5">
+        <div
+          className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5 cursor-help"
+          title={t.tabStatus.singleTabHint}
+        >
           <span className="text-amber-400 font-bold flex-shrink-0">{t.tabStatus.hintPrefix}</span>
           <span className="truncate">{t.tabStatus.singleTabHint}</span>
         </div>

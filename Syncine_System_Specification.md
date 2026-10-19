@@ -377,6 +377,9 @@ export interface TogglePermissionMsg {
    - 於模式說明卡片明確標記：「💡 若因嚴格防火牆或網路限制導致 P2P 連線失敗，可改用『預設中繼伺服器』模式」。
 5. **單分頁觀影防護提示 (Single Active Tab Advisory)**：
    - 於控制面板顯著標記：「💡 建議同時僅開啟一個支援的影片分頁，以確保最佳同步效果，避免多重視窗干擾」。
+6. **控制面板多語系文字自適應與懸停提示 (UI Text Truncation & Hover Tooltip)**：
+   - 針對 380px 面板寬度，精簡英文 (`en-US`) 與日文 (`ja-JP`) 之分頁提示文案（如 `notSupported` 與 `singleTabHint`），避免在固定寬度下因字串過長被截斷為 `...`。
+   - 於提示條容器加上 HTML `title` 屬性，當滑鼠懸停於上方時即時顯示完整說明文字，兼顧緊湊排版與無障礙可讀性。
 
 ---
 

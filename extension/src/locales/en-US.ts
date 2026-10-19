@@ -25,9 +25,9 @@ export const enUS: TranslationSchema = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube tab connected',
     bilibiliConnected: '📺 Bilibili tab connected',
-    notSupported: '💡 Open YouTube or Bilibili video to start watch party',
+    notSupported: 'Open YouTube or Bilibili to start',
     supportBadge: 'Supported',
-    singleTabHint: 'Only one supported video tab is recommended to avoid sync conflicts.',
+    singleTabHint: 'Use a single video tab to avoid sync conflicts.',
     hintPrefix: '💡 Tip',
   },
   connectionModes: {
