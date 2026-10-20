@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node build_content.mjs",
     "test": "node test_i18n_suite.mjs && node test_error_reporting.mjs && node test_frontend_automation.mjs",
-    "zip": "tsc && vite build && powershell -Command \"Compress-Archive -Path dist/* -DestinationPath ../extension-build.zip -Force\"",
+    "zip": "tsc && vite build && node build_content.mjs && powershell -Command \"Compress-Archive -Path dist/* -DestinationPath ../extension-build.zip -Force\"",
     "security:check": "node ../.agents/skills/security-agent/scripts/scan_secrets.js"
   },
   "dependencies": {

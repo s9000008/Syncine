@@ -144,8 +144,14 @@ function verifyAndRedirect(targetUrl: string) {
   if (isSafe) {
     console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.update(tabs[0].id, { url: targetUrl });
+      const activeTab = tabs[0];
+      if (activeTab?.id) {
+        // 防禦性檢查：若分頁已在目標網址，略過重複跳轉，避免觸發全頁刷新與 Loader 重複注入
+        if (activeTab.url && activeTab.url === targetUrl) {
+          console.log(`[Background] 目標分頁已在目標網址，略過重複跳轉: ${targetUrl}`);
+          return;
+        }
+        chrome.tabs.update(activeTab.id, { url: targetUrl });
       }
     });
   } else {
