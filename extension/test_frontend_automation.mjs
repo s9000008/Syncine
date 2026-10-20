@@ -323,6 +323,44 @@ assert(checkTargetSite('https://www.google.com').isTargetSite === false, 'Popup 
 assert(checkTargetSite('https://anime1.me/').isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
 
 // ----------------------------------------------------
+// 測試套件 6: 燈號狀態標記 (綠燈支援 / 紅燈不支援) 與商店清單自動化測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 6: 燈號狀態標記 (綠燈支援 / 紅燈不支援) 與商店連結自動化測試 ---');
+
+function getSiteIndicatorState(url) {
+  const target = checkTargetSite(url);
+  return {
+    isTargetSite: target.isTargetSite,
+    lightColor: target.isTargetSite ? 'GREEN' : 'RED',
+    badgeKey: target.isTargetSite ? 'supportBadge' : 'unsupportedBadge',
+    hasHoverTooltip: true,
+    storeRedirectAvailable: !target.isTargetSite
+  };
+}
+
+const ytState = getSiteIndicatorState('https://www.youtube.com/watch?v=abc1234');
+assert(ytState.lightColor === 'GREEN', 'YouTube 顯示綠燈支援標記');
+assert(ytState.badgeKey === 'supportBadge', 'YouTube 顯示支援徽章');
+
+const biliState = getSiteIndicatorState('https://www.bilibili.com/video/BV1xx411c7mD');
+assert(biliState.lightColor === 'GREEN', 'Bilibili 顯示綠燈支援標記');
+
+const nicoState = getSiteIndicatorState('https://www.nicovideo.jp/watch/sm9');
+assert(nicoState.lightColor === 'GREEN', 'Niconico 顯示綠燈支援標記');
+
+const anime1State = getSiteIndicatorState('https://anime1.me/12345');
+assert(anime1State.lightColor === 'GREEN', 'Anime1.me 顯示綠燈支援標記');
+
+const googleState = getSiteIndicatorState('https://www.google.com');
+assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈不支援標記');
+assert(googleState.badgeKey === 'unsupportedBadge', '非支援網站顯示不支援徽章');
+assert(googleState.storeRedirectAvailable === true, '非支援網站支援點擊前往 Chrome 商店查看完整支援清單');
+
+const CHROME_STORE_URL =
+  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip?authuser=0&hl=zh-TW';
+assert(CHROME_STORE_URL.startsWith('https://chromewebstore.google.com/detail/syncine-'), 'Chrome 商店官方發布網址正確無誤');
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

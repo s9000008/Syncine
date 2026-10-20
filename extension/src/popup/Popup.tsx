@@ -16,13 +16,18 @@ import {
   Bell,
   UserCheck,
   UserX,
-  Clock
+  Clock,
+  MessageSquarePlus
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
+
+
+const CHROME_STORE_URL =
+  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip?authuser=0&hl=zh-TW';
 
 export default function Popup() {
   const { t, translateReturnCode, language } = useTranslation();
@@ -454,12 +459,12 @@ export default function Popup() {
           </div>
         )}
 
-        {/* 當前分頁狀態提示條 */}
+        {/* 當前分頁狀態提示條（燈號標記：綠燈支援 / 紅燈不支援） */}
         <div
-          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border cursor-help ${
+          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border transition ${
             isTargetSite
-              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
-              : 'bg-amber-950/30 text-amber-300 border-amber-800/40'
+              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50 cursor-help'
+              : 'bg-rose-950/25 text-rose-300 border-rose-900/40 hover:border-rose-700/50 cursor-pointer'
           }`}
           title={
             isYouTube
@@ -470,10 +475,23 @@ export default function Popup() {
               ? t.tabStatus.niconicoConnected
               : isAnime1
               ? t.tabStatus.anime1Connected
-              : t.tabStatus.notSupported
+              : t.tabStatus.supportedTooltip
           }
+          onClick={() => {
+            if (!isTargetSite) {
+              chrome.tabs?.create?.({ url: CHROME_STORE_URL });
+            }
+          }}
         >
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {/* 燈號指示：綠燈支援 / 紅燈不支援 */}
+            <span
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                isTargetSite
+                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse'
+                  : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)]'
+              }`}
+            />
             <Video className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="truncate">
               {isYouTube
@@ -487,11 +505,16 @@ export default function Popup() {
                 : t.tabStatus.notSupported}
             </span>
           </div>
-          {isTargetSite && (
-            <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50 flex-shrink-0 ml-2">
-              {t.tabStatus.supportBadge}
-            </span>
-          )}
+          {/* 燈號狀態徽章：綠燈支援 / 紅燈不支援 */}
+          <span
+            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ml-2 ${
+              isTargetSite
+                ? 'text-emerald-400 bg-emerald-900/60 border-emerald-700/50'
+                : 'text-rose-400 bg-rose-950/70 border-rose-800/60'
+            }`}
+          >
+            {isTargetSite ? t.tabStatus.supportBadge : t.tabStatus.unsupportedBadge}
+          </span>
         </div>
 
         {/* 建議僅開啟單一分頁防護提示 */}
@@ -1054,9 +1077,29 @@ export default function Popup() {
       </div>
 
       {/* 底部 Footer */}
-      <div className="mt-4 pt-2.5 border-t border-slate-800/80 text-center text-[10px] text-slate-500 flex items-center justify-between">
-        <span>{t.app.engineLabel}</span>
-        <span className="font-mono text-emerald-400 font-semibold text-[10px]">
+      <div className="mt-4 pt-2.5 border-t border-slate-800/80 text-center text-[10px] text-slate-500 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* 左下角小按鈕：問題回報 */}
+          <button
+            onClick={handleReportToGitHub}
+            className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-300 transition px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/60 cursor-pointer flex-shrink-0 shadow-sm"
+            title={t.roomUi.footerFeedbackTooltip}
+          >
+            <MessageSquarePlus className="w-3 h-3 text-slate-400" />
+            <span>{t.roomUi.footerFeedbackBtn}</span>
+          </button>
+
+          {/* 支援網站標籤（懸停顯示具體支援網站，點擊開啟 Chrome 商店） */}
+          <span
+            className="cursor-pointer hover:text-slate-300 transition truncate text-[10px] text-slate-500"
+            title={t.tabStatus.supportedTooltip}
+            onClick={() => chrome.tabs?.create?.({ url: CHROME_STORE_URL })}
+          >
+            {t.app.engineLabel}
+          </span>
+        </div>
+
+        <span className="font-mono text-emerald-400 font-semibold text-[10px] flex-shrink-0">
           {t.connectionModes.footerPrefix}
           {(roomState ? roomState.mode : connectionMode) === 'P2P'
             ? t.connectionModes.p2p.footerLabel

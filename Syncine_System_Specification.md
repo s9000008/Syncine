@@ -387,6 +387,19 @@ export interface TogglePermissionMsg {
    - 針對 380px 面板寬度，精簡英文 (`en-US`) 與日文 (`ja-JP`) 之分頁提示文案（如 `notSupported` 與 `singleTabHint`），避免在固定寬度下因字串過長被截斷為 `...`。
    - 於提示條容器加上 HTML `title` 屬性，當滑鼠懸停於上方時即時顯示完整說明文字，兼顧緊湊排版與無障礙可讀性。
 
+
+7. **網站支援燈號狀態指示與商店導流系統 (Site Support Traffic Light & Store Feedback)**：
+   - **燈號標記機制**：
+     - **綠燈支援 (🟢 Green Light)**：當目前分頁為 YouTube、Bilibili、Niconico 或 Anime1.me 之有效影片播放頁面時，顯示高亮綠燈動態光暈（`bg-emerald-400` + `shadow` + `animate-pulse`），並標記 `[支援]` 徽章與各平台連線狀態。
+     - **紅燈不支援 (🔴 Red Light)**：當目前分頁非支援目標或非播放頁時，顯示鮮明紅燈（`bg-rose-500` + `shadow`），提示條轉為玫瑰紅基調並標記 `[不支援]` 徽章。
+   - **自適應支援清單與懸停提示 (Truncated Label & Hover Tooltip)**：
+     - 紅燈時主文案精簡顯示：「`支援網站：YouTube / Bilibili / Niconico 與更多`」（適配多語系面板寬度）。
+     - 滑鼠懸停（Hover）時彈出詳細說明，列舉當前具體支援的播放器範疇（YouTube 標準影片、Bilibili 標準影片/番劇、Niconico 動畫頻道/標準影片、Anime1.me 動畫播放/分類頁等）。
+   - **官方商店完整支援清單導流 (Chrome Web Store Official Directory)**：
+     - 點擊紅燈提示條或底部引擎標籤，將導向官方 Chrome 線上應用程式商店說明頁面，供使用者查閱最新完整支援網站清單。
+   - **左下角空間極簡化問題回報按鈕 (Bottom-Left Compact Feedback Button)**：
+     - 面板左下角配置低侵入性小按鈕：「`💬 問題回報`」，使用者可一鍵發起 GitHub Issue 或反饋網站支援建議，自動整合本機脫敏診斷報告。
+
 ---
 
 ## 10. 長期主要功能規劃 (Long-Term Roadmap)
