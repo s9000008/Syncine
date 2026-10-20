@@ -4,17 +4,52 @@ import { getStandaloneText } from '../locales';
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
 
 // ----------------------------------------------------
-// 1. MV3 長連接 Port 保活
+// 1. MV3 長連接 Port 保活與 bfcache 生命週期管理
 // ----------------------------------------------------
 let keepAlivePort: chrome.runtime.Port | null = null;
-try {
-  keepAlivePort = chrome.runtime.connect({ name: 'syncine-keepalive' });
-  keepAlivePort.onDisconnect.addListener(() => {
-    console.log('[Syncine ContentScript] Keep-Alive Port 斷開，試圖重新連線...');
-  });
-} catch (e) {
-  console.warn('[Syncine] 建立 Keep-Alive Port 失敗:', e);
+
+function setupKeepAlivePort() {
+  if (window.self !== window.top) return;
+  try {
+    if (keepAlivePort) {
+      try { keepAlivePort.disconnect(); } catch (_) {}
+      keepAlivePort = null;
+    }
+    keepAlivePort = chrome.runtime.connect({ name: 'syncine-keepalive' });
+    keepAlivePort.onDisconnect.addListener((port) => {
+      // 關鍵：存取 lastError 與 port.error，標記異常已被捕捉，
+      // 防止 Chrome 拋出「Unchecked runtime.lastError: The page keeping the extension port is moved into back/forward cache...」
+      const lastError = chrome.runtime.lastError;
+      const portError = (port as any)?.error;
+      if (lastError || portError) {
+        console.log('[Syncine ContentScript] Keep-Alive Port 正常釋放或因 bfcache 凍結切斷:', lastError?.message || portError?.message);
+      }
+      keepAlivePort = null;
+    });
+  } catch (e) {
+    console.warn('[Syncine] 建立 Keep-Alive Port 失敗:', e);
+  }
 }
+
+// 監聽現代瀏覽器快退快進快取 (Back/Forward Cache, bfcache) 生命週期
+window.addEventListener('pagehide', (event) => {
+  // 當分頁即將進入 bfcache 時主動斷開 Port，防止被 Chrome 強制殺死並報錯
+  if (event.persisted && keepAlivePort) {
+    try { keepAlivePort.disconnect(); } catch (_) {}
+    keepAlivePort = null;
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  // 當分頁從 bfcache 被喚醒時，重新建立 Port 連線並恢復房間狀態
+  if (event.persisted) {
+    setupKeepAlivePort();
+    queryInitialRoomState();
+  }
+});
+
+// 初始化啟動保活 Port
+setupKeepAlivePort();
 
 // ----------------------------------------------------
 // 2. 全域狀態變數
@@ -627,25 +662,36 @@ window.addEventListener('yt-navigate-finish', () => {
   }, 1000);
 });
 
-// 向 Background 獲取最新狀態
-chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
-  if (res?.roomState) {
-    roomState = {
-      isInRoom: true,
-      isHost: res.roomState.isHost,
-      allowGuestControl: res.roomState.allowGuestControl,
-      currentUrl: res.roomState.currentUrl
-    };
-    if (roomState.isHost && isCurrentActiveVideoTab()) {
-      startHeartbeat();
+// ----------------------------------------------------
+// 7. 房間狀態向後台同步與查詢
+// ----------------------------------------------------
+function queryInitialRoomState() {
+  if (window.self !== window.top) return;
+  chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
+    if (chrome.runtime.lastError) {
+      return;
+    }
+    if (res?.roomState) {
+      roomState = {
+        isInRoom: true,
+        isHost: res.roomState.isHost,
+        allowGuestControl: res.roomState.allowGuestControl,
+        currentUrl: res.roomState.currentUrl
+      };
+      if (roomState.isHost && isCurrentActiveVideoTab()) {
+        startHeartbeat();
+      } else {
+        stopHeartbeat();
+      }
     } else {
+      roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
       stopHeartbeat();
     }
-  } else {
-    roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
-    stopHeartbeat();
-  }
-});
+  });
+}
+
+// 首次啟動向 Background 獲取最新狀態
+queryInitialRoomState();
 
 // 監聽來自 Background 的動態訊息
 chrome.runtime.onMessage.addListener((request) => {

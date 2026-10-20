@@ -361,6 +361,25 @@ const CHROME_STORE_URL =
 assert(CHROME_STORE_URL.startsWith('https://chromewebstore.google.com/detail/syncine-'), 'Chrome 商店官方發布網址正確無誤');
 
 // ----------------------------------------------------
+// 測試套件 7: bfcache 頁面快取生命週期與沙盒 iframe 注入隔離測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 7: bfcache 快取生命週期與沙盒 iframe 隔離測試 ---');
+
+const manifestObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'src/manifest.json'), 'utf-8'));
+assert(manifestObj.content_scripts[0].all_frames === false, 'manifest.json 停用 all_frames (防止注入廣告/沙盒 iframe)');
+assert(!manifestObj.content_scripts[0].match_about_blank, 'manifest.json 移除 match_about_blank');
+
+const contentSrc = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+assert(contentSrc.includes('window.self !== window.top'), 'content/index.ts 包含頂層視窗防禦守衛 (window.self !== window.top)');
+assert(contentSrc.includes('pagehide'), 'content/index.ts 監聽 pagehide 事件以釋放 Port');
+assert(contentSrc.includes('pageshow'), 'content/index.ts 監聽 pageshow 事件以恢復 Port 與狀態');
+assert(contentSrc.includes('event.persisted'), 'content/index.ts 依據 event.persisted 判定 bfcache 生命週期');
+assert(contentSrc.includes('chrome.runtime.lastError'), 'content/index.ts 存取 chrome.runtime.lastError 消除未捕獲異常');
+
+const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+assert(bgSrc.includes('chrome.runtime.lastError'), 'background/index.ts 存取 chrome.runtime.lastError 消除斷開異常');
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

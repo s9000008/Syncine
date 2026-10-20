@@ -400,6 +400,11 @@ export interface TogglePermissionMsg {
    - **左下角空間極簡化問題回報按鈕 (Bottom-Left Compact Feedback Button)**：
      - 面板左下角配置低侵入性小按鈕：「`💬 問題回報`」，使用者可一鍵發起 GitHub Issue 或反饋網站支援建議，自動整合本機脫敏診斷報告。
 
+8. **bfcache 頁面快取生命週期適配與沙盒 iframe 注入防護 (bfcache & Sandbox iframe Isolation)**：
+   - **停用 `all_frames` 與 `match_about_blank`**：Content Script 僅注入頂層視窗（`window.top`），避免動態模組 Loader 注入至 YouTube/Bilibili 之廣告、追蹤或沙盒 iframe 觸發 `Unsafe attempt to load URL` 安全限制。
+   - **Page Lifecycle API (bfcache)**：監聽 `pagehide` 與 `pageshow` 事件。在分頁進入快退快進快取（bfcache）時主動中斷長連接 Port，喚醒時自動重連並恢復房間最新狀態。
+   - **主動捕捉 `chrome.runtime.lastError`**：於 `port.onDisconnect` 與後端訊息回呼中顯式存取 `lastError`，消除瀏覽器未捕捉異常警示。
+
 ---
 
 ## 10. 長期主要功能規劃 (Long-Term Roadmap)

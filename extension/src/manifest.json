@@ -36,8 +36,7 @@
       "js": [
         "src/content/index.ts"
       ],
-      "all_frames": true,
-      "match_about_blank": true,
+      "all_frames": false,
       "run_at": "document_end"
     }
   ],

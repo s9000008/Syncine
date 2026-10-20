@@ -69,7 +69,12 @@ chrome.storage?.local?.get(['syncine_user_id', 'coview_user_id', SESSION_STORAGE
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'syncine-keepalive' || port.name === 'coview-keepalive') {
     console.log('[Background] 收到 Content Script 長連接保活 Port');
-    port.onDisconnect.addListener(() => {
+    port.onDisconnect.addListener((p) => {
+      const lastError = chrome.runtime.lastError;
+      const portError = (p as any)?.error;
+      if (lastError || portError) {
+        // 正常 bfcache 或分頁關閉釋放
+      }
       console.log('[Background] Content Script Port 斷開');
     });
   }
@@ -150,7 +155,7 @@ function verifyAndRedirect(targetUrl: string) {
         chrome.tabs.sendMessage(tabs[0].id, {
           type: 'SHOW_SECURITY_ALERT',
           payload: { url: targetUrl }
-        });
+        }).catch(() => {});
       }
     });
   }
