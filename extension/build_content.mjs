@@ -17,7 +17,10 @@ esbuild.buildSync({
   minify: true,
   format: 'iife',
   outfile: outputFile,
-  target: ['chrome100']
+  target: ['chrome100'],
+  define: {
+    'process.env.NODE_ENV': '"production"'
+  }
 });
 
 // 2. 更新 dist/manifest.json，讓 Chrome 原生直接加載 content.js

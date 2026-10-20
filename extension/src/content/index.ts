@@ -1,5 +1,5 @@
 import { SyncData, getVideoIdentifier } from '../types/protocol';
-import { getStandaloneText } from '../locales';
+import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
 
@@ -74,6 +74,7 @@ let seekDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isUserSeeking = false;
 let wasPlayingBeforeSeek = false;
 let lastSyncedTime = 0;
+let roomPlaybackState: 'PLAYING' | 'PAUSED' | 'IDLE' = 'IDLE';
 
 function markProgrammatic(durationMs = 800) {
   programmaticUntilTimestamp = Date.now() + durationMs;
@@ -244,8 +245,18 @@ function isYouTubeAdPlaying(): boolean {
     return Boolean(adVideo && !adVideo.paused && (adVideo.currentSrc || adVideo.getAttribute('src')));
   }
   if (!host.includes('youtube.com')) return false;
-  const adOverlay = document.querySelector('.video-ads') || document.querySelector('.ytp-ad-player-overlay');
-  return !!adOverlay && (adOverlay as HTMLElement).offsetWidth > 0;
+
+  // 1. YouTube 播放器容器標準廣告 class 判定 (ad-showing / ad-interrupting)
+  const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+  if (player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) {
+    return true;
+  }
+
+  // 2. 廣告覆蓋層元素判定 (注意：勿單純判定 .video-ads，因其為永久容器且在無廣告時 offsetWidth 仍大於 0)
+  const adOverlay = document.querySelector(
+    '.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container'
+  );
+  return Boolean(adOverlay && (adOverlay as HTMLElement).offsetWidth > 0);
 }
 
 // ----------------------------------------------------
@@ -288,6 +299,10 @@ function stopHeartbeat() {
 // 5. 5 秒容差與單程延遲補償演算法 (規格 4.2)
 // ----------------------------------------------------
 function applySyncState(data: SyncData) {
+  if (!targetVideo) {
+    const v = findVideoElement();
+    if (v) attachVideoListeners(v);
+  }
   if (!targetVideo || !roomState.isInRoom) return;
   // 觀眾端防護：若自身尚未處於目標影片，不套用時間軸校準，避免分頁未跳轉前時間跳動
   if (!isCurrentActiveVideoTab()) {
@@ -322,6 +337,7 @@ function applySyncState(data: SyncData) {
   markProgrammatic(1000);
 
   if (action === 'PLAY') {
+    roomPlaybackState = 'PLAYING';
     // 只有在時間差大於 0.5 秒或處於不同播放狀態時校準進度，避免極小誤差造成重複 Seek
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
@@ -331,6 +347,7 @@ function applySyncState(data: SyncData) {
       targetVideo.play().catch((err) => console.log('[Syncine Play Intercepted]:', err));
     }
   } else if (action === 'PAUSE') {
+    roomPlaybackState = 'PAUSED';
     // 暫停時若時間差距小於 0.5 秒直接 pause，不強制 seek，消除播放器暫停時的畫面閃爍與誤判卡頓
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
@@ -338,21 +355,23 @@ function applySyncState(data: SyncData) {
     lastSyncedTime = targetVideo.currentTime;
     targetVideo.pause();
   } else if (action === 'SEEK') {
-    // 主動 Seek 事件無視容差，強制作業更新時間軸
     targetVideo.currentTime = targetServerTime;
     lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
+      roomPlaybackState = 'PLAYING';
       console.log('[Syncine Seek] 發送端正在播放，接收端跟隨同步播放');
       targetVideo.play().catch((err) => console.log('[Syncine Seek Play Intercepted]:', err));
     } else if (serverPaused === true) {
+      roomPlaybackState = 'PAUSED';
       console.log('[Syncine Seek] 發送端處於暫停，接收端跟隨暫停');
       targetVideo.pause();
     }
   } else if (action === 'HEARTBEAT') {
     // 1. 雙向校準播放狀態
     if (typeof serverPaused === 'boolean') {
+      roomPlaybackState = serverPaused ? 'PAUSED' : 'PLAYING';
       if (serverPaused && !targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為暫停，觀眾對齊暫停');
         targetVideo.pause();
@@ -408,9 +427,13 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態');
-      markProgrammatic(400);
-      video.pause();
+      // 僅在房間明確處於 PAUSED 狀態時，觀眾私自點擊播放才回滾至暫停
+      // 若房間本就處於 PLAYING，為正常播放對齊，切勿回滾形成死鎖
+      if (roomPlaybackState === 'PAUSED') {
+        console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態至暫停');
+        markProgrammatic(400);
+        video.pause();
+      }
       return;
     }
 
@@ -436,9 +459,13 @@ function attachVideoListeners(video: HTMLVideoElement) {
     hostStallActive = false;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態');
-      markProgrammatic(400);
-      video.play().catch(() => {});
+      // 僅在房間明確處於 PLAYING 狀態時，觀眾私自點擊暫停才回滾至播放
+      // 若房間本就處於 PAUSED 或初始化階段，切勿強制喚醒播放！
+      if (roomPlaybackState === 'PLAYING') {
+        console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態至播放');
+        markProgrammatic(400);
+        video.play().catch(() => {});
+      }
       return;
     }
 
@@ -478,7 +505,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      if (Math.abs(video.currentTime - lastSyncedTime) > 0.5) {
+      if (lastSyncedTime > 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
         console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
         markProgrammatic(400);
         video.currentTime = lastSyncedTime;
@@ -715,6 +742,8 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     } else {
       roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
+      roomPlaybackState = 'IDLE';
+      lastSyncedTime = 0;
       hostStallActive = false;
       if (bufferingTimer) {
         clearTimeout(bufferingTimer);
@@ -733,6 +762,7 @@ chrome.runtime.onMessage.addListener((request) => {
         data: {
           action: targetVideo.paused ? 'PAUSE' : 'PLAY',
           currentTime: targetVideo.currentTime,
+          paused: targetVideo.paused,
           timestamp: Date.now()
         }
       });
