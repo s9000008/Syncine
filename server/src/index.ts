@@ -17,7 +17,8 @@ import {
   CreateRoomRes,
   SignalOfferMsg,
   SignalAnswerMsg,
-  SignalIceCandidateMsg
+  SignalIceCandidateMsg,
+  SERVER_HOST_WHITELIST
 } from './types';
 
 dotenv.config();
@@ -294,8 +295,16 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    actualRoom.currentUrl = payload.data.targetUrl;
-    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${sanitizeLog(payload.data.targetUrl)} (Room: ${sanitizeLog(actualRoom.roomId)})`);
+    const targetUrl = payload.data.targetUrl;
+    const isSafe = SERVER_HOST_WHITELIST.some((regex) => regex.test(targetUrl));
+    if (!isSafe) {
+      console.warn(`[Security Alert] 攔截非白名單/惡意跳轉網址: ${sanitizeLog(targetUrl)} (Socket: ${sanitizeLog(socket.id)})`);
+      socket.emit('ERROR', { code: 'ERR_UNAUTHORIZED_URL', message: '目標網址未在授權白名單中' });
+      return;
+    }
+
+    actualRoom.currentUrl = targetUrl;
+    console.log(`[Socket.IO] 廣播網頁跳轉事件: ${sanitizeLog(targetUrl)} (Room: ${sanitizeLog(actualRoom.roomId)})`);
     socket.to(actualRoom.roomId).emit('REDIRECT_ROOM', payload);
   });
 
