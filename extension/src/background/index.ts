@@ -145,13 +145,22 @@ function verifyAndRedirect(targetUrl: string) {
     console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
-      if (activeTab?.id) {
-        // 防禦性檢查：若分頁已在目標網址，略過重複跳轉，避免觸發全頁刷新與 Loader 重複注入
+      const tabId = activeTab?.id;
+      if (tabId) {
+        // 若分頁已在目標網址，檢查 Content Script 連線狀態
         if (activeTab.url && activeTab.url === targetUrl) {
-          console.log(`[Background] 目標分頁已在目標網址，略過重複跳轉: ${targetUrl}`);
+          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${targetUrl}`);
+          chrome.tabs.sendMessage(tabId, {
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: currentRoomState
+          }).catch(() => {
+            // 若 sendMessage 失敗，表示 Content Script 尚未注入 (例如 SPA 跳轉過來的分頁)，刷新分頁以注入
+            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${targetUrl}`);
+            chrome.tabs.update(tabId, { url: targetUrl });
+          });
           return;
         }
-        chrome.tabs.update(activeTab.id, { url: targetUrl });
+        chrome.tabs.update(tabId, { url: targetUrl });
       }
     });
   } else {
@@ -777,35 +786,53 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
       if (!syncData) break;
 
-      // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
-      if (currentRoomState?.isHost && !currentRoomState.currentUrl && sender.tab?.url) {
-        currentRoomState.currentUrl = sender.tab.url;
-        persistRoomSession(currentRoomState);
-      }
-
-      // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
-      if (sender.tab?.url && currentRoomState?.currentUrl) {
-        const senderVideoId = getVideoIdentifier(sender.tab.url);
-        const roomVideoId = getVideoIdentifier(currentRoomState.currentUrl);
-        if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
-          console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sender.tab.url})`);
-          break;
+      const handleForwardSync = (room: RoomStateInfo | null) => {
+        if (!room) {
+          console.warn('[Background] BG_SYNC_STATE 捨棄：尚未加入房間或工作階段已丟失');
+          return;
         }
-      }
 
-      console.log(`[Background] 轉發影音同步事件: action=${syncData.action}, time=${syncData.currentTime?.toFixed?.(2)}s, mode=${currentRoomState?.mode}, p2pStatus=${currentRoomState?.p2pStatus}`);
+        // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
+        if (room.isHost && !room.currentUrl && sender.tab?.url) {
+          room.currentUrl = sender.tab.url;
+          persistRoomSession(room);
+        }
 
-      if (currentRoomState?.mode === 'P2P' && currentRoomState?.p2pStatus === 'CONNECTED') {
-        chrome.runtime.sendMessage({
-          type: 'OFFSCREEN_SEND_DATA',
-          payload: syncData
-        } as ExtensionMessage).catch(() => {});
-      } else if (socket && currentRoomState) {
-        socket.emit('SYNC_STATE', {
-          event: 'SYNC_STATE',
-          roomId: currentRoomState.roomId,
-          targetGuestSocketId,
-          data: syncData
+        // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
+        if (sender.tab?.url && room.currentUrl) {
+          const senderVideoId = getVideoIdentifier(sender.tab.url);
+          const roomVideoId = getVideoIdentifier(room.currentUrl);
+          if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
+            console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sender.tab.url})`);
+            return;
+          }
+        }
+
+        console.log(`[Background] 轉發影音同步事件: action=${syncData.action}, time=${syncData.currentTime?.toFixed?.(2)}s, mode=${room.mode}, p2pStatus=${room.p2pStatus}`);
+
+        if (room.mode === 'P2P') {
+          chrome.runtime.sendMessage({
+            type: 'OFFSCREEN_SEND_DATA',
+            payload: syncData
+          } as ExtensionMessage).catch(() => {});
+        } else if (socket) {
+          socket.emit('SYNC_STATE', {
+            event: 'SYNC_STATE',
+            roomId: room.roomId,
+            targetGuestSocketId,
+            data: syncData
+          });
+        }
+      };
+
+      if (currentRoomState) {
+        handleForwardSync(currentRoomState);
+      } else {
+        chrome.storage?.local?.get([SESSION_STORAGE_KEY], (res) => {
+          if (res?.[SESSION_STORAGE_KEY]) {
+            currentRoomState = res[SESSION_STORAGE_KEY];
+          }
+          handleForwardSync(currentRoomState);
         });
       }
       break;

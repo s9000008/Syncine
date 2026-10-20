@@ -246,16 +246,28 @@ function isYouTubeAdPlaying(): boolean {
   }
   if (!host.includes('youtube.com')) return false;
 
-  // 1. YouTube 播放器容器標準廣告 class 判定 (ad-showing / ad-interrupting)
+  // 判定真實可見之 YouTube 廣告元素：
+  // 必須同時存在 ad-showing / ad-interrupting 且覆蓋層中有實際可見的廣告文本、倒數或跳過按鈕
+  // 杜絕廣告攔截器 (如 uBlock Origin / Brave Shields) 攔截廣告後遺留之 DOM class 誤判偽陽性
   const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-  if (player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) {
-    return true;
-  }
+  const isAdClassPresent = Boolean(
+    player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))
+  );
 
-  // 2. 廣告覆蓋層判定：僅在具備明確跳過按鈕且按鈕可見時判定為廣告
-  const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
-  if (skipBtn && (skipBtn as HTMLElement).offsetWidth > 0) {
-    return true;
+  if (!isAdClassPresent) return false;
+
+  // 尋找真實可見的廣告文字或跳過按鈕覆蓋層 (寬高皆大於 0 且未被 display: none / visibility: hidden 隱藏)
+  const adElement = document.querySelector(
+    '.ytp-ad-text, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-preview-container, .ytp-ad-duration-remaining'
+  ) as HTMLElement | null;
+
+  if (adElement && adElement.offsetWidth > 0 && adElement.offsetHeight > 0) {
+    try {
+      const style = window.getComputedStyle(adElement);
+      if (style.display !== 'none' && style.visibility !== 'hidden') {
+        return true;
+      }
+    } catch (_) {}
   }
 
   return false;
