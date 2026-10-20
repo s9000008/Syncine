@@ -495,18 +495,25 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
 
 function broadcastToVideoTabs(msg: any) {
   chrome.tabs.query({}, (tabs) => {
+    let sentCount = 0;
     tabs.forEach((tab) => {
+      const pendingUrl = (tab as any).pendingUrl;
       if (
         tab.id &&
-        tab.url &&
-        (tab.url.includes('youtube.com') ||
+        ((tab.url && (tab.url.includes('youtube.com') ||
           tab.url.includes('bilibili.com') ||
           tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me'))
+          tab.url.includes('anime1.me'))) ||
+        (pendingUrl && (pendingUrl.includes('youtube.com') ||
+          pendingUrl.includes('bilibili.com') ||
+          pendingUrl.includes('nicovideo.jp') ||
+          pendingUrl.includes('anime1.me'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+        sentCount++;
       }
     });
+    console.log(`[Background] broadcastToVideoTabs (${msg?.type || 'unknown'}): 已發送至 ${sentCount} 個影片分頁 (系統查詢到 ${tabs.length} 個分頁)`);
   });
 }
 
@@ -768,6 +775,14 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       const syncData = payload?.data ?? (request as any).data;
       const targetGuestSocketId = payload?.targetGuestSocketId ?? (request as any).targetGuestSocketId;
 
+      if (!syncData) break;
+
+      // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
+      if (currentRoomState?.isHost && !currentRoomState.currentUrl && sender.tab?.url) {
+        currentRoomState.currentUrl = sender.tab.url;
+        persistRoomSession(currentRoomState);
+      }
+
       // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
       if (sender.tab?.url && currentRoomState?.currentUrl) {
         const senderVideoId = getVideoIdentifier(sender.tab.url);
@@ -777,6 +792,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           break;
         }
       }
+
+      console.log(`[Background] 轉發影音同步事件: action=${syncData.action}, time=${syncData.currentTime?.toFixed?.(2)}s, mode=${currentRoomState?.mode}, p2pStatus=${currentRoomState?.p2pStatus}`);
 
       if (currentRoomState?.mode === 'P2P' && currentRoomState?.p2pStatus === 'CONNECTED') {
         chrome.runtime.sendMessage({
@@ -969,7 +986,18 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
 
     case 'GET_ROOM_STATE': {
-      sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+      if (currentRoomState) {
+        sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+      } else {
+        chrome.storage?.local?.get([SESSION_STORAGE_KEY, 'syncine_user_id'], (result) => {
+          if (result?.[SESSION_STORAGE_KEY]) {
+            currentRoomState = result[SESSION_STORAGE_KEY];
+            console.log('[Background] GET_ROOM_STATE 從本機 storage 成功還原房間狀態:', currentRoomState?.roomId);
+          }
+          sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+        });
+        return true;
+      }
       break;
     }
 
@@ -1126,13 +1154,16 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       }
 
       if (syncData.action) {
+        console.log(`[Background] 收到 DataChannel 影音操作 (${syncData.action})，廣播至目標分頁`);
         broadcastToVideoTabs({
           type: 'CS_SYNC_RECEIVED',
           payload: { data: syncData }
         });
       } else if (syncData.type === 'REDIRECT_ROOM') {
+        console.log(`[Background] 收到 DataChannel 推播網址 (${syncData.targetUrl})，執行跳轉並保存房間狀態`);
         if (currentRoomState) {
           currentRoomState.currentUrl = syncData.targetUrl;
+          persistRoomSession(currentRoomState);
         }
         verifyAndRedirect(syncData.targetUrl);
         broadcastToVideoTabs({
@@ -1140,8 +1171,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           payload: currentRoomState
         });
       } else if (syncData.type === 'TOGGLE_PERMISSION') {
+        console.log(`[Background] 收到 DataChannel 權限變更 (${syncData.allowGuestControl})`);
         if (currentRoomState) {
           currentRoomState.allowGuestControl = syncData.allowGuestControl;
+          persistRoomSession(currentRoomState);
         }
         broadcastToVideoTabs({
           type: 'CS_PERMISSION_UPDATED',

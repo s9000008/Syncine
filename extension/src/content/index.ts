@@ -252,11 +252,13 @@ function isYouTubeAdPlaying(): boolean {
     return true;
   }
 
-  // 2. 廣告覆蓋層元素判定 (注意：勿單純判定 .video-ads，因其為永久容器且在無廣告時 offsetWidth 仍大於 0)
-  const adOverlay = document.querySelector(
-    '.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container'
-  );
-  return Boolean(adOverlay && (adOverlay as HTMLElement).offsetWidth > 0);
+  // 2. 廣告覆蓋層判定：僅在具備明確跳過按鈕且按鈕可見時判定為廣告
+  const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+  if (skipBtn && (skipBtn as HTMLElement).offsetWidth > 0) {
+    return true;
+  }
+
+  return false;
 }
 
 // ----------------------------------------------------
@@ -295,6 +297,31 @@ function stopHeartbeat() {
   }
 }
 
+/**
+ * 瀏覽器自動播放政策 (Autoplay Policy) 彈性降級播放輔助函式
+ * 若瀏覽器因「使用者尚未與本頁面互動」攔截 video.play()，自動轉為靜音播放以確保同步，
+ * 並在使用者首次點擊或按鍵時自動解除靜音。
+ */
+function safePlayVideo(video: HTMLVideoElement) {
+  if (!video.paused) return;
+  video.play().catch((err) => {
+    console.warn('[Syncine] video.play() 攔截 (受瀏覽器 Autoplay 政策限制):', err);
+    video.muted = true;
+    video.play().then(() => {
+      console.log('[Syncine] 由於瀏覽器 Autoplay 限制，已先自動靜音並開始播放，點擊頁面任意處即可開啟聲音');
+      const unmute = () => {
+        video.muted = false;
+        window.removeEventListener('click', unmute);
+        window.removeEventListener('keydown', unmute);
+      };
+      window.addEventListener('click', unmute, { once: true });
+      window.addEventListener('keydown', unmute, { once: true });
+    }).catch((e) => {
+      console.error('[Syncine] 靜音播放仍然被攔截:', e);
+    });
+  });
+}
+
 // ----------------------------------------------------
 // 5. 5 秒容差與單程延遲補償演算法 (規格 4.2)
 // ----------------------------------------------------
@@ -303,10 +330,17 @@ function applySyncState(data: SyncData) {
     const v = findVideoElement();
     if (v) attachVideoListeners(v);
   }
-  if (!targetVideo || !roomState.isInRoom) return;
+  if (!targetVideo) {
+    console.warn('[Syncine] applySyncState 略過: 未能鎖定 Target Video DOM');
+    return;
+  }
+  if (!roomState.isInRoom) {
+    console.warn('[Syncine] applySyncState 略過: 本分頁尚未處於房間中 (isInRoom=false)');
+    return;
+  }
   // 觀眾端防護：若自身尚未處於目標影片，不套用時間軸校準，避免分頁未跳轉前時間跳動
   if (!isCurrentActiveVideoTab()) {
-    console.log('[Syncine] 當前分頁影片與房間目標不符，略過時間軸同步');
+    console.log(`[Syncine] 當前分頁影片與房間目標不符，略過時間軸同步 (myId: ${getVideoIdentifier(window.location.href)}, roomId: ${getVideoIdentifier(roomState.currentUrl)})`);
     return;
   }
 
@@ -338,16 +372,16 @@ function applySyncState(data: SyncData) {
 
   if (action === 'PLAY') {
     roomPlaybackState = 'PLAYING';
+    console.log(`[Syncine ContentScript] 執行同步播放 (PLAY) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s, 差: ${timeDiff.toFixed(2)}s)`);
     // 只有在時間差大於 0.5 秒或處於不同播放狀態時校準進度，避免極小誤差造成重複 Seek
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
     }
     lastSyncedTime = targetVideo.currentTime;
-    if (targetVideo.paused) {
-      targetVideo.play().catch((err) => console.log('[Syncine Play Intercepted]:', err));
-    }
+    safePlayVideo(targetVideo);
   } else if (action === 'PAUSE') {
     roomPlaybackState = 'PAUSED';
+    console.log(`[Syncine ContentScript] 執行同步暫停 (PAUSE) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s)`);
     // 暫停時若時間差距小於 0.5 秒直接 pause，不強制 seek，消除播放器暫停時的畫面閃爍與誤判卡頓
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
@@ -355,17 +389,16 @@ function applySyncState(data: SyncData) {
     lastSyncedTime = targetVideo.currentTime;
     targetVideo.pause();
   } else if (action === 'SEEK') {
+    console.log(`[Syncine ContentScript] 執行同步進度跳轉 (SEEK) -> 目標時間: ${targetServerTime.toFixed(2)}s, 發送端狀態: ${serverPaused ? '暫停' : '播放'}`);
     targetVideo.currentTime = targetServerTime;
     lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
       roomPlaybackState = 'PLAYING';
-      console.log('[Syncine Seek] 發送端正在播放，接收端跟隨同步播放');
-      targetVideo.play().catch((err) => console.log('[Syncine Seek Play Intercepted]:', err));
+      safePlayVideo(targetVideo);
     } else if (serverPaused === true) {
       roomPlaybackState = 'PAUSED';
-      console.log('[Syncine Seek] 發送端處於暫停，接收端跟隨暫停');
       targetVideo.pause();
     }
   } else if (action === 'HEARTBEAT') {
@@ -377,7 +410,7 @@ function applySyncState(data: SyncData) {
         targetVideo.pause();
       } else if (!serverPaused && targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為播放，觀眾對齊播放');
-        targetVideo.play().catch(() => {});
+        safePlayVideo(targetVideo);
       }
     }
 
@@ -437,6 +470,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       return;
     }
 
+    console.log(`[Syncine Host] 捕捉到本機播放操作 (play)，發送 BG_SYNC_STATE: PLAY (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -469,6 +503,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       return;
     }
 
+    console.log(`[Syncine Host] 捕捉到本機暫停操作 (pause)，發送 BG_SYNC_STATE: PAUSE (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -488,6 +523,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     // 若跳轉前處於播放狀態，或當前已開播，則目標狀態認定為播放中 (paused: false)
     const isPaused = targetVideo.paused && !wasPlayingBeforeSeek;
 
+    console.log(`[Syncine Host] 捕捉到本機進度跳轉 (seek)，發送 BG_SYNC_STATE: SEEK -> ${targetVideo.currentTime.toFixed(2)}s (paused: ${isPaused})`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -696,8 +732,10 @@ function queryInitialRoomState() {
   if (window.self !== window.top) return;
   chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
     if (chrome.runtime.lastError) {
+      console.warn('[Syncine ContentScript] queryInitialRoomState 異常:', chrome.runtime.lastError.message);
       return;
     }
+    console.log('[Syncine ContentScript] queryInitialRoomState 回傳房間狀態:', res?.roomState);
     if (res?.roomState) {
       roomState = {
         isInRoom: true,
@@ -725,6 +763,7 @@ chrome.runtime.onMessage.addListener((request) => {
   const { type, payload } = request;
 
   if (type === 'CS_SYNC_RECEIVED') {
+    console.log('[Syncine ContentScript] 收到遠端同步指令 (CS_SYNC_RECEIVED):', payload?.data);
     applySyncState(payload.data);
   } else if (type === 'CS_ROOM_STATE_CHANGED') {
     if (payload) {
