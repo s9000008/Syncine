@@ -6,8 +6,8 @@ export const zhCN: TranslationSchema = {
     name: 'Syncine (同映)',
     tagline: '远程视频同步播放 (Watch Party)',
     defaultVersion: APP_VERSION,
-    engineLabel: 'Syncine Engine • 支持 YouTube / Bilibili',
-    supportedPlatforms: 'YouTube / Bilibili',
+    engineLabel: 'Syncine • YouTube / Bilibili / Niconico / Anime1',
+    supportedPlatforms: 'YouTube / Bilibili / Niconico / Anime1',
   },
   connectionStatus: {
     reconnecting: '正在重新连接...',
@@ -25,9 +25,11 @@ export const zhCN: TranslationSchema = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube 视频标签页已连接',
     bilibiliConnected: '📺 哔哩哔哩视频标签页已连接',
-    notSupported: '💡 请打开 YouTube 或哔哩哔哩网页以进行同步观影',
+    niconicoConnected: '📺 Niconico 视频标签页已连接',
+    anime1Connected: '🌸 Anime1.me 视频标签页已连接',
+    notSupported: '请打开 YouTube / Bilibili / Niconico / Anime1 视频',
     supportBadge: '支持',
-    singleTabHint: '建议浏览器仅同时打开一个支持的视频标签页，以避免同步干扰。',
+    singleTabHint: '建议同时仅打开一个支持的视频标签页，避免同步干扰。',
     hintPrefix: '💡 提示',
   },
   connectionModes: {

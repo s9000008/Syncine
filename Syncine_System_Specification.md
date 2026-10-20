@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.3)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.6.0)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -11,7 +11,9 @@
 
 ### 1.2 支援目標網站（當前版本）
 1. **YouTube**：標準網頁版影片播放頁（處理 SPA 網頁架構與廣告過濾）。
-2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片播放頁（處理動態載入 DOM）。
+2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM）。
+3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
+4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
 
 > [!NOTE]
 > **功能範疇調整說明**：
@@ -172,8 +174,12 @@ if (timeDiff > 5) {
 ```javascript
 // AI 實作：網域安全過濾規則 (當前支援核心站點)
 const HOST_WHITELIST = [
+    /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
     /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
-    /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/
+    /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
+    /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
+    /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
+    /^https:\/\/anime1\.me\/.+/
 ];
 
 function verifyAndRedirect(targetUrl) {

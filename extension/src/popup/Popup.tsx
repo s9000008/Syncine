@@ -113,7 +113,9 @@ export default function Popup() {
 
   const isYouTube = activeTabUrl.includes('youtube.com/watch');
   const isBilibili = activeTabUrl.includes('bilibili.com/video') || activeTabUrl.includes('bilibili.com/bangumi');
-  const isTargetSite = isYouTube || isBilibili;
+  const isNiconico = activeTabUrl.includes('nicovideo.jp/watch/');
+  const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(activeTabUrl);
+  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -445,31 +447,49 @@ export default function Popup() {
 
         {/* 當前分頁狀態提示條 */}
         <div
-          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border ${
+          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border cursor-help ${
             isTargetSite
               ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
               : 'bg-amber-950/30 text-amber-300 border-amber-800/40'
           }`}
+          title={
+            isYouTube
+              ? t.tabStatus.youtubeConnected
+              : isBilibili
+              ? t.tabStatus.bilibiliConnected
+              : isNiconico
+              ? t.tabStatus.niconicoConnected
+              : isAnime1
+              ? t.tabStatus.anime1Connected
+              : t.tabStatus.notSupported
+          }
         >
-          <div className="flex items-center gap-1.5 truncate max-w-[280px]">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <Video className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="truncate">
               {isYouTube
                 ? t.tabStatus.youtubeConnected
                 : isBilibili
                 ? t.tabStatus.bilibiliConnected
+                : isNiconico
+                ? t.tabStatus.niconicoConnected
+                : isAnime1
+                ? t.tabStatus.anime1Connected
                 : t.tabStatus.notSupported}
             </span>
           </div>
           {isTargetSite && (
-            <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
+            <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50 flex-shrink-0 ml-2">
               {t.tabStatus.supportBadge}
             </span>
           )}
         </div>
 
         {/* 建議僅開啟單一分頁防護提示 */}
-        <div className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5">
+        <div
+          className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5 cursor-help"
+          title={t.tabStatus.singleTabHint}
+        >
           <span className="text-amber-400 font-bold flex-shrink-0">{t.tabStatus.hintPrefix}</span>
           <span className="truncate">{t.tabStatus.singleTabHint}</span>
         </div>

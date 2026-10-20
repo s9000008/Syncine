@@ -4,12 +4,14 @@ import { DEFAULT_SERVER_URL } from '../config';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
-// 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇)
+// 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇、Niconico 與 Anime1.me)
 const HOST_WHITELIST = [
   /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
   /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
-  /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/
+  /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
+  /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/anime1\.me\/.+/
 ];
 
 let socket: Socket | null = null;
@@ -483,7 +485,14 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
 function broadcastToVideoTabs(msg: any) {
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
-      if (tab.id && tab.url && (tab.url.includes('youtube.com') || tab.url.includes('bilibili.com'))) {
+      if (
+        tab.id &&
+        tab.url &&
+        (tab.url.includes('youtube.com') ||
+          tab.url.includes('bilibili.com') ||
+          tab.url.includes('nicovideo.jp') ||
+          tab.url.includes('anime1.me'))
+      ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
       }
     });

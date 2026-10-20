@@ -6,8 +6,8 @@ export const enUS: TranslationSchema = {
     name: 'Syncine',
     tagline: 'Remote Watch Party for Web Videos',
     defaultVersion: APP_VERSION,
-    engineLabel: 'Syncine Engine • Supports YouTube / Bilibili',
-    supportedPlatforms: 'YouTube / Bilibili',
+    engineLabel: 'Syncine • YT / Bilibili / Niconico / Anime1',
+    supportedPlatforms: 'YouTube / Bilibili / Niconico / Anime1',
   },
   connectionStatus: {
     reconnecting: 'Reconnecting...',
@@ -25,9 +25,11 @@ export const enUS: TranslationSchema = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube tab connected',
     bilibiliConnected: '📺 Bilibili tab connected',
-    notSupported: '💡 Open YouTube or Bilibili video to start watch party',
+    niconicoConnected: '📺 Niconico tab connected',
+    anime1Connected: '🌸 Anime1.me tab connected',
+    notSupported: 'Open YT, Bilibili, Niconico or Anime1 to start',
     supportBadge: 'Supported',
-    singleTabHint: 'Only one supported video tab is recommended to avoid sync conflicts.',
+    singleTabHint: 'Use a single video tab to avoid sync conflicts.',
     hintPrefix: '💡 Tip',
   },
   connectionModes: {

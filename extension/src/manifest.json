@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "zh_TW",
   "name": "__MSG_appName__",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "__MSG_appDesc__",
   "permissions": [
     "storage",
@@ -14,6 +14,8 @@
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://www.bilibili.com/*",
+    "https://www.nicovideo.jp/*",
+    "https://anime1.me/*",
     "https://syncine.fly.dev/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -27,7 +29,9 @@
       "matches": [
         "https://www.youtube.com/watch*",
         "https://www.bilibili.com/video/*",
-        "https://www.bilibili.com/bangumi/play/*"
+        "https://www.bilibili.com/bangumi/play/*",
+        "https://www.nicovideo.jp/watch/*",
+        "https://anime1.me/*"
       ],
       "js": [
         "src/content/index.ts"

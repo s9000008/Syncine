@@ -405,6 +405,67 @@ assert(extPkg.version === manifestJson.version, `package.json 與 manifest.json 
 assert(versionTsSource.includes("import pkg from '../package.json'"), 'version.ts 作為單一真理來源自動讀取 package.json');
 assert(zhTwSource.includes('defaultVersion: APP_VERSION'), '語系 defaultVersion 自動引用 APP_VERSION 免除硬編碼');
 
+// ----------------------------------------------------
+// 模組 10: Niconico 與 Anime1.me 平台擴充與既有功能零迴歸驗證
+// ----------------------------------------------------
+console.log('\n--- 模組 10: Niconico 與 Anime1.me 平台擴充與既有功能零迴歸驗證 ---');
+
+// 1. Manifest 權限與注入範圍驗證
+const hostPerms = manifestJson.host_permissions || [];
+const csMatches = manifestJson.content_scripts?.[0]?.matches || [];
+assert(hostPerms.includes('https://www.youtube.com/*'), 'Manifest 完整保留 YouTube host_permissions');
+assert(hostPerms.includes('https://www.bilibili.com/*'), 'Manifest 完整保留 Bilibili host_permissions');
+assert(hostPerms.includes('https://www.nicovideo.jp/*'), 'Manifest 新增 Niconico host_permissions');
+assert(hostPerms.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me host_permissions');
+assert(csMatches.includes('https://www.youtube.com/watch*'), 'Manifest 完整保留 YouTube content_scripts matches');
+assert(csMatches.includes('https://www.bilibili.com/video/*'), 'Manifest 完整保留 Bilibili video matches');
+assert(csMatches.includes('https://www.nicovideo.jp/watch/*'), 'Manifest 新增 Niconico watch matches');
+assert(csMatches.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me matches');
+
+// 2. 影片唯一識別碼 (getVideoIdentifier) 多平台驗證
+import { execSync } from 'child_process';
+const protoModulePath = path.join(__dirname, 'dist_test/protocol.mjs');
+fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
+execSync(`npx esbuild "${path.join(__dirname, 'src/types/protocol.ts')}" --bundle --format=esm --outfile="${protoModulePath}"`, { stdio: 'pipe' });
+const { getVideoIdentifier } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
+
+assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s') === 'yt:dQw4w9WgXcQ', 'getVideoIdentifier 正確提取 YouTube ID');
+assert(getVideoIdentifier('https://www.bilibili.com/video/BV1xx411c7mD?p=1') === 'bili:BV1xx411c7mD', 'getVideoIdentifier 正確提取 Bilibili BV 號');
+assert(getVideoIdentifier('https://www.nicovideo.jp/watch/sm9?ref=search_key_video') === 'nico:sm9', 'getVideoIdentifier 正確提取 Niconico sm 編號並忽略查詢參數');
+assert(getVideoIdentifier('https://www.nicovideo.jp/watch/so43652101') === 'nico:so43652101', 'getVideoIdentifier 正確提取 Niconico 官方動畫 so 編號');
+assert(getVideoIdentifier('https://anime1.me/23456') === 'anime1:23456', 'getVideoIdentifier 正確提取 Anime1.me 單集 ID');
+assert(
+  getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%AD%A3/') === 'anime1:category/2026年冬季',
+  'getVideoIdentifier 正確提取 Anime1.me 番劇分類路徑'
+);
+
+// 3. Content Script 選擇器與懶載入輔助驗證 (確保既有 YouTube/Bilibili 完全不變)
+assert(contentScriptSource.includes("document.querySelector('video.html5-main-video')"), 'Content Script 完整保留 YouTube 專用選擇器');
+assert(contentScriptSource.includes("document.querySelector('.bpx-player-video-wrap video')"), 'Content Script 完整保留 Bilibili 專用選擇器');
+assert(contentScriptSource.includes('findNiconicoVideo'), 'Content Script 實作 Niconico 智慧選擇器 (排除廣告與空殼 Video)');
+assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 實作 Anime1.me Video.js (.vjs-tech) 選擇器');
+assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 實作 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
+
+// 4. Background 白名單與廣播範圍驗證
+assert(backgroundScriptSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'Background HOST_WHITELIST 支援 Niconico 安全跳轉');
+assert(backgroundScriptSource.includes('anime1\\.me\\/.+'), 'Background HOST_WHITELIST 支援 Anime1.me 安全跳轉');
+assert(
+  backgroundScriptSource.includes("tab.url.includes('nicovideo.jp')") &&
+    backgroundScriptSource.includes("tab.url.includes('anime1.me')"),
+  'Background broadcastToVideoTabs 涵蓋 Niconico 與 Anime1.me 分頁'
+);
+
+// 5. 四大語系與 Popup 狀態顯示驗證
+for (const file of localeFiles) {
+  const content = fs.readFileSync(path.join(__dirname, 'src/locales', file), 'utf-8');
+  assert(content.includes('niconicoConnected:'), `${file} 包含 niconicoConnected 翻譯`);
+  assert(content.includes('anime1Connected:'), `${file} 包含 anime1Connected 翻譯`);
+}
+assert(
+  popupTsx.includes('isNiconico') && popupTsx.includes('isAnime1'),
+  'Popup.tsx 支援偵測並顯示 Niconico 與 Anime1.me 連線狀態'
+);
+
 console.log('\n====================================================');
 console.log(`📊 擴充測試執行完畢: 共 ${passed + failed} 項測試 | 通過: ${passed} | 失敗: ${failed}`);
 console.log('====================================================');

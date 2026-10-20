@@ -5,8 +5,8 @@ export const zhTW = {
     name: 'Syncine (同映)',
     tagline: '遠端影片同步播放 (Watch Party)',
     defaultVersion: APP_VERSION,
-    engineLabel: 'Syncine Engine • 支援 YouTube / Bilibili',
-    supportedPlatforms: 'YouTube / Bilibili',
+    engineLabel: 'Syncine • YouTube / Bilibili / Niconico / Anime1',
+    supportedPlatforms: 'YouTube / Bilibili / Niconico / Anime1',
   },
   connectionStatus: {
     reconnecting: '重新連線回魂中...',
@@ -24,9 +24,11 @@ export const zhTW = {
   tabStatus: {
     youtubeConnected: '🎬 YouTube 影片分頁已連線',
     bilibiliConnected: '📺 Bilibili 影片分頁已連線',
-    notSupported: '💡 請開啟 YouTube 或 Bilibili 網頁以進行同步觀影',
+    niconicoConnected: '📺 Niconico 影片分頁已連線',
+    anime1Connected: '🌸 Anime1.me 影片分頁已連線',
+    notSupported: '請開啟 YouTube / Bilibili / Niconico / Anime1 影片',
     supportBadge: '支援',
-    singleTabHint: '建議瀏覽器同時僅開啟一個支援的影片分頁，以避免同步干擾。',
+    singleTabHint: '建議同時僅開啟一個支援的影片分頁，避免同步干擾。',
     hintPrefix: '💡 提示',
   },
   connectionModes: {

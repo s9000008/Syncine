@@ -165,6 +165,8 @@ export interface P2PDiagnosticData {
  * 解析影片唯一標識 (Video Identifier)
  * YouTube: 提取 v 參數 (如: yt:dQw4w9WgXcQ)
  * Bilibili: 提取 BV 號 (如: bili:BV1xx411c7mD)
+ * Niconico: 提取 watch ID (如: nico:sm9, nico:so43652101)
+ * Anime1.me: 提取單集或分類路徑 (如: anime1:12345)
  */
 export function getVideoIdentifier(rawUrl?: string): string | null {
   if (!rawUrl) return null;
@@ -190,6 +192,22 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       const match = url.pathname.match(/\/(BV[a-zA-Z0-9]+)/i);
       if (match && match[1]) {
         return `bili:${match[1]}`;
+      }
+    }
+
+    // 3. Niconico 影片辨識 (如: sm9, so43652101, nm12345, 純數字頻道影片 ID)
+    if (url.hostname.includes('nicovideo.jp')) {
+      const match = url.pathname.match(/\/watch\/([a-zA-Z0-9]+)/);
+      if (match && match[1]) {
+        return `nico:${match[1]}`;
+      }
+    }
+
+    // 4. Anime1.me 影片辨識 (單集頁 /12345 或番劇分類頁 /category/...)
+    if (url.hostname.includes('anime1.me')) {
+      const cleanPath = decodeURIComponent(url.pathname).replace(/^\/+|\/+$/g, '');
+      if (cleanPath) {
+        return `anime1:${cleanPath}`;
       }
     }
 

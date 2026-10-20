@@ -66,6 +66,67 @@ function isCurrentActiveVideoTab(): boolean {
 // ----------------------------------------------------
 // 3. 跨平台 Video 選擇器與動態捕捉
 // ----------------------------------------------------
+function findNiconicoVideo(): HTMLVideoElement | null {
+  const allVideos = Array.from(
+    document.querySelectorAll(
+      '[data-name="VideoPlayer"] video, [data-name="MainVideoPlayer"] video, #MainVideoPlayer video, .MainVideoPlayer video, video'
+    )
+  ) as HTMLVideoElement[];
+
+  // 排除 Niconico 廣告容器內的 video，避免誤綁廣告播放器
+  const candidates = allVideos.filter(
+    (v) => !v.closest('[class*="VideoAd"], #nv_watch_VideoAdContainer, [class*="AdContainer"]')
+  );
+  if (candidates.length === 0) return null;
+
+  // 1. 優先鎖定正在播放且已載入的 video
+  const playing = candidates.find((v) => !v.paused && v.readyState > 0);
+  if (playing) return playing;
+
+  // 2. 優先鎖定具備有效 src (如 blob:) 且可視寬度大於 0 的主播放器 video
+  const activeMain = candidates.find(
+    (v) => Boolean(v.currentSrc || v.getAttribute('src')) && v.offsetWidth > 0
+  );
+  if (activeMain) return activeMain;
+
+  // 3. 鎖定具備有效 src 或 readyState > 0 的 video
+  const withSrc = candidates.find(
+    (v) => Boolean(v.currentSrc || v.getAttribute('src')) || v.readyState > 0
+  );
+  if (withSrc) return withSrc;
+
+  return candidates[0];
+}
+
+function findAnime1Video(): HTMLVideoElement | null {
+  const videos = Array.from(
+    document.querySelectorAll('video.vjs-tech, .video-js video, .vjscontainer video, video')
+  ) as HTMLVideoElement[];
+  if (videos.length === 0) return null;
+
+  // 1. 優先鎖定正在播放中的 video (支援番劇合集頁切換集數)
+  const playing = videos.find((v) => !v.paused);
+  if (playing) return playing;
+
+  // 2. 若已綁定之 targetVideo 仍在 DOM 中且已載入串流來源，維持鎖定
+  if (
+    targetVideo &&
+    document.contains(targetVideo) &&
+    (Boolean(targetVideo.currentSrc || targetVideo.getAttribute('src')) || targetVideo.readyState > 0)
+  ) {
+    return targetVideo;
+  }
+
+  // 3. 選擇已載入串流來源 (點過播放鈕) 的 video
+  const loaded = videos.find(
+    (v) => Boolean(v.currentSrc || v.getAttribute('src')) || v.readyState > 0
+  );
+  if (loaded) return loaded;
+
+  // 4. 預設選擇第一個可視的 video.vjs-tech
+  return videos.find((v) => v.offsetWidth > 0) || videos[0];
+}
+
 function findVideoElement(): HTMLVideoElement | null {
   const host = window.location.hostname;
 
@@ -73,15 +134,81 @@ function findVideoElement(): HTMLVideoElement | null {
     return document.querySelector('video.html5-main-video') as HTMLVideoElement;
   } else if (host.includes('bilibili.com')) {
     return document.querySelector('.bpx-player-video-wrap video') || document.querySelector('video') as HTMLVideoElement;
+  } else if (host.includes('nicovideo.jp')) {
+    return findNiconicoVideo();
+  } else if (host.includes('anime1.me')) {
+    return findAnime1Video();
   } else if (host.includes('google.com')) {
     return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
   }
   return document.querySelector('video') as HTMLVideoElement;
 }
 
-// YouTube SPA 導航與廣告偵測
+/**
+ * Anime1.me 專屬：懶載入播放器自動喚醒機制
+ * Anime1 在使用者點擊 .vjs-big-play-button 前，<video class="vjs-tech"> 無 src 屬性。
+ * 當收到遠端同步播放/跳轉指令而本地尚未初始化串流時，自動點擊播放鈕觸發 data-apireq 載入並對齊進度。
+ */
+function ensureAnime1SourceReady(
+  video: HTMLVideoElement,
+  targetTime: number,
+  shouldPlay: boolean
+): boolean {
+  if (!window.location.hostname.includes('anime1.me')) return true;
+  if (Boolean(video.currentSrc || video.getAttribute('src')) || video.readyState > 0) {
+    return true;
+  }
+
+  (video as any).__syncinePendingTarget = { targetTime, shouldPlay };
+
+  if (!(video as any).__syncineWakingUp) {
+    (video as any).__syncineWakingUp = true;
+    const container =
+      video.closest('.video-js, .vjscontainer, .ap-video-wrapper') || document;
+    const bigPlayBtn = container.querySelector('.vjs-big-play-button') as HTMLElement | null;
+
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        (video as any).__syncineWakingUp = false;
+        const pending = (video as any).__syncinePendingTarget;
+        if (!pending) return;
+        markProgrammatic(1000);
+        if (pending.targetTime > 0.5) {
+          video.currentTime = pending.targetTime;
+        }
+        lastSyncedTime = video.currentTime;
+        if (pending.shouldPlay) {
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+      },
+      { once: true }
+    );
+
+    if (bigPlayBtn) {
+      console.log('[Syncine Anime1] 偵測到播放器尚未初始化串流，自動點擊 .vjs-big-play-button 載入來源');
+      markProgrammatic(1500);
+      bigPlayBtn.click();
+    }
+  }
+
+  return false;
+}
+
+// YouTube 與 Niconico 廣告偵測
 function isYouTubeAdPlaying(): boolean {
-  if (!window.location.hostname.includes('youtube.com')) return false;
+  const host = window.location.hostname;
+  if (host.includes('nicovideo.jp')) {
+    const adContainer =
+      document.querySelector('#nv_watch_VideoAdContainer') ||
+      document.querySelector('[class*="VideoAdContainer"]');
+    if (!adContainer || (adContainer as HTMLElement).offsetWidth === 0) return false;
+    const adVideo = adContainer.querySelector('video') as HTMLVideoElement | null;
+    return Boolean(adVideo && !adVideo.paused && (adVideo.currentSrc || adVideo.getAttribute('src')));
+  }
+  if (!host.includes('youtube.com')) return false;
   const adOverlay = document.querySelector('.video-ads') || document.querySelector('.ytp-ad-player-overlay');
   return !!adOverlay && (adOverlay as HTMLElement).offsetWidth > 0;
 }
@@ -148,6 +275,14 @@ function applySyncState(data: SyncData) {
   const localTime = targetVideo.currentTime;
   const timeDiff = Math.abs(localTime - targetServerTime);
 
+  // Anime1.me 懶載入防護：若收到需播放或跳轉指令但本地播放器尚未點擊載入 src，先自動喚醒載入
+  const needsSource = action === 'PLAY' || action === 'SEEK' || (action === 'HEARTBEAT' && !serverPaused);
+  if (needsSource) {
+    if (!ensureAnime1SourceReady(targetVideo, targetServerTime, !isTargetPaused)) {
+      return;
+    }
+  }
+
   // 標記接下來的 1000ms 為腳本同步操作，防止事件回彈與循環觸發
   markProgrammatic(1000);
 
@@ -207,10 +342,12 @@ function applySyncState(data: SyncData) {
 // 6. 綁定 Video DOM 事件監聽
 // ----------------------------------------------------
 function attachVideoListeners(video: HTMLVideoElement) {
+  if (targetVideo !== video) {
+    targetVideo = video;
+    lastSyncedTime = video.currentTime || 0;
+  }
   if ((video as any).__syncine_attached || (video as any).__coview_attached) return;
   (video as any).__syncine_attached = true;
-  targetVideo = video;
-  lastSyncedTime = video.currentTime || 0;
 
   console.log('[Syncine] 成功綁定 Target Video DOM');
 
@@ -409,20 +546,70 @@ function attachVideoListeners(video: HTMLVideoElement) {
 // ----------------------------------------------------
 // 7. MutationObserver 與初始化
 // ----------------------------------------------------
+let domObserver: MutationObserver | null = null;
+let lastObservedUrl = window.location.href;
+
 function initObserver() {
   const v = findVideoElement();
   if (v) {
     attachVideoListeners(v);
   }
 
-  const observer = new MutationObserver(() => {
-    const video = findVideoElement();
-    if (video && video !== targetVideo) {
-      attachVideoListeners(video);
-    }
-  });
+  if (!domObserver && document.body) {
+    domObserver = new MutationObserver(() => {
+      // Niconico / SPA 網址變更偵測
+      if (window.location.href !== lastObservedUrl) {
+        lastObservedUrl = window.location.href;
+        if (window.location.hostname.includes('nicovideo.jp')) {
+          console.log('[Syncine] 偵測到 Niconico SPA 網頁導航切換');
+          setTimeout(() => {
+            const nextVideo = findVideoElement();
+            if (nextVideo) attachVideoListeners(nextVideo);
+            if (roomState.isInRoom && roomState.isHost) {
+              if (isCurrentActiveVideoTab()) {
+                startHeartbeat();
+              } else {
+                stopHeartbeat();
+              }
+            }
+          }, 800);
+        }
+      }
 
-  observer.observe(document.body, { childList: true, subtree: true });
+      const video = findVideoElement();
+      if (video && video !== targetVideo) {
+        attachVideoListeners(video);
+      }
+    });
+
+    domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+}
+
+// Anime1.me 合集頁與 Niconico 多重 Video 動態切換：於捕獲階段優先鎖定使用者點擊播放之 Video
+if (
+  window.location.hostname.includes('anime1.me') ||
+  window.location.hostname.includes('nicovideo.jp')
+) {
+  document.addEventListener(
+    'play',
+    (e) => {
+      const el = e.target;
+      if (el instanceof HTMLVideoElement) {
+        // 排除 Niconico 廣告容器內的 video
+        if (
+          window.location.hostname.includes('nicovideo.jp') &&
+          el.closest('[class*="VideoAd"], #nv_watch_VideoAdContainer, [class*="AdContainer"]')
+        ) {
+          return;
+        }
+        if (el !== targetVideo) {
+          attachVideoListeners(el);
+        }
+      }
+    },
+    true
+  );
 }
 
 // YouTube SPA 切換影片事件
