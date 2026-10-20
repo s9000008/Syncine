@@ -1,5 +1,15 @@
 export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
 
+// 伺服器端目標網址安全白名單 (縱深防禦：防範惡意 Host 廣播釣魚或偽協定網址)
+export const SERVER_HOST_WHITELIST: RegExp[] = [
+  /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
+  /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
+  /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
+  /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
+  /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/anime1\.me\/.+/
+];
+
 export type SyncineEvent = 
   | 'CREATE_ROOM' 
   | 'CREATE_ROOM_SUCCESS' 

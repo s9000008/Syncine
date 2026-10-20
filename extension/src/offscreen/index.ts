@@ -565,6 +565,7 @@ class PeerJSWebRTCManager {
             } as ExtensionMessage).catch(() => {});
           } else {
             // 一般影音同步指令 (PLAY / PAUSE / SEEK / REDIRECT)
+            console.log('[Syncine Offscreen Guest] 收到 DataChannel 封包:', data);
             chrome.runtime.sendMessage({
               type: 'OFFSCREEN_DATA_RECEIVED',
               payload: data
@@ -607,14 +608,20 @@ class PeerJSWebRTCManager {
   // ----------------------------------------------------
   public sendData(data: any) {
     if (this.role === 'HOST') {
+      let sentCount = 0;
       this.activeConnections.forEach((conn) => {
         if (conn.open) {
           conn.send(data);
+          sentCount++;
         }
       });
+      console.log(`[Syncine Offscreen Host] sendData (${data?.action || data?.type}): 已發送至 ${sentCount} 個 Peer (連線池總數: ${this.activeConnections.size})`);
     } else if (this.role === 'GUEST') {
       if (this.guestConnection && this.guestConnection.open) {
         this.guestConnection.send(data);
+        console.log(`[Syncine Offscreen Guest] sendData (${data?.action || data?.type}): 已發送至 Host`);
+      } else {
+        console.warn(`[Syncine Offscreen Guest] sendData 失敗: 與 Host 連線未開啟 (open=${this.guestConnection?.open})`);
       }
     }
   }

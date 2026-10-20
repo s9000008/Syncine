@@ -1,20 +1,55 @@
 import { SyncData, getVideoIdentifier } from '../types/protocol';
-import { getStandaloneText } from '../locales';
+import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
 
 // ----------------------------------------------------
-// 1. MV3 長連接 Port 保活
+// 1. MV3 長連接 Port 保活與 bfcache 生命週期管理
 // ----------------------------------------------------
 let keepAlivePort: chrome.runtime.Port | null = null;
-try {
-  keepAlivePort = chrome.runtime.connect({ name: 'syncine-keepalive' });
-  keepAlivePort.onDisconnect.addListener(() => {
-    console.log('[Syncine ContentScript] Keep-Alive Port 斷開，試圖重新連線...');
-  });
-} catch (e) {
-  console.warn('[Syncine] 建立 Keep-Alive Port 失敗:', e);
+
+function setupKeepAlivePort() {
+  if (window.self !== window.top) return;
+  try {
+    if (keepAlivePort) {
+      try { keepAlivePort.disconnect(); } catch (_) {}
+      keepAlivePort = null;
+    }
+    keepAlivePort = chrome.runtime.connect({ name: 'syncine-keepalive' });
+    keepAlivePort.onDisconnect.addListener((port) => {
+      // 關鍵：存取 lastError 與 port.error，標記異常已被捕捉，
+      // 防止 Chrome 拋出「Unchecked runtime.lastError: The page keeping the extension port is moved into back/forward cache...」
+      const lastError = chrome.runtime.lastError;
+      const portError = (port as any)?.error;
+      if (lastError || portError) {
+        console.log('[Syncine ContentScript] Keep-Alive Port 正常釋放或因 bfcache 凍結切斷:', lastError?.message || portError?.message);
+      }
+      keepAlivePort = null;
+    });
+  } catch (e) {
+    console.warn('[Syncine] 建立 Keep-Alive Port 失敗:', e);
+  }
 }
+
+// 監聽現代瀏覽器快退快進快取 (Back/Forward Cache, bfcache) 生命週期
+window.addEventListener('pagehide', (event) => {
+  // 當分頁即將進入 bfcache 時主動斷開 Port，防止被 Chrome 強制殺死並報錯
+  if (event.persisted && keepAlivePort) {
+    try { keepAlivePort.disconnect(); } catch (_) {}
+    keepAlivePort = null;
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  // 當分頁從 bfcache 被喚醒時，重新建立 Port 連線並恢復房間狀態
+  if (event.persisted) {
+    setupKeepAlivePort();
+    queryInitialRoomState();
+  }
+});
+
+// 初始化啟動保活 Port
+setupKeepAlivePort();
 
 // ----------------------------------------------------
 // 2. 全域狀態變數
@@ -39,6 +74,7 @@ let seekDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isUserSeeking = false;
 let wasPlayingBeforeSeek = false;
 let lastSyncedTime = 0;
+let roomPlaybackState: 'PLAYING' | 'PAUSED' | 'IDLE' = 'IDLE';
 
 function markProgrammatic(durationMs = 800) {
   programmaticUntilTimestamp = Date.now() + durationMs;
@@ -209,8 +245,32 @@ function isYouTubeAdPlaying(): boolean {
     return Boolean(adVideo && !adVideo.paused && (adVideo.currentSrc || adVideo.getAttribute('src')));
   }
   if (!host.includes('youtube.com')) return false;
-  const adOverlay = document.querySelector('.video-ads') || document.querySelector('.ytp-ad-player-overlay');
-  return !!adOverlay && (adOverlay as HTMLElement).offsetWidth > 0;
+
+  // 判定真實可見之 YouTube 廣告元素：
+  // 必須同時存在 ad-showing / ad-interrupting 且覆蓋層中有實際可見的廣告文本、倒數或跳過按鈕
+  // 杜絕廣告攔截器 (如 uBlock Origin / Brave Shields) 攔截廣告後遺留之 DOM class 誤判偽陽性
+  const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+  const isAdClassPresent = Boolean(
+    player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))
+  );
+
+  if (!isAdClassPresent) return false;
+
+  // 尋找真實可見的廣告文字或跳過按鈕覆蓋層 (寬高皆大於 0 且未被 display: none / visibility: hidden 隱藏)
+  const adElement = document.querySelector(
+    '.ytp-ad-text, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-preview-container, .ytp-ad-duration-remaining'
+  ) as HTMLElement | null;
+
+  if (adElement && adElement.offsetWidth > 0 && adElement.offsetHeight > 0) {
+    try {
+      const style = window.getComputedStyle(adElement);
+      if (style.display !== 'none' && style.visibility !== 'hidden') {
+        return true;
+      }
+    } catch (_) {}
+  }
+
+  return false;
 }
 
 // ----------------------------------------------------
@@ -249,14 +309,50 @@ function stopHeartbeat() {
   }
 }
 
+/**
+ * 瀏覽器自動播放政策 (Autoplay Policy) 彈性降級播放輔助函式
+ * 若瀏覽器因「使用者尚未與本頁面互動」攔截 video.play()，自動轉為靜音播放以確保同步，
+ * 並在使用者首次點擊或按鍵時自動解除靜音。
+ */
+function safePlayVideo(video: HTMLVideoElement) {
+  if (!video.paused) return;
+  video.play().catch((err) => {
+    console.warn('[Syncine] video.play() 攔截 (受瀏覽器 Autoplay 政策限制):', err);
+    video.muted = true;
+    video.play().then(() => {
+      console.log('[Syncine] 由於瀏覽器 Autoplay 限制，已先自動靜音並開始播放，點擊頁面任意處即可開啟聲音');
+      const unmute = () => {
+        video.muted = false;
+        window.removeEventListener('click', unmute);
+        window.removeEventListener('keydown', unmute);
+      };
+      window.addEventListener('click', unmute, { once: true });
+      window.addEventListener('keydown', unmute, { once: true });
+    }).catch((e) => {
+      console.error('[Syncine] 靜音播放仍然被攔截:', e);
+    });
+  });
+}
+
 // ----------------------------------------------------
 // 5. 5 秒容差與單程延遲補償演算法 (規格 4.2)
 // ----------------------------------------------------
 function applySyncState(data: SyncData) {
-  if (!targetVideo || !roomState.isInRoom) return;
+  if (!targetVideo) {
+    const v = findVideoElement();
+    if (v) attachVideoListeners(v);
+  }
+  if (!targetVideo) {
+    console.warn('[Syncine] applySyncState 略過: 未能鎖定 Target Video DOM');
+    return;
+  }
+  if (!roomState.isInRoom) {
+    console.warn('[Syncine] applySyncState 略過: 本分頁尚未處於房間中 (isInRoom=false)');
+    return;
+  }
   // 觀眾端防護：若自身尚未處於目標影片，不套用時間軸校準，避免分頁未跳轉前時間跳動
   if (!isCurrentActiveVideoTab()) {
-    console.log('[Syncine] 當前分頁影片與房間目標不符，略過時間軸同步');
+    console.log(`[Syncine] 當前分頁影片與房間目標不符，略過時間軸同步 (myId: ${getVideoIdentifier(window.location.href)}, roomId: ${getVideoIdentifier(roomState.currentUrl)})`);
     return;
   }
 
@@ -287,15 +383,17 @@ function applySyncState(data: SyncData) {
   markProgrammatic(1000);
 
   if (action === 'PLAY') {
+    roomPlaybackState = 'PLAYING';
+    console.log(`[Syncine ContentScript] 執行同步播放 (PLAY) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s, 差: ${timeDiff.toFixed(2)}s)`);
     // 只有在時間差大於 0.5 秒或處於不同播放狀態時校準進度，避免極小誤差造成重複 Seek
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
     }
     lastSyncedTime = targetVideo.currentTime;
-    if (targetVideo.paused) {
-      targetVideo.play().catch((err) => console.log('[Syncine Play Intercepted]:', err));
-    }
+    safePlayVideo(targetVideo);
   } else if (action === 'PAUSE') {
+    roomPlaybackState = 'PAUSED';
+    console.log(`[Syncine ContentScript] 執行同步暫停 (PAUSE) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s)`);
     // 暫停時若時間差距小於 0.5 秒直接 pause，不強制 seek，消除播放器暫停時的畫面閃爍與誤判卡頓
     if (timeDiff > 0.5) {
       targetVideo.currentTime = targetServerTime;
@@ -303,27 +401,28 @@ function applySyncState(data: SyncData) {
     lastSyncedTime = targetVideo.currentTime;
     targetVideo.pause();
   } else if (action === 'SEEK') {
-    // 主動 Seek 事件無視容差，強制作業更新時間軸
+    console.log(`[Syncine ContentScript] 執行同步進度跳轉 (SEEK) -> 目標時間: ${targetServerTime.toFixed(2)}s, 發送端狀態: ${serverPaused ? '暫停' : '播放'}`);
     targetVideo.currentTime = targetServerTime;
     lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
-      console.log('[Syncine Seek] 發送端正在播放，接收端跟隨同步播放');
-      targetVideo.play().catch((err) => console.log('[Syncine Seek Play Intercepted]:', err));
+      roomPlaybackState = 'PLAYING';
+      safePlayVideo(targetVideo);
     } else if (serverPaused === true) {
-      console.log('[Syncine Seek] 發送端處於暫停，接收端跟隨暫停');
+      roomPlaybackState = 'PAUSED';
       targetVideo.pause();
     }
   } else if (action === 'HEARTBEAT') {
     // 1. 雙向校準播放狀態
     if (typeof serverPaused === 'boolean') {
+      roomPlaybackState = serverPaused ? 'PAUSED' : 'PLAYING';
       if (serverPaused && !targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為暫停，觀眾對齊暫停');
         targetVideo.pause();
       } else if (!serverPaused && targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為播放，觀眾對齊播放');
-        targetVideo.play().catch(() => {});
+        safePlayVideo(targetVideo);
       }
     }
 
@@ -373,12 +472,17 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態');
-      markProgrammatic(400);
-      video.pause();
+      // 僅在房間明確處於 PAUSED 狀態時，觀眾私自點擊播放才回滾至暫停
+      // 若房間本就處於 PLAYING，為正常播放對齊，切勿回滾形成死鎖
+      if (roomPlaybackState === 'PAUSED') {
+        console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態至暫停');
+        markProgrammatic(400);
+        video.pause();
+      }
       return;
     }
 
+    console.log(`[Syncine Host] 捕捉到本機播放操作 (play)，發送 BG_SYNC_STATE: PLAY (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -401,12 +505,17 @@ function attachVideoListeners(video: HTMLVideoElement) {
     hostStallActive = false;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態');
-      markProgrammatic(400);
-      video.play().catch(() => {});
+      // 僅在房間明確處於 PLAYING 狀態時，觀眾私自點擊暫停才回滾至播放
+      // 若房間本就處於 PAUSED 或初始化階段，切勿強制喚醒播放！
+      if (roomPlaybackState === 'PLAYING') {
+        console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態至播放');
+        markProgrammatic(400);
+        video.play().catch(() => {});
+      }
       return;
     }
 
+    console.log(`[Syncine Host] 捕捉到本機暫停操作 (pause)，發送 BG_SYNC_STATE: PAUSE (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -426,6 +535,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     // 若跳轉前處於播放狀態，或當前已開播，則目標狀態認定為播放中 (paused: false)
     const isPaused = targetVideo.paused && !wasPlayingBeforeSeek;
 
+    console.log(`[Syncine Host] 捕捉到本機進度跳轉 (seek)，發送 BG_SYNC_STATE: SEEK -> ${targetVideo.currentTime.toFixed(2)}s (paused: ${isPaused})`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
       data: {
@@ -443,7 +553,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      if (Math.abs(video.currentTime - lastSyncedTime) > 0.5) {
+      if (lastSyncedTime > 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
         console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
         markProgrammatic(400);
         video.currentTime = lastSyncedTime;
@@ -627,31 +737,45 @@ window.addEventListener('yt-navigate-finish', () => {
   }, 1000);
 });
 
-// 向 Background 獲取最新狀態
-chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
-  if (res?.roomState) {
-    roomState = {
-      isInRoom: true,
-      isHost: res.roomState.isHost,
-      allowGuestControl: res.roomState.allowGuestControl,
-      currentUrl: res.roomState.currentUrl
-    };
-    if (roomState.isHost && isCurrentActiveVideoTab()) {
-      startHeartbeat();
+// ----------------------------------------------------
+// 7. 房間狀態向後台同步與查詢
+// ----------------------------------------------------
+function queryInitialRoomState() {
+  if (window.self !== window.top) return;
+  chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
+    if (chrome.runtime.lastError) {
+      console.warn('[Syncine ContentScript] queryInitialRoomState 異常:', chrome.runtime.lastError.message);
+      return;
+    }
+    console.log('[Syncine ContentScript] queryInitialRoomState 回傳房間狀態:', res?.roomState);
+    if (res?.roomState) {
+      roomState = {
+        isInRoom: true,
+        isHost: res.roomState.isHost,
+        allowGuestControl: res.roomState.allowGuestControl,
+        currentUrl: res.roomState.currentUrl
+      };
+      if (roomState.isHost && isCurrentActiveVideoTab()) {
+        startHeartbeat();
+      } else {
+        stopHeartbeat();
+      }
     } else {
+      roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
       stopHeartbeat();
     }
-  } else {
-    roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
-    stopHeartbeat();
-  }
-});
+  });
+}
+
+// 首次啟動向 Background 獲取最新狀態
+queryInitialRoomState();
 
 // 監聽來自 Background 的動態訊息
 chrome.runtime.onMessage.addListener((request) => {
   const { type, payload } = request;
 
   if (type === 'CS_SYNC_RECEIVED') {
+    console.log('[Syncine ContentScript] 收到遠端同步指令 (CS_SYNC_RECEIVED):', payload?.data);
     applySyncState(payload.data);
   } else if (type === 'CS_ROOM_STATE_CHANGED') {
     if (payload) {
@@ -669,6 +793,8 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     } else {
       roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
+      roomPlaybackState = 'IDLE';
+      lastSyncedTime = 0;
       hostStallActive = false;
       if (bufferingTimer) {
         clearTimeout(bufferingTimer);
@@ -687,6 +813,7 @@ chrome.runtime.onMessage.addListener((request) => {
         data: {
           action: targetVideo.paused ? 'PAUSE' : 'PLAY',
           currentTime: targetVideo.currentTime,
+          paused: targetVideo.paused,
           timestamp: Date.now()
         }
       });

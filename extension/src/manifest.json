@@ -27,7 +27,9 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.youtube.com/*",
         "https://www.youtube.com/watch*",
+        "https://www.bilibili.com/*",
         "https://www.bilibili.com/video/*",
         "https://www.bilibili.com/bangumi/play/*",
         "https://www.nicovideo.jp/watch/*",
@@ -36,8 +38,7 @@
       "js": [
         "src/content/index.ts"
       ],
-      "all_frames": true,
-      "match_about_blank": true,
+      "all_frames": false,
       "run_at": "document_end"
     }
   ],

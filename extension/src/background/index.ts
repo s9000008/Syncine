@@ -69,7 +69,12 @@ chrome.storage?.local?.get(['syncine_user_id', 'coview_user_id', SESSION_STORAGE
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'syncine-keepalive' || port.name === 'coview-keepalive') {
     console.log('[Background] 收到 Content Script 長連接保活 Port');
-    port.onDisconnect.addListener(() => {
+    port.onDisconnect.addListener((p) => {
+      const lastError = chrome.runtime.lastError;
+      const portError = (p as any)?.error;
+      if (lastError || portError) {
+        // 正常 bfcache 或分頁關閉釋放
+      }
       console.log('[Background] Content Script Port 斷開');
     });
   }
@@ -139,8 +144,23 @@ function verifyAndRedirect(targetUrl: string) {
   if (isSafe) {
     console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.update(tabs[0].id, { url: targetUrl });
+      const activeTab = tabs[0];
+      const tabId = activeTab?.id;
+      if (tabId) {
+        // 若分頁已在目標網址，檢查 Content Script 連線狀態
+        if (activeTab.url && activeTab.url === targetUrl) {
+          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${targetUrl}`);
+          chrome.tabs.sendMessage(tabId, {
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: currentRoomState
+          }).catch(() => {
+            // 若 sendMessage 失敗，表示 Content Script 尚未注入 (例如 SPA 跳轉過來的分頁)，刷新分頁以注入
+            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${targetUrl}`);
+            chrome.tabs.update(tabId, { url: targetUrl });
+          });
+          return;
+        }
+        chrome.tabs.update(tabId, { url: targetUrl });
       }
     });
   } else {
@@ -150,7 +170,7 @@ function verifyAndRedirect(targetUrl: string) {
         chrome.tabs.sendMessage(tabs[0].id, {
           type: 'SHOW_SECURITY_ALERT',
           payload: { url: targetUrl }
-        });
+        }).catch(() => {});
       }
     });
   }
@@ -484,18 +504,25 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
 
 function broadcastToVideoTabs(msg: any) {
   chrome.tabs.query({}, (tabs) => {
+    let sentCount = 0;
     tabs.forEach((tab) => {
+      const pendingUrl = (tab as any).pendingUrl;
       if (
         tab.id &&
-        tab.url &&
-        (tab.url.includes('youtube.com') ||
+        ((tab.url && (tab.url.includes('youtube.com') ||
           tab.url.includes('bilibili.com') ||
           tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me'))
+          tab.url.includes('anime1.me'))) ||
+        (pendingUrl && (pendingUrl.includes('youtube.com') ||
+          pendingUrl.includes('bilibili.com') ||
+          pendingUrl.includes('nicovideo.jp') ||
+          pendingUrl.includes('anime1.me'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+        sentCount++;
       }
     });
+    console.log(`[Background] broadcastToVideoTabs (${msg?.type || 'unknown'}): 已發送至 ${sentCount} 個影片分頁 (系統查詢到 ${tabs.length} 個分頁)`);
   });
 }
 
@@ -757,27 +784,55 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       const syncData = payload?.data ?? (request as any).data;
       const targetGuestSocketId = payload?.targetGuestSocketId ?? (request as any).targetGuestSocketId;
 
-      // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
-      if (sender.tab?.url && currentRoomState?.currentUrl) {
-        const senderVideoId = getVideoIdentifier(sender.tab.url);
-        const roomVideoId = getVideoIdentifier(currentRoomState.currentUrl);
-        if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
-          console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sender.tab.url})`);
-          break;
-        }
-      }
+      if (!syncData) break;
 
-      if (currentRoomState?.mode === 'P2P' && currentRoomState?.p2pStatus === 'CONNECTED') {
-        chrome.runtime.sendMessage({
-          type: 'OFFSCREEN_SEND_DATA',
-          payload: syncData
-        } as ExtensionMessage).catch(() => {});
-      } else if (socket && currentRoomState) {
-        socket.emit('SYNC_STATE', {
-          event: 'SYNC_STATE',
-          roomId: currentRoomState.roomId,
-          targetGuestSocketId,
-          data: syncData
+      const handleForwardSync = (room: RoomStateInfo | null) => {
+        if (!room) {
+          console.warn('[Background] BG_SYNC_STATE 捨棄：尚未加入房間或工作階段已丟失');
+          return;
+        }
+
+        // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
+        if (room.isHost && !room.currentUrl && sender.tab?.url) {
+          room.currentUrl = sender.tab.url;
+          persistRoomSession(room);
+        }
+
+        // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
+        if (sender.tab?.url && room.currentUrl) {
+          const senderVideoId = getVideoIdentifier(sender.tab.url);
+          const roomVideoId = getVideoIdentifier(room.currentUrl);
+          if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
+            console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sender.tab.url})`);
+            return;
+          }
+        }
+
+        console.log(`[Background] 轉發影音同步事件: action=${syncData.action}, time=${syncData.currentTime?.toFixed?.(2)}s, mode=${room.mode}, p2pStatus=${room.p2pStatus}`);
+
+        if (room.mode === 'P2P') {
+          chrome.runtime.sendMessage({
+            type: 'OFFSCREEN_SEND_DATA',
+            payload: syncData
+          } as ExtensionMessage).catch(() => {});
+        } else if (socket) {
+          socket.emit('SYNC_STATE', {
+            event: 'SYNC_STATE',
+            roomId: room.roomId,
+            targetGuestSocketId,
+            data: syncData
+          });
+        }
+      };
+
+      if (currentRoomState) {
+        handleForwardSync(currentRoomState);
+      } else {
+        chrome.storage?.local?.get([SESSION_STORAGE_KEY], (res) => {
+          if (res?.[SESSION_STORAGE_KEY]) {
+            currentRoomState = res[SESSION_STORAGE_KEY];
+          }
+          handleForwardSync(currentRoomState);
         });
       }
       break;
@@ -958,7 +1013,18 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
 
     case 'GET_ROOM_STATE': {
-      sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+      if (currentRoomState) {
+        sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+      } else {
+        chrome.storage?.local?.get([SESSION_STORAGE_KEY, 'syncine_user_id'], (result) => {
+          if (result?.[SESSION_STORAGE_KEY]) {
+            currentRoomState = result[SESSION_STORAGE_KEY];
+            console.log('[Background] GET_ROOM_STATE 從本機 storage 成功還原房間狀態:', currentRoomState?.roomId);
+          }
+          sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+        });
+        return true;
+      }
       break;
     }
 
@@ -1115,13 +1181,16 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       }
 
       if (syncData.action) {
+        console.log(`[Background] 收到 DataChannel 影音操作 (${syncData.action})，廣播至目標分頁`);
         broadcastToVideoTabs({
           type: 'CS_SYNC_RECEIVED',
           payload: { data: syncData }
         });
       } else if (syncData.type === 'REDIRECT_ROOM') {
+        console.log(`[Background] 收到 DataChannel 推播網址 (${syncData.targetUrl})，執行跳轉並保存房間狀態`);
         if (currentRoomState) {
           currentRoomState.currentUrl = syncData.targetUrl;
+          persistRoomSession(currentRoomState);
         }
         verifyAndRedirect(syncData.targetUrl);
         broadcastToVideoTabs({
@@ -1129,8 +1198,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           payload: currentRoomState
         });
       } else if (syncData.type === 'TOGGLE_PERMISSION') {
+        console.log(`[Background] 收到 DataChannel 權限變更 (${syncData.allowGuestControl})`);
         if (currentRoomState) {
           currentRoomState.allowGuestControl = syncData.allowGuestControl;
+          persistRoomSession(currentRoomState);
         }
         broadcastToVideoTabs({
           type: 'CS_PERMISSION_UPDATED',

@@ -170,6 +170,10 @@ for (const file of localeFiles) {
   assert(content.includes('reportIssueGithub:'), `${file} 包含 reportIssueGithub 翻譯`);
   assert(content.includes('copyDiagnosticReport:'), `${file} 包含 copyDiagnosticReport 翻譯`);
   assert(content.includes('reportCopiedToast:'), `${file} 包含 reportCopiedToast 翻譯`);
+  assert(content.includes('supportedTooltip:'), `${file} 包含 supportedTooltip 懸停提示`);
+  assert(content.includes('unsupportedBadge:'), `${file} 包含 unsupportedBadge 徽章`);
+  assert(content.includes('footerFeedbackBtn:'), `${file} 包含 footerFeedbackBtn 回報按鈕`);
+  assert(content.includes('footerFeedbackTooltip:'), `${file} 包含 footerFeedbackTooltip 懸停提示`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
   for (const code of standardCodes) {
@@ -189,6 +193,10 @@ assert(popupTsx.includes('parseConnectionCode'), 'Popup.tsx 引入並使用 pars
 assert(popupTsx.includes('formatShareCode'), 'Popup.tsx 引入並使用 formatShareCode 輸出標準前綴');
 assert(popupTsx.includes('handleReportToGitHub'), 'Popup.tsx 包含 handleReportToGitHub 一鍵回報功能');
 assert(popupTsx.includes('handleCopyDiagnosticReport'), 'Popup.tsx 包含 handleCopyDiagnosticReport 複製報告功能');
+assert(popupTsx.includes('CHROME_STORE_URL'), 'Popup.tsx 定義了 Chrome 線上應用程式商店導流網址');
+assert(popupTsx.includes('MessageSquarePlus'), 'Popup.tsx 引入了 MessageSquarePlus 回報圖示');
+assert(popupTsx.includes('unsupportedBadge'), 'Popup.tsx 支援紅燈不支援徽章');
+assert(popupTsx.includes('footerFeedbackBtn'), 'Popup.tsx 包含左下角問題回報小按鈕');
 
 const bgTs = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
