@@ -396,7 +396,16 @@ export default function Popup() {
                       : 'bg-emerald-400 animate-pulse'
                   }`}
                 ></span>
-                <span className="truncate">
+                <span
+                  className="truncate"
+                  title={
+                    roomState?.connectionStatus === 'RECONNECTING'
+                      ? t.connectionStatus.reconnecting
+                      : roomState?.connectionStatus === 'DISCONNECTED'
+                      ? t.connectionStatus.disconnected
+                      : t.connectionStatus.ready
+                  }
+                >
                   {roomState?.connectionStatus === 'RECONNECTING'
                     ? t.connectionStatus.reconnecting
                     : roomState?.connectionStatus === 'DISCONNECTED'

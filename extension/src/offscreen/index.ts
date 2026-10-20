@@ -80,7 +80,7 @@ class PeerJSWebRTCManager {
           if (!cand) return;
           const match = cand.match(/\btyp\s+(host|srflx|relay)\b/i);
           const type = (match ? match[1].toLowerCase() : 'host') as 'host' | 'srflx' | 'relay';
-          this.logger.record('STUN_GATHER', `收集到 ICE 候選者 (${type})`, 'INFO', { type });
+          this.logger.record('STUN_GATHER', `ICE 候選者 (${type})`, 'INFO', { type });
         });
       };
       bindPc();
@@ -235,7 +235,7 @@ class PeerJSWebRTCManager {
       const roomId = generateSecureRoomCode(6);
       this.roomId = roomId;
       this.lastRoomId = roomId;
-      this.logger.record('INIT', '房主建立房間', 'INFO', { roomId });
+      this.logger.record('INIT', '建立房間', 'INFO', { roomId });
 
       console.log(`[Syncine P2P Host] 正在向信令網路註冊房間 ID: ${roomId}...`);
       const peerId = `syncine-${roomId}`;
@@ -244,7 +244,7 @@ class PeerJSWebRTCManager {
 
       peer.on('open', (id) => {
         console.log(`[Syncine P2P Host] 🎉 房間建立成功！房間代碼: ${roomId} (PeerID: ${id})`);
-        this.logger.record('SIGNALING', 'PeerJS 信令服務器註冊就緒', 'INFO', { peerId: id });
+        this.logger.record('SIGNALING', '信令註冊就緒', 'INFO', { peerId: id });
         this.updateStatus('CONNECTED');
         resolve({ roomId });
       });
@@ -254,7 +254,7 @@ class PeerJSWebRTCManager {
         const shortId = requestId.slice(-4);
         const guestName = conn.metadata?.guestName || shortId;
         console.log(`[Syncine P2P Host] 收到新成員入房申請: ${guestName} (${requestId})`);
-        this.logger.record('AUDIT', '收到觀眾入房申請', 'INFO', { requestId });
+        this.logger.record('AUDIT', '收到入房申請', 'INFO', { requestId });
         this.attachIceLogger(conn);
 
         this.pendingRequests.set(requestId, conn);
@@ -263,7 +263,7 @@ class PeerJSWebRTCManager {
         // 綁定連線狀態事件
         conn.on('open', () => {
           console.log(`[Syncine P2P Host] 與成員 ${requestId} 之 DataChannel 已成功 open (open=${conn.open})`);
-          this.logger.record('DATA_CHANNEL', '與觀眾之 DataChannel 已成功建立', 'INFO', { requestId });
+          this.logger.record('DATA_CHANNEL', 'DataChannel 已建立', 'INFO', { requestId });
           // 若房主已預先核准，立即補發核准訊息
           if (this.approvedRequestIds.has(requestId)) {
             this.sendApprovalSignal(conn, requestId);
@@ -291,13 +291,13 @@ class PeerJSWebRTCManager {
 
         conn.on('error', (err) => {
           console.error(`[Syncine P2P Host] 成員 ${requestId} 連線異常:`, err);
-          this.logger.record('ERROR', '與觀眾連線發生異常', 'ERROR', { requestId, error: err.message });
+          this.logger.record('ERROR', '觀眾連線異常', 'ERROR', { requestId, error: err.message });
         });
       });
 
       peer.on('error', (err) => {
         console.error('[Syncine P2P Host] 信令伺服器錯誤:', err);
-        this.logger.record('ERROR', `房主信令伺服器錯誤 (${err.type || 'unknown'})`, 'ERROR', { type: err.type, error: err.message });
+        this.logger.record('ERROR', `信令錯誤 (${err.type || 'unknown'})`, 'ERROR', { type: err.type, error: err.message });
         if (err.type === 'unavailable-id') {
           this.createRoom(userId).then(resolve).catch(reject);
         } else {
@@ -419,11 +419,11 @@ class PeerJSWebRTCManager {
       this.lastRoomId = this.roomId;
       this.retryCount = retryCount;
       this.updateStatus('CONNECTING');
-      this.logger.record('INIT', '觀眾發起加入房間', 'INFO', { roomId: this.roomId, retryCount });
+      this.logger.record('INIT', '發起入房', 'INFO', { roomId: this.roomId, retryCount });
 
       const MAX_RETRIES = 2;
       const handleRetry = (reason: string, error: Error) => {
-        this.logger.record('RETRY', `退避重試 (${reason})`, 'WARN', { retryCount: retryCount + 1, error: error.message });
+        this.logger.record('RETRY', `重試 (${reason})`, 'WARN', { retryCount: retryCount + 1, error: error.message });
         if (retryCount < MAX_RETRIES) {
           const delayMs = retryCount === 0 ? 1500 : 3000;
           console.warn(`[Syncine P2P Guest] 握手/ICE 未就緒 (${reason})，正在啟動第 ${retryCount + 1}/${MAX_RETRIES} 次自動重試 (退避 ${delayMs}ms)...`);
@@ -435,7 +435,7 @@ class PeerJSWebRTCManager {
           }, delayMs);
         } else {
           console.error(`[Syncine P2P Guest] 重試已達上限 (${MAX_RETRIES} 次)，P2P 穿透失敗，建議改用官方伺服器中繼模式`);
-          this.logger.record('ERROR', '重試次數已達上限，P2P 穿透失敗', 'ERROR');
+          this.logger.record('ERROR', '重試達上限，穿透失敗', 'ERROR');
           this.close();
           reject(error);
         }
@@ -447,7 +447,7 @@ class PeerJSWebRTCManager {
       peer.on('open', (id) => {
         const targetHostPeerId = `syncine-${this.roomId}`;
         console.log(`[Syncine P2P Guest] 正在向房主 ${targetHostPeerId} 送出入房申請 (嘗試: ${retryCount + 1})...`);
-        this.logger.record('SIGNALING', 'PeerJS 信令服務器連線就緒，正在向房主發起握手', 'INFO', { peerId: id, roomId: this.roomId });
+        this.logger.record('SIGNALING', '信令就緒，發起握手', 'INFO', { peerId: id, roomId: this.roomId });
 
         let isSettled = false;
         const connectTimeoutTimer = setTimeout(() => {
@@ -476,7 +476,7 @@ class PeerJSWebRTCManager {
           isSettled = true;
           clearTimeout(connectTimeoutTimer);
           console.log('[Syncine P2P Guest] 通道已打通，等待房主確認核准中...');
-          this.logger.record('DATA_CHANNEL', 'DataChannel 通道已打通，等待房主審核', 'INFO');
+          this.logger.record('DATA_CHANNEL', '通道打通，待審核', 'INFO');
           // 主動告知房主通道已就緒並查詢核准狀態
           try {
             conn.send({ type: 'GUEST_POLL_APPROVAL' });
@@ -495,7 +495,7 @@ class PeerJSWebRTCManager {
             if (pollSeconds > 15) {
               if (this.guestPollTimer) clearInterval(this.guestPollTimer);
               console.warn('[Syncine P2P Guest] 等待房主審核逾時 (15s)');
-              this.logger.record('ERROR', '等待房主審核逾時 (15s)', 'ERROR');
+              this.logger.record('ERROR', '審核逾時 (15s)', 'ERROR');
               this.close();
               chrome.runtime.sendMessage({
                 type: 'CS_ROOM_STATE_CHANGED',
@@ -521,7 +521,7 @@ class PeerJSWebRTCManager {
         conn.on('data', (data: any) => {
           if (data?.type === 'JOIN_APPROVED') {
             console.log('[Syncine P2P Guest] 🎉 收到房主 JOIN_APPROVED 核准通知！立即解鎖開播');
-            this.logger.record('CONNECTED', '收到房主核准通知，P2P 直連就緒', 'INFO');
+            this.logger.record('CONNECTED', '核准通過，直連就緒', 'INFO');
             if (this.guestPollTimer) clearInterval(this.guestPollTimer);
             this.updateStatus('CONNECTED');
 
@@ -543,7 +543,7 @@ class PeerJSWebRTCManager {
             }
           } else if (data?.type === 'JOIN_REJECTED') {
             console.warn('[Syncine P2P Guest] 房主已婉拒您的加入申請');
-            this.logger.record('AUDIT', '房主已拒絕入房申請', 'WARN');
+            this.logger.record('AUDIT', '房主拒絕申請', 'WARN');
             if (this.guestPollTimer) clearInterval(this.guestPollTimer);
             this.close();
             chrome.runtime.sendMessage({
@@ -580,7 +580,7 @@ class PeerJSWebRTCManager {
 
         conn.on('error', (err) => {
           console.error('[Syncine P2P Guest] 與房主連線異常:', err);
-          this.logger.record('ERROR', 'DataChannel 連線異常', 'ERROR', { error: err.message });
+          this.logger.record('ERROR', 'DataChannel 異常', 'ERROR', { error: err.message });
           if (!isSettled) {
             isSettled = true;
             clearTimeout(connectTimeoutTimer);
@@ -591,7 +591,7 @@ class PeerJSWebRTCManager {
 
       peer.on('error', (err) => {
         console.error('[Syncine P2P Guest] 信令連線失敗:', err);
-        this.logger.record('ERROR', `PeerJS 信令錯誤 (${err.type || 'unknown'})`, 'ERROR', { type: err.type, error: err.message });
+        this.logger.record('ERROR', `信令錯誤 (${err.type || 'unknown'})`, 'ERROR', { type: err.type, error: err.message });
         this.updateStatus('DISCONNECTED');
         if (err.type === 'peer-unavailable') {
           reject(new Error('ERR_ROOM_NOT_FOUND'));
