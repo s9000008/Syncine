@@ -195,6 +195,14 @@ function verifyAndRedirect(targetUrl) {
 }
 ```
 
+#### 5.1.1 跨平台純淨標準網址轉換 (getCanonicalVideoUrl)
+在建房 (CREATE_ROOM)、加入 (JOIN_ROOM)、綁定目標分頁與強制跳轉 (REDIRECT_ROOM) 前，全系統強制調用 getCanonicalVideoUrl(rawUrl)，徹底剔除各串流平台夾帶之冗餘追蹤標籤與上下文參數：
+* **Netflix**：剔除 trackId 與包含 Base64 推薦狀態之長字串 tctx，收斂至標準 https://www.netflix.com/watch/<id>。
+* **YouTube**：剔除推薦來源、播放清單與頻道參數 (ab_channel, list, index 等)，youtu.be 與 /embed/ 統一收斂至標準 https://www.youtube.com/watch?v=<id>。
+* **Bilibili**：剔除來源追蹤碼 (spm_id_from 等)，僅保留純淨 /video/BV... 或 /bangumi/play/ep...。
+* **Niconico**：剔除 ref 檢索參數，僅保留 /watch/<id>。
+* **效益**：杜絕龐大追蹤標籤造成 URL 解析異常、降低網路通訊負擔、防止個人推薦 Token 洩漏，並保證跳轉白名單比對 100% 精準。
+
 ### 5.2 房主權限控制與雙重攔截機制
 房主控制面板設有 `[允許觀眾操作播放器]`（`allow_guest_control: boolean`）開關（預設為關閉）。
 * **當開關為 False（禁用觀眾操作）時**：

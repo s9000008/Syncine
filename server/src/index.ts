@@ -18,7 +18,7 @@ import {
   SignalOfferMsg,
   SignalAnswerMsg,
   SignalIceCandidateMsg,
-  SERVER_HOST_WHITELIST, isServerUrlAllowed
+  SERVER_HOST_WHITELIST, isServerUrlAllowed, getCanonicalVideoUrl
 } from './types';
 
 dotenv.config();
@@ -129,6 +129,7 @@ io.on('connection', (socket: Socket) => {
   // 1. 建立房間
   registerSafeHandler<CreateRoomReq>(socket, 'CREATE_ROOM', (payload) => {
     const { userId, currentUrl, isSelfHosted, mode, language } = payload?.data || {};
+    const cleanUrl = getCanonicalVideoUrl(currentUrl);
 
     // 資安防護：驗證語系格式 (BCP 47 標籤格式，限制 10 字元內，避免惡意注入)
     let sanitizedLang: string | undefined = undefined;
@@ -142,7 +143,7 @@ io.on('connection', (socket: Socket) => {
     const room = roomManager.createRoom(
       socket.id,
       userId,
-      currentUrl,
+      cleanUrl,
       isSelfHosted ?? false,
       mode ?? 'DEFAULT',
       sanitizedLang
@@ -295,7 +296,8 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
-    const targetUrl = payload.data.targetUrl;
+    const targetUrl = getCanonicalVideoUrl(payload.data.targetUrl);
+    payload.data.targetUrl = targetUrl;
     const isSafe = isServerUrlAllowed(targetUrl);
     if (!isSafe) {
       console.warn(`[Security Alert] 攔截非白名單/惡意跳轉網址: ${sanitizeLog(targetUrl)} (Socket: ${sanitizeLog(socket.id)})`);

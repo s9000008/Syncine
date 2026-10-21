@@ -31,7 +31,7 @@ import { execSync } from 'child_process';
 const protoModulePath = path.join(__dirname, 'dist_test/protocol.mjs');
 fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
 execSync(`npx esbuild "${path.join(__dirname, 'src/types/protocol.ts')}" --bundle --format=esm --outfile="${protoModulePath}"`, { stdio: 'pipe' });
-const { getVideoIdentifier } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
+const { getVideoIdentifier, getCanonicalVideoUrl } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
 
 // YouTube
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ') === 'yt:dQw4w9WgXcQ', 'YouTube 標準網址識別 (yt:dQw4w9WgXcQ)');
@@ -57,6 +57,24 @@ assert(getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%
 // Netflix
 assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix:80057281', 'Netflix 標準觀看頁識別 (netflix:80057281)');
 assert(getVideoIdentifier('https://www.netflix.com/watch/80057281?trackId=255824129') === 'netflix:80057281', 'Netflix 帶 trackId 查詢參數仍精準識別');
+
+
+// 測試套件 1.5: 跨平台純淨標準影片網址 (getCanonicalVideoUrl) 測試
+console.log('\n--- 測試套件 1.5: 跨平台純淨標準網址 (getCanonicalVideoUrl) 測試 ---');
+const dirtyNetflix = 'https://www.netflix.com/watch/81759292?trackId=264163088&tctx=%2C%2C596c0582-23ec-4603-b1f0-10543a3c2e3a-33534024%2CeyJwYWdlSWQiOiJQU18zZTlmOTJkZi0zM2E1LTQ0MDUtODZlOS02NGJkMGYyYzFlNWJfTDFfTjgiLCJzZWN0aW9uSWQiOiI3OGY4MWVmMS03MjFiLTQxOTktYmY1MS0zMWU0YzhhOGRhYzQiLCJpZHgiOi05OTl9%2CPS_3e9f92df-33a5-4405-86e9-64bd0f2c1e5b_L1_N8%2C%2C%2C%2C%2CVideo%3A81759290%2C%2C';
+assert(getCanonicalVideoUrl(dirtyNetflix) === 'https://www.netflix.com/watch/81759292', 'Netflix 超長 tctx/trackId 參數徹底剔除並轉為純淨 /watch/81759292');
+
+const dirtyYt = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&index=1&ab_channel=RickAstley';
+assert(getCanonicalVideoUrl(dirtyYt) === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'YouTube 剔除 playlist/ab_channel 參數');
+
+const shortYt = 'https://youtu.be/dQw4w9WgXcQ?si=abcdef';
+assert(getCanonicalVideoUrl(shortYt) === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'YouTube 短網址轉為標準 /watch?v=dQw4w9WgXcQ');
+
+const dirtyBili = 'https://www.bilibili.com/video/BV1xx411c7mD/?spm_id_from=333.337.0.0';
+assert(getCanonicalVideoUrl(dirtyBili) === 'https://www.bilibili.com/video/BV1xx411c7mD', 'Bilibili 剔除 spm_id 追蹤參數');
+
+const dirtyNico = 'https://www.nicovideo.jp/watch/sm9?ref=search_key_video';
+assert(getCanonicalVideoUrl(dirtyNico) === 'https://www.nicovideo.jp/watch/sm9', 'Niconico 剔除 ref 追蹤參數');
 
 // ----------------------------------------------------
 // 測試套件 2: Background HOST_WHITELIST 資安防禦與釣魚攔截自動化測試

@@ -19,7 +19,7 @@ import {
   Clock,
   MessageSquarePlus
 } from 'lucide-react';
-import { RoomStateInfo, ConnectionMode, DetectedShareCodeType } from '../types/protocol';
+import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -165,7 +165,7 @@ export default function Popup() {
       {
         type: 'BG_CREATE_ROOM',
         payload: {
-          currentUrl: activeTabUrl,
+          currentUrl: getCanonicalVideoUrl(activeTabUrl),
           mode: connectionMode,
           customServerUrl: connectionMode === 'CUSTOM_IP' ? targetServerUrl : undefined,
           language
@@ -304,7 +304,7 @@ export default function Popup() {
     if (!activeTabUrl) return;
     safeSendMessage({
       type: 'BG_REDIRECT_ROOM',
-      payload: { targetUrl: activeTabUrl }
+      payload: { targetUrl: getCanonicalVideoUrl(activeTabUrl) }
     });
   };
 
