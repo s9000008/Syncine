@@ -14,6 +14,7 @@
 2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM）。
 3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
 4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
+5. **Netflix**：`netflix.com/watch/*` 播放頁（處理 SPA 路由導航、專屬播放容器 `.watch-video video` 選擇器與影片唯一識別碼 `netflix:<numericId>` 提取）。
 
 > [!NOTE]
 > **功能範疇調整說明**：
@@ -179,7 +180,8 @@ const HOST_WHITELIST = [
     /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
     /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
     /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-    /^https:\/\/anime1\.me\/.+/
+    /^https:\/\/anime1\.me\/.+/,
+    /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
 ];
 
 function verifyAndRedirect(targetUrl) {
@@ -412,7 +414,7 @@ export interface TogglePermissionMsg {
 以下項目列為系統長期演進之主要功能路線圖：
 
 ### 10.1 支援更多主流影音串流平台 (Streaming Platforms Integration)
-* **目標平台**：逐步擴展支援 **Vimeo**、**Netflix**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
+* **目標平台**：已正式實裝 **Netflix**；後續逐步擴展支援 **Vimeo**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
 * **技術要點**：針對各平台相異的播放器 DOM 結構、SPA 換集路由機制與自適應串流防禦（防跳幀、防廣告干擾）實裝專屬 Content Script 解析適配器。
 
 ### 10.2 本地影片 P2P 串流播放 (Local Video P2P Streaming)

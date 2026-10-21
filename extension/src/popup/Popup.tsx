@@ -120,7 +120,8 @@ export default function Popup() {
   const isBilibili = activeTabUrl.includes('bilibili.com/video') || activeTabUrl.includes('bilibili.com/bangumi');
   const isNiconico = activeTabUrl.includes('nicovideo.jp/watch/');
   const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(activeTabUrl);
-  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1;
+  const isNetflix = activeTabUrl.includes('netflix.com/watch/');
+  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -475,6 +476,8 @@ export default function Popup() {
               ? t.tabStatus.niconicoConnected
               : isAnime1
               ? t.tabStatus.anime1Connected
+              : isNetflix
+              ? t.tabStatus.netflixConnected
               : t.tabStatus.supportedTooltip
           }
           onClick={() => {
@@ -502,6 +505,8 @@ export default function Popup() {
                 ? t.tabStatus.niconicoConnected
                 : isAnime1
                 ? t.tabStatus.anime1Connected
+                : isNetflix
+                ? t.tabStatus.netflixConnected
                 : t.tabStatus.notSupported}
             </span>
           </div>

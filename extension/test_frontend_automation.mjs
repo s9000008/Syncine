@@ -54,6 +54,10 @@ assert(getVideoIdentifier('https://anime1.me/23456') === 'anime1:23456', 'Anime1
 assert(getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%AD%A3/') === 'anime1:category/2026年冬季', 'Anime1.me 番劇分類頁 URL 解碼識別');
 assert(getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%AD%A3/anime-title/') === 'anime1:category/2026年冬季/anime-title', 'Anime1.me 巢狀分類路徑識別');
 
+// Netflix
+assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix:80057281', 'Netflix 標準觀看頁識別 (netflix:80057281)');
+assert(getVideoIdentifier('https://www.netflix.com/watch/80057281?trackId=255824129') === 'netflix:80057281', 'Netflix 帶 trackId 查詢參數仍精準識別');
+
 // ----------------------------------------------------
 // 測試套件 2: Background HOST_WHITELIST 資安防禦與釣魚攔截自動化測試
 // ----------------------------------------------------
@@ -65,7 +69,8 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/
+  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
 ];
 
 function isSafeUrl(url) {
@@ -81,12 +86,14 @@ assert(isSafeUrl('https://www.nicovideo.jp/watch/sm9'), '放行合法 Niconico s
 assert(isSafeUrl('https://www.nicovideo.jp/watch/so43652101'), '放行合法 Niconico so 觀看網址');
 assert(isSafeUrl('https://anime1.me/23456'), '放行合法 Anime1.me 單集網址');
 assert(isSafeUrl('https://anime1.me/category/my-anime/'), '放行合法 Anime1.me 分類網址');
+assert(isSafeUrl('https://www.netflix.com/watch/80057281'), '放行合法 Netflix 播放網址');
 
 // 惡意與偽造網址攔截測試 (Security Defenses)
 assert(!isSafeUrl('https://evil-youtube.com/watch?v=dQw4w9WgXcQ'), '攔截偽造 YouTube 釣魚網域');
 assert(!isSafeUrl('https://www.youtube.com.evil.com/watch?v=dQw4w9WgXcQ'), '攔截 YouTube 子網域偽造攻擊');
 assert(!isSafeUrl('https://www.nicovideo.jp.attacker.com/watch/sm9'), '攔截 Niconico 釣魚網域');
 assert(!isSafeUrl('https://anime1.me.evil.com/23456'), '攔截 Anime1.me 釣魚網域');
+assert(!isSafeUrl('https://www.netflix.com.attacker.com/watch/80057281'), '攔截 Netflix 釣魚網域');
 assert(!isSafeUrl('http://www.youtube.com/watch?v=dQw4w9WgXcQ'), '攔截非 HTTPS 明文跳轉');
 assert(!isSafeUrl('javascript:alert(1)'), '攔截 XSS 偽協定注入');
 assert(!isSafeUrl('data:text/html,<script>'), '攔截 Data URI 偽協定注入');
@@ -306,12 +313,14 @@ function checkTargetSite(url) {
   const isBilibili = url.includes('bilibili.com/video') || url.includes('bilibili.com/bangumi');
   const isNiconico = url.includes('nicovideo.jp/watch/');
   const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(url);
+  const isNetflix = url.includes('netflix.com/watch/');
   return {
     isYouTube,
     isBilibili,
     isNiconico,
     isAnime1,
-    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1
+    isNetflix,
+    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix
   };
 }
 
@@ -319,6 +328,8 @@ assert(checkTargetSite('https://www.youtube.com/watch?v=123').isTargetSite === t
 assert(checkTargetSite('https://www.bilibili.com/video/BV1xx').isTargetSite === true, 'Popup 識別 Bilibili 為支援目標頁面');
 assert(checkTargetSite('https://www.nicovideo.jp/watch/sm9').isTargetSite === true, 'Popup 識別 Niconico 為支援目標頁面');
 assert(checkTargetSite('https://anime1.me/23456').isTargetSite === true, 'Popup 識別 Anime1.me 為支援目標頁面');
+assert(checkTargetSite('https://www.netflix.com/watch/80057281').isTargetSite === true, 'Popup 識別 Netflix 為支援目標頁面');
+assert(checkTargetSite('https://www.netflix.com/browse').isTargetSite === false, 'Popup 識別 Netflix 首頁非觀看頁面 (安全防護)');
 assert(checkTargetSite('https://www.google.com').isTargetSite === false, 'Popup 識別 Google 非目標頁面 (顯示請開啟支援影片提示)');
 assert(checkTargetSite('https://anime1.me/').isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
 
@@ -350,6 +361,9 @@ assert(nicoState.lightColor === 'GREEN', 'Niconico 顯示綠燈支援標記');
 
 const anime1State = getSiteIndicatorState('https://anime1.me/12345');
 assert(anime1State.lightColor === 'GREEN', 'Anime1.me 顯示綠燈支援標記');
+
+const netflixState = getSiteIndicatorState('https://www.netflix.com/watch/80057281');
+assert(netflixState.lightColor === 'GREEN', 'Netflix 顯示綠燈支援標記');
 
 const googleState = getSiteIndicatorState('https://www.google.com');
 assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈不支援標記');

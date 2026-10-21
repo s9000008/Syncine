@@ -211,6 +211,14 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       }
     }
 
+    // 5. Netflix 影片辨識 (如: /watch/80057281)
+    if (url.hostname.includes('netflix.com')) {
+      const match = url.pathname.match(/\/watch\/([0-9]+)/);
+      if (match && match[1]) {
+        return `netflix:${match[1]}`;
+      }
+    }
+
     // 其它網址以去除 query/hash 之 pathname 為識別
     return `${url.origin}${url.pathname}`;
   } catch (e) {

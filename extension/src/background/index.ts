@@ -11,7 +11,8 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/
+  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
 ];
 
 let socket: Socket | null = null;
@@ -512,11 +513,11 @@ function broadcastToVideoTabs(msg: any) {
         ((tab.url && (tab.url.includes('youtube.com') ||
           tab.url.includes('bilibili.com') ||
           tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me'))) ||
+          tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))) ||
         (pendingUrl && (pendingUrl.includes('youtube.com') ||
           pendingUrl.includes('bilibili.com') ||
           pendingUrl.includes('nicovideo.jp') ||
-          pendingUrl.includes('anime1.me'))))
+          pendingUrl.includes('anime1.me') || pendingUrl.includes('netflix.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
         sentCount++;

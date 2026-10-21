@@ -36,7 +36,9 @@ if (fs.existsSync(manifestFile)) {
       "https://www.bilibili.com/video/*",
       "https://www.bilibili.com/bangumi/play/*",
       "https://www.nicovideo.jp/watch/*",
-      "https://anime1.me/*"
+      "https://anime1.me/*",
+      "https://www.netflix.com/*",
+      "https://www.netflix.com/watch*"
     ];
   }
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n', 'utf8');

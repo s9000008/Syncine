@@ -7,7 +7,8 @@ export const SERVER_HOST_WHITELIST: RegExp[] = [
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/
+  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
 ];
 
 export type SyncineEvent = 

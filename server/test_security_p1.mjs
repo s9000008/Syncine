@@ -160,12 +160,14 @@ import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.bilibili.com/video/BV1xx411c7mD')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.nicovideo.jp/watch/sm9')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://anime1.me/12345')));
+    assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.netflix.com/watch/80057281')));
     // 攔截釣魚與惡意協定
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('https://malicious-phishing.com/watch?v=123')), false);
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('javascript:alert(1)')), false);
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('data:text/html,<script>alert(1)</script>')), false);
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('http://www.youtube.com/watch?v=123')), false);
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('https://www.youtube.com.attacker.com/watch?v=123')), false);
+    assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('https://www.netflix.com.attacker.com/watch/80057281')), false);
     console.log('  ✅ [PASS] 惡意釣魚網址、XSS 偽協定與未授權跳轉在伺服器端 100% 被攔截！');
 
     console.log('====================================================');

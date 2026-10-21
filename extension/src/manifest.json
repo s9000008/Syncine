@@ -16,6 +16,7 @@
     "https://www.bilibili.com/*",
     "https://www.nicovideo.jp/*",
     "https://anime1.me/*",
+    "https://www.netflix.com/*",
     "https://syncine.fly.dev/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -33,7 +34,9 @@
         "https://www.bilibili.com/video/*",
         "https://www.bilibili.com/bangumi/play/*",
         "https://www.nicovideo.jp/watch/*",
-        "https://anime1.me/*"
+        "https://anime1.me/*",
+        "https://www.netflix.com/*",
+        "https://www.netflix.com/watch*"
       ],
       "js": [
         "src/content/index.ts"

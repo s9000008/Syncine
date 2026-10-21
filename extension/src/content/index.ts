@@ -134,6 +134,25 @@ function findNiconicoVideo(): HTMLVideoElement | null {
   return candidates[0];
 }
 
+/**
+ * Netflix 專屬：主觀看播放器 video 選取機制
+ * 優先鎖定 .watch-video 或主播放器容器內的 video，並防範 /browse 預覽預告片干擾
+ */
+function findNetflixVideo(): HTMLVideoElement | null {
+  const watchPlayer = document.querySelector(
+    '.watch-video video, .nf-player-container video, [data-uia="watch-video"] video'
+  ) as HTMLVideoElement | null;
+  if (watchPlayer) return watchPlayer;
+
+  if (window.location.pathname.includes('/watch/')) {
+    const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+    const visible = videos.find((v) => v.offsetWidth > 0 && v.offsetHeight > 0);
+    if (visible) return visible;
+    return videos[0] || null;
+  }
+  return null;
+}
+
 function findAnime1Video(): HTMLVideoElement | null {
   const videos = Array.from(
     document.querySelectorAll('video.vjs-tech, .video-js video, .vjscontainer video, video')
@@ -174,6 +193,8 @@ function findVideoElement(): HTMLVideoElement | null {
     return findNiconicoVideo();
   } else if (host.includes('anime1.me')) {
     return findAnime1Video();
+  } else if (host.includes('netflix.com')) {
+    return findNetflixVideo();
   } else if (host.includes('google.com')) {
     return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
   }
@@ -670,8 +691,8 @@ function initObserver() {
       // Niconico / SPA 網址變更偵測
       if (window.location.href !== lastObservedUrl) {
         lastObservedUrl = window.location.href;
-        if (window.location.hostname.includes('nicovideo.jp')) {
-          console.log('[Syncine] 偵測到 Niconico SPA 網頁導航切換');
+        if (window.location.hostname.includes('nicovideo.jp') || window.location.hostname.includes('netflix.com')) {
+          console.log('[Syncine] 偵測到 SPA 網頁導航切換');
           setTimeout(() => {
             const nextVideo = findVideoElement();
             if (nextVideo) attachVideoListeners(nextVideo);
@@ -699,7 +720,8 @@ function initObserver() {
 // Anime1.me 合集頁與 Niconico 多重 Video 動態切換：於捕獲階段優先鎖定使用者點擊播放之 Video
 if (
   window.location.hostname.includes('anime1.me') ||
-  window.location.hostname.includes('nicovideo.jp')
+  window.location.hostname.includes('nicovideo.jp') ||
+  window.location.hostname.includes('netflix.com')
 ) {
   document.addEventListener(
     'play',
@@ -710,6 +732,12 @@ if (
         if (
           window.location.hostname.includes('nicovideo.jp') &&
           el.closest('[class*="VideoAd"], #nv_watch_VideoAdContainer, [class*="AdContainer"]')
+        ) {
+          return;
+        }
+        if (
+          window.location.hostname.includes('netflix.com') &&
+          !window.location.pathname.includes('/watch/')
         ) {
           return;
         }
