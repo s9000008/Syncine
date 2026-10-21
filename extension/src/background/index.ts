@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
+import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
@@ -140,49 +141,108 @@ async function closeOffscreenDocument() {
 // ----------------------------------------------------
 // 3. 資安防禦：網域白名單過濾跳轉
 // ----------------------------------------------------
+/**
+ * 網域安全白名單檢驗函式 (雙重防禦：正則 + 原生 URL 語法解析)
+ */
+export function isUrlAllowed(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const targetUrl = rawUrl.trim();
+
+  // 1. 正則白名單檢驗
+  if (HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
+    return true;
+  }
+
+  // 2. 原生 URL 解析器雙重驗證 (防範因 query 參數過長、轉義或大小寫導致正則偽陰性)
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+
+    // YouTube
+    if (
+      (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') &&
+      parsed.pathname === '/watch' &&
+      parsed.searchParams.has('v')
+    ) {
+      return true;
+    }
+    // Bilibili
+    if (
+      (host === 'www.bilibili.com' || host === 'bilibili.com') &&
+      (parsed.pathname.startsWith('/video/') || parsed.pathname.startsWith('/bangumi/play/'))
+    ) {
+      return true;
+    }
+    // Niconico
+    if (
+      (host === 'www.nicovideo.jp' || host === 'nicovideo.jp') &&
+      parsed.pathname.startsWith('/watch/')
+    ) {
+      return true;
+    }
+    // Anime1.me
+    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+      return true;
+    }
+    // Netflix
+    if (
+      (host === 'www.netflix.com' || host === 'netflix.com') &&
+      parsed.pathname.startsWith('/watch/')
+    ) {
+      return true;
+    }
+  } catch (e) {
+    return false;
+  }
+
+  return false;
+}
+
 function verifyAndRedirect(targetUrl: string) {
-  const isSafe = HOST_WHITELIST.some((regex) => regex.test(targetUrl));
+  const cleanUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
+  const isSafe = isUrlAllowed(cleanUrl);
   if (isSafe) {
-    console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
+    console.log(`[Background] 通過安全白名單，跳轉至: ${cleanUrl}`);
     // 優先查詢使用者當前焦點視窗的活躍分頁 (lastFocusedWindow)
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const activeTab = tabs && tabs[0];
       const tabId = activeTab?.id;
       if (tabId) {
         // 若分頁已在目標網址，檢查 Content Script 連線狀態
-        if (activeTab.url && activeTab.url === targetUrl) {
-          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${targetUrl}`);
+        if (activeTab.url && activeTab.url === cleanUrl) {
+          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${cleanUrl}`);
           chrome.tabs.sendMessage(tabId, {
             type: 'CS_ROOM_STATE_CHANGED',
             payload: currentRoomState
           }).catch(() => {
             // 若 sendMessage 失敗，表示 Content Script 尚未注入 (例如 SPA 跳轉過來的分頁)，刷新分頁以注入
-            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${targetUrl}`);
-            chrome.tabs.update(tabId, { url: targetUrl });
+            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${cleanUrl}`);
+            chrome.tabs.update(tabId, { url: cleanUrl });
           });
           return;
         }
-        chrome.tabs.update(tabId, { url: targetUrl });
+        chrome.tabs.update(tabId, { url: cleanUrl });
       } else {
         // 備援處理：若當前焦點視窗查無活躍分頁，查詢全域活躍分頁或自動開啟新分頁
         chrome.tabs.query({ active: true }, (allActiveTabs) => {
           const fallbackTab = allActiveTabs && allActiveTabs[0];
           if (fallbackTab && fallbackTab.id) {
-            chrome.tabs.update(fallbackTab.id, { url: targetUrl });
+            chrome.tabs.update(fallbackTab.id, { url: cleanUrl });
           } else {
-            console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${targetUrl}`);
-            chrome.tabs.create({ url: targetUrl });
+            console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${cleanUrl}`);
+            chrome.tabs.create({ url: cleanUrl });
           }
         });
       }
     });
   } else {
-    console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${targetUrl}`);
+    console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${cleanUrl}`);
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, {
           type: 'SHOW_SECURITY_ALERT',
-          payload: { url: targetUrl }
+          payload: { url: cleanUrl, version: APP_VERSION }
         }).catch(() => {});
       }
     });

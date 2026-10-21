@@ -176,3 +176,34 @@ export interface RoomState {
   emptyRoomTimer?: NodeJS.Timeout;
 }
 
+
+export function isServerUrlAllowed(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const targetUrl = rawUrl.trim();
+  if (SERVER_HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
+    return true;
+  }
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if ((host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') && parsed.pathname === '/watch' && parsed.searchParams.has('v')) {
+      return true;
+    }
+    if ((host === 'www.bilibili.com' || host === 'bilibili.com') && (parsed.pathname.startsWith('/video/') || parsed.pathname.startsWith('/bangumi/play/'))) {
+      return true;
+    }
+    if ((host === 'www.nicovideo.jp' || host === 'nicovideo.jp') && parsed.pathname.startsWith('/watch/')) {
+      return true;
+    }
+    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+      return true;
+    }
+    if ((host === 'www.netflix.com' || host === 'netflix.com') && parsed.pathname.startsWith('/watch/')) {
+      return true;
+    }
+  } catch (e) {
+    return false;
+  }
+  return false;
+}

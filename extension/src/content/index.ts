@@ -894,7 +894,8 @@ chrome.runtime.onMessage.addListener((request) => {
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
     const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
-    alert(`${alertMsg} (${payload.url})`);
+    const ver = payload?.version ? ` [Syncine v${payload.version}]` : '';
+    alert(`${alertMsg}${ver}\n(${payload?.url || ''})`);
   }
 });
 
