@@ -355,6 +355,45 @@ function safePlayVideo(video: HTMLVideoElement) {
   });
 }
 
+/**
+ * 跨平台安全播放控制適配器 (Cross-Platform Playback Adapter)
+ * 在 Netflix 平台上，直接修改 HTML5 video.currentTime 會被 Cadmium 播放器攔截並拋出崩潰異常
+ * 透過自訂事件轉發給 MAIN 世界的 netflix_bridge.js 調用內部 VideoPlayer API
+ */
+function applySeek(video: HTMLVideoElement, targetTime: number) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'SEEK', currentTime: targetTime }
+      })
+    );
+  } else {
+    video.currentTime = targetTime;
+  }
+}
+
+function applyPlay(video: HTMLVideoElement) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'PLAY' }
+      })
+    );
+  }
+  safePlayVideo(video);
+}
+
+function applyPause(video: HTMLVideoElement) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'PAUSE' }
+      })
+    );
+  }
+  video.pause();
+}
+
 // ----------------------------------------------------
 // 5. 5 秒容差與單程延遲補償演算法 (規格 4.2)
 // ----------------------------------------------------
@@ -408,31 +447,31 @@ function applySyncState(data: SyncData) {
     console.log(`[Syncine ContentScript] 執行同步播放 (PLAY) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s, 差: ${timeDiff.toFixed(2)}s)`);
     // 只有在時間差大於 0.5 秒或處於不同播放狀態時校準進度，避免極小誤差造成重複 Seek
     if (timeDiff > 0.5) {
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
     }
-    lastSyncedTime = targetVideo.currentTime;
-    safePlayVideo(targetVideo);
+    lastSyncedTime = targetServerTime;
+    applyPlay(targetVideo);
   } else if (action === 'PAUSE') {
     roomPlaybackState = 'PAUSED';
     console.log(`[Syncine ContentScript] 執行同步暫停 (PAUSE) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s)`);
     // 暫停時若時間差距小於 0.5 秒直接 pause，不強制 seek，消除播放器暫停時的畫面閃爍與誤判卡頓
     if (timeDiff > 0.5) {
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
     }
-    lastSyncedTime = targetVideo.currentTime;
-    targetVideo.pause();
+    lastSyncedTime = targetServerTime;
+    applyPause(targetVideo);
   } else if (action === 'SEEK') {
     console.log(`[Syncine ContentScript] 執行同步進度跳轉 (SEEK) -> 目標時間: ${targetServerTime.toFixed(2)}s, 發送端狀態: ${serverPaused ? '暫停' : '播放'}`);
-    targetVideo.currentTime = targetServerTime;
+    applySeek(targetVideo, targetServerTime);
     lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
       roomPlaybackState = 'PLAYING';
-      safePlayVideo(targetVideo);
+      applyPlay(targetVideo);
     } else if (serverPaused === true) {
       roomPlaybackState = 'PAUSED';
-      targetVideo.pause();
+      applyPause(targetVideo);
     }
   } else if (action === 'HEARTBEAT') {
     // 1. 雙向校準播放狀態
@@ -440,17 +479,17 @@ function applySyncState(data: SyncData) {
       roomPlaybackState = serverPaused ? 'PAUSED' : 'PLAYING';
       if (serverPaused && !targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為暫停，觀眾對齊暫停');
-        targetVideo.pause();
+        applyPause(targetVideo);
       } else if (!serverPaused && targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為播放，觀眾對齊播放');
-        safePlayVideo(targetVideo);
+        applyPlay(targetVideo);
       }
     }
 
     // 2. 被動心跳 5 秒容差檢查 (在暫停或非必要狀態下不隨意位移)
     if (timeDiff > 5) {
       console.log(`[Syncine Heartbeat] 時間差為 ${timeDiff.toFixed(2)} 秒 (>5秒)，強制同步位移至: ${targetServerTime}`);
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
       lastSyncedTime = targetServerTime;
     } else {
       lastSyncedTime = targetVideo.currentTime;
@@ -498,7 +537,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (roomPlaybackState === 'PAUSED') {
         console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態至暫停');
         markProgrammatic(400);
-        video.pause();
+        applyPause(video);
       }
       return;
     }
@@ -531,7 +570,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (roomPlaybackState === 'PLAYING') {
         console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態至播放');
         markProgrammatic(400);
-        video.play().catch(() => {});
+        applyPlay(video);
       }
       return;
     }
@@ -577,7 +616,11 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (lastSyncedTime > 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
         console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
         markProgrammatic(400);
-        video.currentTime = lastSyncedTime;
+        if (window.location.hostname.includes('netflix.com')) {
+          applySeek(video, lastSyncedTime);
+        } else {
+          video.currentTime = lastSyncedTime;
+        }
       }
       return;
     }

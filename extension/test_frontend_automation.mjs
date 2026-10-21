@@ -394,6 +394,21 @@ const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), '
 assert(bgSrc.includes('chrome.runtime.lastError'), 'background/index.ts 存取 chrome.runtime.lastError 消除斷開異常');
 
 // ----------------------------------------------------
+// 測試套件 8: Netflix MV3 Main World Bridge 深度適配與事件橋接測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 8: Netflix MV3 Main World Bridge 深度適配測試 ---');
+
+assert(fs.existsSync(path.join(__dirname, 'src/content/netflix_bridge.ts')), 'Netflix Bridge 原始碼檔案存在');
+assert(manifestObj.content_scripts.some((cs) => cs.world === 'MAIN' && cs.js.includes('src/content/netflix_bridge.ts')), 'Manifest 宣告 Netflix Bridge 於 world: MAIN 環境');
+assert(contentSrc.includes('SYNCINE_NETFLIX_CMD'), 'Content Script 實裝 SYNCINE_NETFLIX_CMD 事件轉發');
+assert(contentSrc.includes('applySeek') && contentSrc.includes('applyPlay') && contentSrc.includes('applyPause'), 'Content Script 實裝跨平台安全播放控制適配器');
+
+const bridgeSrc = fs.readFileSync(path.join(__dirname, 'src/content/netflix_bridge.ts'), 'utf-8');
+assert(bridgeSrc.includes('getNetflixPlayer'), 'Netflix Bridge 實裝內部 VideoPlayer 實例探測器');
+assert(bridgeSrc.includes('player.seek'), 'Netflix Bridge 調用 player.seek 原生 API');
+assert(bridgeSrc.includes('detail.currentTime * 1000'), 'Netflix Bridge 正確將秒數換算為毫秒 (ms)');
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

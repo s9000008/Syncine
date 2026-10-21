@@ -14,7 +14,7 @@
 2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM）。
 3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
 4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
-5. **Netflix**：`netflix.com/watch/*` 播放頁（處理 SPA 路由導航、專屬播放容器 `.watch-video video` 選擇器與影片唯一識別碼 `netflix:<numericId>` 提取）。
+5. **Netflix**：`netflix.com/watch/*` 播放頁（處理 SPA 路由導航、專屬播放容器 `.watch-video video` 選擇器、影片唯一識別碼 `netflix:<numericId>` 提取，並以 MV3 `world: "MAIN"` 橋接調用 Cadmium VideoPlayer API 進行安全 Seek/Play/Pause，防範直接修改 `currentTime` 觸發 DRM/播放器崩潰）。
 
 > [!NOTE]
 > **功能範疇調整說明**：
