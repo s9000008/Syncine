@@ -70,7 +70,7 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
-  /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
 ];
 
 function isSafeUrl(url) {
@@ -87,6 +87,7 @@ assert(isSafeUrl('https://www.nicovideo.jp/watch/so43652101'), '放行合法 Nic
 assert(isSafeUrl('https://anime1.me/23456'), '放行合法 Anime1.me 單集網址');
 assert(isSafeUrl('https://anime1.me/category/my-anime/'), '放行合法 Anime1.me 分類網址');
 assert(isSafeUrl('https://www.netflix.com/watch/80057281'), '放行合法 Netflix 播放網址');
+assert(isSafeUrl('https://netflix.com/watch/80057281'), '放行無 www 前綴之合法 Netflix 播放網址');
 
 // 惡意與偽造網址攔截測試 (Security Defenses)
 assert(!isSafeUrl('https://evil-youtube.com/watch?v=dQw4w9WgXcQ'), '攔截偽造 YouTube 釣魚網域');

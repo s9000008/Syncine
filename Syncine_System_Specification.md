@@ -181,7 +181,7 @@ const HOST_WHITELIST = [
     /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
     /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
     /^https:\/\/anime1\.me\/.+/,
-    /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
+    /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
 ];
 
 function verifyAndRedirect(targetUrl) {

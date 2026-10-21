@@ -161,6 +161,7 @@ import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.nicovideo.jp/watch/sm9')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://anime1.me/12345')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.netflix.com/watch/80057281')));
+    assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://netflix.com/watch/80057281')));
     // 攔截釣魚與惡意協定
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('https://malicious-phishing.com/watch?v=123')), false);
     assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('javascript:alert(1)')), false);

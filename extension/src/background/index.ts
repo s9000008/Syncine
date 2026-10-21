@@ -12,7 +12,7 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
-  /^https:\/\/www\.netflix\.com\/watch\/[0-9]+/
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
 ];
 
 let socket: Socket | null = null;
@@ -144,8 +144,9 @@ function verifyAndRedirect(targetUrl: string) {
   const isSafe = HOST_WHITELIST.some((regex) => regex.test(targetUrl));
   if (isSafe) {
     console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const activeTab = tabs[0];
+    // 優先查詢使用者當前焦點視窗的活躍分頁 (lastFocusedWindow)
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      const activeTab = tabs && tabs[0];
       const tabId = activeTab?.id;
       if (tabId) {
         // 若分頁已在目標網址，檢查 Content Script 連線狀態
@@ -162,6 +163,17 @@ function verifyAndRedirect(targetUrl: string) {
           return;
         }
         chrome.tabs.update(tabId, { url: targetUrl });
+      } else {
+        // 備援處理：若當前焦點視窗查無活躍分頁，查詢全域活躍分頁或自動開啟新分頁
+        chrome.tabs.query({ active: true }, (allActiveTabs) => {
+          const fallbackTab = allActiveTabs && allActiveTabs[0];
+          if (fallbackTab && fallbackTab.id) {
+            chrome.tabs.update(fallbackTab.id, { url: targetUrl });
+          } else {
+            console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${targetUrl}`);
+            chrome.tabs.create({ url: targetUrl });
+          }
+        });
       }
     });
   } else {
