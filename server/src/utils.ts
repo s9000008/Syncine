@@ -33,3 +33,54 @@ export function sanitizeLog(input: unknown, maxLength = 200): string {
     .trim()
     .slice(0, maxLength);
 }
+
+/**
+ * 檢查當前 Node.js 執行期版本是否符合 CVE-2026-111497 (Brotli Out-of-bounds Write) 修復標準
+ * 官方修復基準版本:
+ * - Node 22.x: >= 22.23.4
+ * - Node 24.x: >= 24.22.1
+ * - Node 26.x: >= 26.12.1
+ * 
+ * @param versionString 例如 "26.4.0" 或 "22.23.4"
+ * @returns { isVulnerable: boolean, currentVersion: string, recommendation: string }
+ */
+export function checkNodeSecurityVersion(versionString: string = process.versions.node): {
+  isVulnerable: boolean;
+  currentVersion: string;
+  recommendation: string;
+} {
+  const cleanVer = versionString.startsWith('v') ? versionString.slice(1) : versionString;
+  const parts = cleanVer.split('.').map(p => parseInt(p, 10));
+  const major = parts[0] || 0;
+  const minor = parts[1] || 0;
+  const patch = parts[2] || 0;
+
+  let isVulnerable = false;
+  let recommendation = '';
+
+  if (major === 22) {
+    if (minor < 23 || (minor === 23 && patch < 4)) {
+      isVulnerable = true;
+      recommendation = '建議升級至 Node.js >= 22.23.4';
+    }
+  } else if (major === 24) {
+    if (minor < 22 || (minor === 22 && patch < 1)) {
+      isVulnerable = true;
+      recommendation = '建議升級至 Node.js >= 24.22.1';
+    }
+  } else if (major === 26) {
+    if (minor < 12 || (minor === 12 && patch < 1)) {
+      isVulnerable = true;
+      recommendation = '建議升級至 Node.js >= 26.12.1';
+    }
+  } else if (major < 22) {
+    isVulnerable = true;
+    recommendation = '建議升級至維護中之修復版本 (>= 22.23.4, >= 24.22.1 或 >= 26.12.1)';
+  }
+
+  return {
+    isVulnerable,
+    currentVersion: cleanVer,
+    recommendation
+  };
+}
