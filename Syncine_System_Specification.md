@@ -408,3 +408,27 @@ export interface TogglePermissionMsg {
   * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
 
 
+
+---
+
+## 11. 伺服器端資安防禦與漏洞緩解規範 (Server Security Hardening)
+
+針對 Node.js 執行環境之底層記憶體缺陷（如 CVE-2026-111497 Brotli 邊界外寫入漏洞）與拒絕服務（DoS）攻擊，Syncine 中繼伺服器實裝以下主動式縱深防禦機制：
+
+### 11.1 外部壓縮酬載嚴格阻斷 (Anti-Decompression Bomb & Out-of-bounds Defense)
+* **規範**：Syncine 信令伺服器所有 REST 端點（如 `/health`）僅接收標準純文字 JSON，不支援亦不需要任何外部壓縮編碼。
+* **中介軟體攔截**：伺服器入口檢查 `Content-Encoding` 標頭。凡夾帶 `br` (Brotli)、`gzip`、`deflate` 之請求，在進入任何解析器前**立即中斷並回傳 `HTTP 415 Unsupported Media Type`**（錯誤代碼 `ERR_COMPRESSED_PAYLOAD_FORBIDDEN`），從網路層切斷針對 Node.js 底層解碼器的惡意位元組攻擊。
+* **記憶體配置上限**：`express.json` 限制最大請求酬載為 `64kb`，防止巨量畸形資料消耗系統記憶體。
+
+### 11.2 WebSocket 壓縮關閉與緩衝區邊界
+* **Socket.IO 安全參數**：
+  * `httpCompression: false`：停用 HTTP 長輪詢壓縮。
+  * `perMessageDeflate: false`：關閉 WebSocket 訊框壓縮協議，避免透過 WebSocket 連線觸發底層 zlib / Brotli 函式庫損壞。
+  * `maxHttpBufferSize: 64 * 1024`：嚴格限制單一 WebSocket 封包上限為 64KB。
+
+### 11.3 執行期安全基準稽核 (Runtime Security Auditing)
+* **安全基準版本**：
+  * Node.js 22.x: `>= 22.23.4`
+  * Node.js 24.x: `>= 24.22.1`
+  * Node.js 26.x: `>= 26.12.1`
+* **主動診斷**：伺服器啟動時自動呼叫 `checkNodeSecurityVersion()` 檢驗目前執行環境。若版本低於安全修復基準，主動輸出高亮資安警告日誌，指引維運人員升級。

@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
 import { RateLimiter } from './rateLimiter';
-import { sanitizeLog } from './utils';
+import { sanitizeLog, checkNodeSecurityVersion } from './utils';
 import {
   CreateRoomReq,
   JoinRoomReq,
@@ -32,7 +32,23 @@ const PORT = process.env.PORT || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 app.use(cors({ origin: CORS_ORIGIN }));
-app.use(express.json());
+
+// 資安防禦中介軟體 (防範 CVE-2026-111497 Brotli 邊界外損毀與壓縮炸彈攻擊)
+app.use((req, res, next) => {
+  const encoding = req.headers['content-encoding'];
+  if (encoding) {
+    console.warn(`[Security Alert] 拒絕帶有 Content-Encoding 的非預期 HTTP 請求 (${sanitizeLog(encoding)}) 來自: ${sanitizeLog(req.ip || req.socket.remoteAddress || '')}`);
+    return res.status(415).json({
+      error: 'Unsupported Media Type',
+      code: 'ERR_COMPRESSED_PAYLOAD_FORBIDDEN',
+      message: 'Incoming compressed payloads (br, gzip, deflate) are strictly forbidden to mitigate decompression vulnerabilities (CVE-2026-111497).'
+    });
+  }
+  next();
+});
+
+// 限制 JSON 請求大小至 64KB，阻斷超大記憶體配置 DoS
+app.use(express.json({ limit: '64kb' }));
 
 // 健康檢查 Endpoint
 app.get('/health', (_req, res) => {
@@ -49,7 +65,11 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  // 資安防護：關閉 HTTP 與 WebSocket 壓縮，防範 Brotli / zlib 解碼器邊界外損毀 (CVE-2026-111497) 與記憶體溢位
+  httpCompression: false,
+  perMessageDeflate: false,
+  maxHttpBufferSize: 64 * 1024 // 限制單一訊息上限為 64KB
 });
 
 const roomManager = new RoomManager();
@@ -439,6 +459,12 @@ server.on('error', (err: any) => {
 server.listen(PORT, () => {
   console.log(`================================================`);
   console.log(`🚀 Syncine WebSocket Server 啟動於 http://localhost:${PORT}`);
+  const audit = checkNodeSecurityVersion();
+  if (audit.isVulnerable) {
+    console.warn(`[Security Warning] ⚠️ 當前 Node.js 執行版本 (v${audit.currentVersion}) 存在 Brotli 記憶體損壞高風險漏洞 (CVE-2026-111497)！${audit.recommendation}`);
+  } else {
+    console.log(`[Security Audit] ✅ Node.js 執行版本安全檢查通過 (v${audit.currentVersion})`);
+  }
   console.log(`================================================`);
 });
 
