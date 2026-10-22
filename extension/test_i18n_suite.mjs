@@ -425,10 +425,13 @@ assert(hostPerms.includes('https://www.youtube.com/*'), 'Manifest 完整保留 Y
 assert(hostPerms.includes('https://www.bilibili.com/*'), 'Manifest 完整保留 Bilibili host_permissions');
 assert(hostPerms.includes('https://www.nicovideo.jp/*'), 'Manifest 新增 Niconico host_permissions');
 assert(hostPerms.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me host_permissions');
+assert(hostPerms.includes('https://www.netflix.com/*'), 'Manifest 新增 Netflix host_permissions');
 assert(csMatches.includes('https://www.youtube.com/watch*'), 'Manifest 完整保留 YouTube content_scripts matches');
 assert(csMatches.includes('https://www.bilibili.com/video/*'), 'Manifest 完整保留 Bilibili video matches');
 assert(csMatches.includes('https://www.nicovideo.jp/watch/*'), 'Manifest 新增 Niconico watch matches');
 assert(csMatches.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me matches');
+assert(csMatches.includes('https://www.netflix.com/*'), 'Manifest 新增 Netflix matches');
+assert(csMatches.includes('https://www.netflix.com/watch*'), 'Manifest 新增 Netflix watch matches');
 
 // 2. 影片唯一識別碼 (getVideoIdentifier) 多平台驗證
 import { execSync } from 'child_process';
@@ -446,21 +449,24 @@ assert(
   getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%AD%A3/') === 'anime1:category/2026年冬季',
   'getVideoIdentifier 正確提取 Anime1.me 番劇分類路徑'
 );
+assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix:80057281', 'getVideoIdentifier 正確提取 Netflix ID');
 
 // 3. Content Script 選擇器與懶載入輔助驗證 (確保既有 YouTube/Bilibili 完全不變)
 assert(contentScriptSource.includes("document.querySelector('video.html5-main-video')"), 'Content Script 完整保留 YouTube 專用選擇器');
 assert(contentScriptSource.includes("document.querySelector('.bpx-player-video-wrap video')"), 'Content Script 完整保留 Bilibili 專用選擇器');
 assert(contentScriptSource.includes('findNiconicoVideo'), 'Content Script 實作 Niconico 智慧選擇器 (排除廣告與空殼 Video)');
 assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 實作 Anime1.me Video.js (.vjs-tech) 選擇器');
+assert(contentScriptSource.includes('findNetflixVideo'), 'Content Script 實作 Netflix 專屬選擇器');
 assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 實作 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
 
 // 4. Background 白名單與廣播範圍驗證
 assert(backgroundScriptSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'Background HOST_WHITELIST 支援 Niconico 安全跳轉');
 assert(backgroundScriptSource.includes('anime1\\.me\\/.+'), 'Background HOST_WHITELIST 支援 Anime1.me 安全跳轉');
+assert(backgroundScriptSource.includes('netflix\\.com\\/watch\\/[0-9]+'), 'Background HOST_WHITELIST 支援 Netflix 安全跳轉');
 assert(
   backgroundScriptSource.includes("tab.url.includes('nicovideo.jp')") &&
-    backgroundScriptSource.includes("tab.url.includes('anime1.me')"),
-  'Background broadcastToVideoTabs 涵蓋 Niconico 與 Anime1.me 分頁'
+    backgroundScriptSource.includes("tab.url.includes('anime1.me')") && backgroundScriptSource.includes("tab.url.includes('netflix.com')"),
+  'Background broadcastToVideoTabs 涵蓋 Niconico、Anime1.me 與 Netflix 分頁'
 );
 
 // 5. 四大語系與 Popup 狀態顯示驗證
@@ -468,10 +474,11 @@ for (const file of localeFiles) {
   const content = fs.readFileSync(path.join(__dirname, 'src/locales', file), 'utf-8');
   assert(content.includes('niconicoConnected:'), `${file} 包含 niconicoConnected 翻譯`);
   assert(content.includes('anime1Connected:'), `${file} 包含 anime1Connected 翻譯`);
+  assert(content.includes('netflixConnected:'), `${file} 包含 netflixConnected 翻譯`);
 }
 assert(
-  popupTsx.includes('isNiconico') && popupTsx.includes('isAnime1'),
-  'Popup.tsx 支援偵測並顯示 Niconico 與 Anime1.me 連線狀態'
+  popupTsx.includes('isNiconico') && popupTsx.includes('isAnime1') && popupTsx.includes('isNetflix'),
+  'Popup.tsx 支援偵測並顯示 Niconico、Anime1.me 與 Netflix 連線狀態'
 );
 
 console.log('\n====================================================');

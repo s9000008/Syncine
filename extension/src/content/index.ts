@@ -134,6 +134,25 @@ function findNiconicoVideo(): HTMLVideoElement | null {
   return candidates[0];
 }
 
+/**
+ * Netflix 專屬：主觀看播放器 video 選取機制
+ * 優先鎖定 .watch-video 或主播放器容器內的 video，並防範 /browse 預覽預告片干擾
+ */
+function findNetflixVideo(): HTMLVideoElement | null {
+  const watchPlayer = document.querySelector(
+    '.watch-video video, .nf-player-container video, [data-uia="watch-video"] video'
+  ) as HTMLVideoElement | null;
+  if (watchPlayer) return watchPlayer;
+
+  if (window.location.pathname.includes('/watch/')) {
+    const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+    const visible = videos.find((v) => v.offsetWidth > 0 && v.offsetHeight > 0);
+    if (visible) return visible;
+    return videos[0] || null;
+  }
+  return null;
+}
+
 function findAnime1Video(): HTMLVideoElement | null {
   const videos = Array.from(
     document.querySelectorAll('video.vjs-tech, .video-js video, .vjscontainer video, video')
@@ -174,6 +193,8 @@ function findVideoElement(): HTMLVideoElement | null {
     return findNiconicoVideo();
   } else if (host.includes('anime1.me')) {
     return findAnime1Video();
+  } else if (host.includes('netflix.com')) {
+    return findNetflixVideo();
   } else if (host.includes('google.com')) {
     return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
   }
@@ -334,6 +355,45 @@ function safePlayVideo(video: HTMLVideoElement) {
   });
 }
 
+/**
+ * 跨平台安全播放控制適配器 (Cross-Platform Playback Adapter)
+ * 在 Netflix 平台上，直接修改 HTML5 video.currentTime 會被 Cadmium 播放器攔截並拋出崩潰異常
+ * 透過自訂事件轉發給 MAIN 世界的 netflix_bridge.js 調用內部 VideoPlayer API
+ */
+function applySeek(video: HTMLVideoElement, targetTime: number) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'SEEK', currentTime: targetTime }
+      })
+    );
+  } else {
+    video.currentTime = targetTime;
+  }
+}
+
+function applyPlay(video: HTMLVideoElement) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'PLAY' }
+      })
+    );
+  }
+  safePlayVideo(video);
+}
+
+function applyPause(video: HTMLVideoElement) {
+  if (window.location.hostname.includes('netflix.com')) {
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_NETFLIX_CMD', {
+        detail: { action: 'PAUSE' }
+      })
+    );
+  }
+  video.pause();
+}
+
 // ----------------------------------------------------
 // 5. 5 秒容差與單程延遲補償演算法 (規格 4.2)
 // ----------------------------------------------------
@@ -387,31 +447,31 @@ function applySyncState(data: SyncData) {
     console.log(`[Syncine ContentScript] 執行同步播放 (PLAY) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s, 差: ${timeDiff.toFixed(2)}s)`);
     // 只有在時間差大於 0.5 秒或處於不同播放狀態時校準進度，避免極小誤差造成重複 Seek
     if (timeDiff > 0.5) {
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
     }
-    lastSyncedTime = targetVideo.currentTime;
-    safePlayVideo(targetVideo);
+    lastSyncedTime = targetServerTime;
+    applyPlay(targetVideo);
   } else if (action === 'PAUSE') {
     roomPlaybackState = 'PAUSED';
     console.log(`[Syncine ContentScript] 執行同步暫停 (PAUSE) -> 目標時間: ${targetServerTime.toFixed(2)}s (本地: ${localTime.toFixed(2)}s)`);
     // 暫停時若時間差距小於 0.5 秒直接 pause，不強制 seek，消除播放器暫停時的畫面閃爍與誤判卡頓
     if (timeDiff > 0.5) {
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
     }
-    lastSyncedTime = targetVideo.currentTime;
-    targetVideo.pause();
+    lastSyncedTime = targetServerTime;
+    applyPause(targetVideo);
   } else if (action === 'SEEK') {
     console.log(`[Syncine ContentScript] 執行同步進度跳轉 (SEEK) -> 目標時間: ${targetServerTime.toFixed(2)}s, 發送端狀態: ${serverPaused ? '暫停' : '播放'}`);
-    targetVideo.currentTime = targetServerTime;
+    applySeek(targetVideo, targetServerTime);
     lastSyncedTime = targetServerTime;
 
     // 同步發送端的播放狀態：若發送端在播放，全員跟隨播放；若發送端在暫停，全員跟隨暫停
     if (serverPaused === false) {
       roomPlaybackState = 'PLAYING';
-      safePlayVideo(targetVideo);
+      applyPlay(targetVideo);
     } else if (serverPaused === true) {
       roomPlaybackState = 'PAUSED';
-      targetVideo.pause();
+      applyPause(targetVideo);
     }
   } else if (action === 'HEARTBEAT') {
     // 1. 雙向校準播放狀態
@@ -419,17 +479,17 @@ function applySyncState(data: SyncData) {
       roomPlaybackState = serverPaused ? 'PAUSED' : 'PLAYING';
       if (serverPaused && !targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為暫停，觀眾對齊暫停');
-        targetVideo.pause();
+        applyPause(targetVideo);
       } else if (!serverPaused && targetVideo.paused) {
         console.log('[Syncine Heartbeat] 主機目前為播放，觀眾對齊播放');
-        safePlayVideo(targetVideo);
+        applyPlay(targetVideo);
       }
     }
 
     // 2. 被動心跳 5 秒容差檢查 (在暫停或非必要狀態下不隨意位移)
     if (timeDiff > 5) {
       console.log(`[Syncine Heartbeat] 時間差為 ${timeDiff.toFixed(2)} 秒 (>5秒)，強制同步位移至: ${targetServerTime}`);
-      targetVideo.currentTime = targetServerTime;
+      applySeek(targetVideo, targetServerTime);
       lastSyncedTime = targetServerTime;
     } else {
       lastSyncedTime = targetVideo.currentTime;
@@ -477,7 +537,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (roomPlaybackState === 'PAUSED') {
         console.warn('[Syncine Intercept] 觀眾無權限發起播放，回滾狀態至暫停');
         markProgrammatic(400);
-        video.pause();
+        applyPause(video);
       }
       return;
     }
@@ -510,7 +570,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (roomPlaybackState === 'PLAYING') {
         console.warn('[Syncine Intercept] 觀眾無權限發起暫停，回滾狀態至播放');
         markProgrammatic(400);
-        video.play().catch(() => {});
+        applyPlay(video);
       }
       return;
     }
@@ -556,7 +616,11 @@ function attachVideoListeners(video: HTMLVideoElement) {
       if (lastSyncedTime > 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
         console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
         markProgrammatic(400);
-        video.currentTime = lastSyncedTime;
+        if (window.location.hostname.includes('netflix.com')) {
+          applySeek(video, lastSyncedTime);
+        } else {
+          video.currentTime = lastSyncedTime;
+        }
       }
       return;
     }
@@ -670,8 +734,8 @@ function initObserver() {
       // Niconico / SPA 網址變更偵測
       if (window.location.href !== lastObservedUrl) {
         lastObservedUrl = window.location.href;
-        if (window.location.hostname.includes('nicovideo.jp')) {
-          console.log('[Syncine] 偵測到 Niconico SPA 網頁導航切換');
+        if (window.location.hostname.includes('nicovideo.jp') || window.location.hostname.includes('netflix.com')) {
+          console.log('[Syncine] 偵測到 SPA 網頁導航切換');
           setTimeout(() => {
             const nextVideo = findVideoElement();
             if (nextVideo) attachVideoListeners(nextVideo);
@@ -699,7 +763,8 @@ function initObserver() {
 // Anime1.me 合集頁與 Niconico 多重 Video 動態切換：於捕獲階段優先鎖定使用者點擊播放之 Video
 if (
   window.location.hostname.includes('anime1.me') ||
-  window.location.hostname.includes('nicovideo.jp')
+  window.location.hostname.includes('nicovideo.jp') ||
+  window.location.hostname.includes('netflix.com')
 ) {
   document.addEventListener(
     'play',
@@ -710,6 +775,12 @@ if (
         if (
           window.location.hostname.includes('nicovideo.jp') &&
           el.closest('[class*="VideoAd"], #nv_watch_VideoAdContainer, [class*="AdContainer"]')
+        ) {
+          return;
+        }
+        if (
+          window.location.hostname.includes('netflix.com') &&
+          !window.location.pathname.includes('/watch/')
         ) {
           return;
         }
@@ -823,7 +894,8 @@ chrome.runtime.onMessage.addListener((request) => {
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
     const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
-    alert(`${alertMsg} (${payload.url})`);
+    const ver = payload?.version ? ` [Syncine v${payload.version}]` : '';
+    alert(`${alertMsg}${ver}\n(${payload?.url || ''})`);
   }
 });
 

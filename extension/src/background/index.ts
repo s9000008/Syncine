@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
-import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier } from '../types/protocol';
+import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
+import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
@@ -11,7 +12,8 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/
+  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
 ];
 
 let socket: Socket | null = null;
@@ -139,37 +141,108 @@ async function closeOffscreenDocument() {
 // ----------------------------------------------------
 // 3. 資安防禦：網域白名單過濾跳轉
 // ----------------------------------------------------
+/**
+ * 網域安全白名單檢驗函式 (雙重防禦：正則 + 原生 URL 語法解析)
+ */
+export function isUrlAllowed(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const targetUrl = rawUrl.trim();
+
+  // 1. 正則白名單檢驗
+  if (HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
+    return true;
+  }
+
+  // 2. 原生 URL 解析器雙重驗證 (防範因 query 參數過長、轉義或大小寫導致正則偽陰性)
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+
+    // YouTube
+    if (
+      (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') &&
+      parsed.pathname === '/watch' &&
+      parsed.searchParams.has('v')
+    ) {
+      return true;
+    }
+    // Bilibili
+    if (
+      (host === 'www.bilibili.com' || host === 'bilibili.com') &&
+      (parsed.pathname.startsWith('/video/') || parsed.pathname.startsWith('/bangumi/play/'))
+    ) {
+      return true;
+    }
+    // Niconico
+    if (
+      (host === 'www.nicovideo.jp' || host === 'nicovideo.jp') &&
+      parsed.pathname.startsWith('/watch/')
+    ) {
+      return true;
+    }
+    // Anime1.me
+    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+      return true;
+    }
+    // Netflix
+    if (
+      (host === 'www.netflix.com' || host === 'netflix.com') &&
+      parsed.pathname.startsWith('/watch/')
+    ) {
+      return true;
+    }
+  } catch (e) {
+    return false;
+  }
+
+  return false;
+}
+
 function verifyAndRedirect(targetUrl: string) {
-  const isSafe = HOST_WHITELIST.some((regex) => regex.test(targetUrl));
+  const cleanUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
+  const isSafe = isUrlAllowed(cleanUrl);
   if (isSafe) {
-    console.log(`[Background] 通過安全白名單，跳轉至: ${targetUrl}`);
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const activeTab = tabs[0];
+    console.log(`[Background] 通過安全白名單，跳轉至: ${cleanUrl}`);
+    // 優先查詢使用者當前焦點視窗的活躍分頁 (lastFocusedWindow)
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      const activeTab = tabs && tabs[0];
       const tabId = activeTab?.id;
       if (tabId) {
         // 若分頁已在目標網址，檢查 Content Script 連線狀態
-        if (activeTab.url && activeTab.url === targetUrl) {
-          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${targetUrl}`);
+        if (activeTab.url && activeTab.url === cleanUrl) {
+          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${cleanUrl}`);
           chrome.tabs.sendMessage(tabId, {
             type: 'CS_ROOM_STATE_CHANGED',
             payload: currentRoomState
           }).catch(() => {
             // 若 sendMessage 失敗，表示 Content Script 尚未注入 (例如 SPA 跳轉過來的分頁)，刷新分頁以注入
-            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${targetUrl}`);
-            chrome.tabs.update(tabId, { url: targetUrl });
+            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${cleanUrl}`);
+            chrome.tabs.update(tabId, { url: cleanUrl });
           });
           return;
         }
-        chrome.tabs.update(tabId, { url: targetUrl });
+        chrome.tabs.update(tabId, { url: cleanUrl });
+      } else {
+        // 備援處理：若當前焦點視窗查無活躍分頁，查詢全域活躍分頁或自動開啟新分頁
+        chrome.tabs.query({ active: true }, (allActiveTabs) => {
+          const fallbackTab = allActiveTabs && allActiveTabs[0];
+          if (fallbackTab && fallbackTab.id) {
+            chrome.tabs.update(fallbackTab.id, { url: cleanUrl });
+          } else {
+            console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${cleanUrl}`);
+            chrome.tabs.create({ url: cleanUrl });
+          }
+        });
       }
     });
   } else {
-    console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${targetUrl}`);
+    console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${cleanUrl}`);
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, {
           type: 'SHOW_SECURITY_ALERT',
-          payload: { url: targetUrl }
+          payload: { url: cleanUrl, version: APP_VERSION }
         }).catch(() => {});
       }
     });
@@ -302,11 +375,12 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
     socket.on('REDIRECT_ROOM', (data) => {
       console.log('[Background] 收到 REDIRECT_ROOM 網頁跳轉:', data);
       if (data.data?.targetUrl) {
+        const cleanTarget = getCanonicalVideoUrl(data.data.targetUrl);
         if (currentRoomState) {
-          currentRoomState.currentUrl = data.data.targetUrl;
+          currentRoomState.currentUrl = cleanTarget;
           persistRoomSession(currentRoomState);
         }
-        verifyAndRedirect(data.data.targetUrl);
+        verifyAndRedirect(cleanTarget);
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
           payload: currentRoomState
@@ -405,7 +479,7 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
         currentRoomState.isHost = res.data.isHost;
         currentRoomState.allowGuestControl = res.data.allowGuestControl;
         if (res.data.currentUrl) {
-          currentRoomState.currentUrl = res.data.currentUrl;
+          currentRoomState.currentUrl = getCanonicalVideoUrl(res.data.currentUrl);
         }
         if (res.data.resumeToken) {
           currentRoomState.resumeToken = res.data.resumeToken;
@@ -512,11 +586,11 @@ function broadcastToVideoTabs(msg: any) {
         ((tab.url && (tab.url.includes('youtube.com') ||
           tab.url.includes('bilibili.com') ||
           tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me'))) ||
+          tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))) ||
         (pendingUrl && (pendingUrl.includes('youtube.com') ||
           pendingUrl.includes('bilibili.com') ||
           pendingUrl.includes('nicovideo.jp') ||
-          pendingUrl.includes('anime1.me'))))
+          pendingUrl.includes('anime1.me') || pendingUrl.includes('netflix.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
         sentCount++;
@@ -548,6 +622,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     case 'BG_CREATE_ROOM': {
       const mode: ConnectionMode = payload?.mode || 'DEFAULT';
       const serverUrl = payload?.customServerUrl || DEFAULT_SERVER_URL;
+      const cleanUrl = getCanonicalVideoUrl(payload?.currentUrl);
 
       if (mode === 'P2P') {
         ensureOffscreenDocument()
@@ -565,7 +640,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     isHost: true,
                     allowGuestControl: false,
                     serverUrl: 'P2P',
-                    currentUrl: payload.currentUrl,
+                    currentUrl: cleanUrl,
                     mode: 'P2P',
                     p2pStatus: 'CONNECTED',
                     connectionStatus: 'CONNECTED',
@@ -602,7 +677,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             event: 'CREATE_ROOM',
             data: {
               userId,
-              currentUrl: payload.currentUrl,
+              currentUrl: cleanUrl,
               isSelfHosted: mode === 'CUSTOM_IP' || !!payload.customServerUrl,
               mode,
               customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined,
@@ -623,7 +698,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               isHost: true,
               allowGuestControl: res.data.allowGuestControl,
               serverUrl,
-              currentUrl: payload.currentUrl,
+              currentUrl: cleanUrl,
               mode,
               p2pStatus: undefined,
               connectionStatus: 'CONNECTED',
@@ -730,7 +805,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               isHost: res.data?.isHost ?? false,
               allowGuestControl: res.data.allowGuestControl,
               serverUrl,
-              currentUrl: res.data.currentUrl,
+              currentUrl: getCanonicalVideoUrl(res.data.currentUrl),
               mode: actualMode,
               p2pStatus: undefined,
               connectionStatus: 'CONNECTED',
@@ -794,7 +869,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
         // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
         if (room.isHost && !room.currentUrl && sender.tab?.url) {
-          room.currentUrl = sender.tab.url;
+          room.currentUrl = getCanonicalVideoUrl(sender.tab.url);
           persistRoomSession(room);
         }
 
@@ -840,8 +915,9 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
     case 'BG_REDIRECT_ROOM': {
       if (currentRoomState && currentRoomState.isHost) {
-        currentRoomState.currentUrl = payload.targetUrl;
-        verifyAndRedirect(payload.targetUrl);
+        const cleanTarget = getCanonicalVideoUrl(payload.targetUrl);
+        currentRoomState.currentUrl = cleanTarget;
+        verifyAndRedirect(cleanTarget);
 
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
@@ -853,7 +929,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             type: 'OFFSCREEN_SEND_DATA',
             payload: {
               type: 'REDIRECT_ROOM',
-              targetUrl: payload.targetUrl
+              targetUrl: cleanTarget
             }
           } as ExtensionMessage).catch(() => {});
         }
@@ -862,7 +938,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           socket.emit('REDIRECT_ROOM', {
             event: 'REDIRECT_ROOM',
             roomId: currentRoomState.roomId,
-            data: { targetUrl: payload.targetUrl }
+            data: { targetUrl: cleanTarget }
           });
         }
         sendResponse({ success: true });
@@ -1089,7 +1165,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
         currentRoomState.guestAwaitingApproval = false;
         currentRoomState.connectedPeerCount = payload?.memberCount || 2;
         if (payload?.hostCurrentUrl) {
-          currentRoomState.currentUrl = payload.hostCurrentUrl;
+          currentRoomState.currentUrl = getCanonicalVideoUrl(payload.hostCurrentUrl);
         }
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
@@ -1188,11 +1264,12 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
         });
       } else if (syncData.type === 'REDIRECT_ROOM') {
         console.log(`[Background] 收到 DataChannel 推播網址 (${syncData.targetUrl})，執行跳轉並保存房間狀態`);
+        const cleanTarget = getCanonicalVideoUrl(syncData.targetUrl);
         if (currentRoomState) {
-          currentRoomState.currentUrl = syncData.targetUrl;
+          currentRoomState.currentUrl = cleanTarget;
           persistRoomSession(currentRoomState);
         }
-        verifyAndRedirect(syncData.targetUrl);
+        verifyAndRedirect(cleanTarget);
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
           payload: currentRoomState
@@ -1225,7 +1302,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                     isHost: true,
                     allowGuestControl: false,
                     serverUrl: 'P2P',
-                    currentUrl: payload?.currentUrl,
+                    currentUrl: getCanonicalVideoUrl(payload?.currentUrl),
                     mode: 'P2P',
                     p2pStatus: 'CONNECTING',
                     serverlessHandshakeState: 'AWAITING_ANSWER',
@@ -1273,7 +1350,7 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
                   isHost: false,
                   allowGuestControl: false,
                   serverUrl: 'P2P',
-                  currentUrl: payload?.currentUrl,
+                  currentUrl: getCanonicalVideoUrl(payload?.currentUrl),
                   mode: 'P2P',
                   p2pStatus: 'CONNECTING',
                   serverlessHandshakeState: 'AWAITING_HOST_CONFIRM',
