@@ -30,10 +30,10 @@ jobs:
       - name: 檢出原始碼 (Checkout Repository)
         uses: actions/checkout@v4
 
-      - name: 設定 Node.js 20 LTS 環境
+      - name: 設定 Node.js 26 環境
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 26
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 

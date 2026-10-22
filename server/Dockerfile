@@ -6,7 +6,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Build Phase (包含 TypeScript 編譯環境)
 # ------------------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: Production Runner Phase (最小化安全執行環境)
 # ------------------------------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:26-alpine AS runner
 
 # 安裝 dumb-init 作為 PID 1，負責正確轉發 SIGINT/SIGTERM 等 Linux 訊號
 RUN apk add --no-cache dumb-init
