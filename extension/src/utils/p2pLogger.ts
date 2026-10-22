@@ -10,6 +10,8 @@ export function sanitizeIp(text: string): string {
   let result = text.replace(/\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.*.*');
   // 遮蔽 IPv6
   result = result.replace(/\b([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}):[0-9a-fA-F:]+\b/g, '$1:****');
+  // 遮蔽內嵌之 syncine-XXXXXX 房號
+  result = result.replace(/\bsyncine-([A-Za-z0-9]{2})[A-Za-z0-9]+([A-Za-z0-9]{2})\b/g, 'syncine-$1***$2');
   return result;
 }
 
@@ -137,17 +139,17 @@ export class P2PLogger {
 
     const logs = this.getRecentLogs(15);
     const lines = [
-      '### 🛠️ Syncine P2P 連線診斷報告 (Diagnostic Report)',
-      `- **擴充套件版本**: Syncine ${version} (Chrome MV3)`,
-      `- **連線模式**: WebRTC P2P (PeerJS DataChannel)`,
-      `- **身分角色**: ${role}`,
-      `- **目標房間**: ${maskIdentifier(roomId)}`,
-      `- **連線狀態**: ${status}`,
-      `- **錯誤代碼**: ${errorCode}`,
-      `- **退避重試歷程**: ${retryCount} 次重試`,
-      `- **ICE 候選者收集摘要**: host: ${this.candidatesCount.host} 組, srflx: ${this.candidatesCount.srflx} 組, relay: ${this.candidatesCount.relay} 組`,
+      '### 🛠️ Syncine P2P 連線診斷報告',
+      `- **版本**: Syncine ${version} (Chrome MV3)`,
+      `- **模式**: WebRTC P2P (PeerJS DataChannel)`,
+      `- **角色**: ${role}`,
+      `- **房間**: ${maskIdentifier(roomId)}`,
+      `- **狀態**: ${status}`,
+      `- **錯誤碼**: ${errorCode}`,
+      `- **重試**: ${retryCount} 次重試`,
+      `- **ICE 候選者收集摘要**: host: ${this.candidatesCount.host}, srflx: ${this.candidatesCount.srflx}, relay: ${this.candidatesCount.relay}`,
       '',
-      '#### 📜 脫敏日誌流水 (最近關鍵記錄)',
+      '#### 📜 日誌',
       '```text'
     ];
 
@@ -159,7 +161,7 @@ export class P2PLogger {
 
     lines.push('```');
     lines.push('');
-    lines.push('> 💡 備註：所有 IP 位址與機敏識別碼已通過本機零洩漏演算法脫敏，無隱私風險。');
+    lines.push('> 💡 備註：所有 IP 位址與機敏識別碼已通過本機零洩漏演算法脫敏。');
 
     return lines.join('\n');
   }
@@ -177,13 +179,13 @@ export class P2PLogger {
 
     const body = [
       '### 📌 問題現象描述',
-      '在加入或建立 P2P 房間時遭遇連線失敗或逾時。',
+      'P2P 連線失敗或逾時。',
       '',
       params.markdownReport,
       '',
       '### 🖥️ 作業系統與瀏覽器環境',
-      `- 作業系統: ${navigator.platform || 'Windows'}`,
-      `- 瀏覽器核心: ${navigator.userAgent.includes('Edg') ? 'Microsoft Edge' : 'Google Chrome'}`
+      `- 系統: ${navigator.platform || 'Windows'}`,
+      `- 瀏覽器: ${navigator.userAgent.includes('Edg') ? 'Microsoft Edge' : 'Google Chrome'}`
     ].join('\n');
 
     const query = new URLSearchParams({

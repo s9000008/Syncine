@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.3)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.6.1)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -11,7 +11,10 @@
 
 ### 1.2 支援目標網站（當前版本）
 1. **YouTube**：標準網頁版影片播放頁（處理 SPA 網頁架構與廣告過濾）。
-2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片播放頁（處理動態載入 DOM）。
+2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM）。
+3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
+4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
+5. **Netflix**：`netflix.com/watch/*` 播放頁（處理 SPA 路由導航、專屬播放容器 `.watch-video video` 選擇器、影片唯一識別碼 `netflix:<numericId>` 提取，並以 MV3 `world: "MAIN"` 橋接調用 Cadmium VideoPlayer API 進行安全 Seek/Play/Pause，防範直接修改 `currentTime` 觸發 DRM/播放器崩潰）。
 
 > [!NOTE]
 > **功能範疇調整說明**：
@@ -172,8 +175,13 @@ if (timeDiff > 5) {
 ```javascript
 // AI 實作：網域安全過濾規則 (當前支援核心站點)
 const HOST_WHITELIST = [
+    /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
     /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
-    /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/
+    /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
+    /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
+    /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
+    /^https:\/\/anime1\.me\/.+/,
+    /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
 ];
 
 function verifyAndRedirect(targetUrl) {
@@ -186,6 +194,14 @@ function verifyAndRedirect(targetUrl) {
     }
 }
 ```
+
+#### 5.1.1 跨平台純淨標準網址轉換 (getCanonicalVideoUrl)
+在建房 (CREATE_ROOM)、加入 (JOIN_ROOM)、綁定目標分頁與強制跳轉 (REDIRECT_ROOM) 前，全系統強制調用 getCanonicalVideoUrl(rawUrl)，徹底剔除各串流平台夾帶之冗餘追蹤標籤與上下文參數：
+* **Netflix**：剔除 trackId 與包含 Base64 推薦狀態之長字串 tctx，收斂至標準 https://www.netflix.com/watch/<id>。
+* **YouTube**：剔除推薦來源、播放清單與頻道參數 (ab_channel, list, index 等)，youtu.be 與 /embed/ 統一收斂至標準 https://www.youtube.com/watch?v=<id>。
+* **Bilibili**：剔除來源追蹤碼 (spm_id_from 等)，僅保留純淨 /video/BV... 或 /bangumi/play/ep...。
+* **Niconico**：剔除 ref 檢索參數，僅保留 /watch/<id>。
+* **效益**：杜絕龐大追蹤標籤造成 URL 解析異常、降低網路通訊負擔、防止個人推薦 Token 洩漏，並保證跳轉白名單比對 100% 精準。
 
 ### 5.2 房主權限控制與雙重攔截機制
 房主控制面板設有 `[允許觀眾操作播放器]`（`allow_guest_control: boolean`）開關（預設為關閉）。
@@ -377,6 +393,27 @@ export interface TogglePermissionMsg {
    - 於模式說明卡片明確標記：「💡 若因嚴格防火牆或網路限制導致 P2P 連線失敗，可改用『預設中繼伺服器』模式」。
 5. **單分頁觀影防護提示 (Single Active Tab Advisory)**：
    - 於控制面板顯著標記：「💡 建議同時僅開啟一個支援的影片分頁，以確保最佳同步效果，避免多重視窗干擾」。
+6. **控制面板多語系文字自適應與懸停提示 (UI Text Truncation & Hover Tooltip)**：
+   - 針對 380px 面板寬度，精簡英文 (`en-US`) 與日文 (`ja-JP`) 之分頁提示文案（如 `notSupported` 與 `singleTabHint`），避免在固定寬度下因字串過長被截斷為 `...`。
+   - 於提示條容器加上 HTML `title` 屬性，當滑鼠懸停於上方時即時顯示完整說明文字，兼顧緊湊排版與無障礙可讀性。
+
+
+7. **網站支援燈號狀態指示與商店導流系統 (Site Support Traffic Light & Store Feedback)**：
+   - **燈號標記機制**：
+     - **綠燈支援 (🟢 Green Light)**：當目前分頁為 YouTube、Bilibili、Niconico 或 Anime1.me 之有效影片播放頁面時，顯示高亮綠燈動態光暈（`bg-emerald-400` + `shadow` + `animate-pulse`），並標記 `[支援]` 徽章與各平台連線狀態。
+     - **紅燈不支援 (🔴 Red Light)**：當目前分頁非支援目標或非播放頁時，顯示鮮明紅燈（`bg-rose-500` + `shadow`），提示條轉為玫瑰紅基調並標記 `[不支援]` 徽章。
+   - **自適應支援清單與懸停提示 (Truncated Label & Hover Tooltip)**：
+     - 紅燈時主文案精簡顯示：「`支援網站：YouTube / Bilibili / Niconico 與更多`」（適配多語系面板寬度）。
+     - 滑鼠懸停（Hover）時彈出詳細說明，列舉當前具體支援的播放器範疇（YouTube 標準影片、Bilibili 標準影片/番劇、Niconico 動畫頻道/標準影片、Anime1.me 動畫播放/分類頁等）。
+   - **官方商店完整支援清單導流 (Chrome Web Store Official Directory)**：
+     - 點擊紅燈提示條或底部引擎標籤，將導向官方 Chrome 線上應用程式商店說明頁面，供使用者查閱最新完整支援網站清單。
+   - **左下角空間極簡化問題回報按鈕 (Bottom-Left Compact Feedback Button)**：
+     - 面板左下角配置低侵入性小按鈕：「`💬 問題回報`」，使用者可一鍵發起 GitHub Issue 或反饋網站支援建議，自動整合本機脫敏診斷報告。
+
+8. **bfcache 頁面快取生命週期適配與沙盒 iframe 注入防護 (bfcache & Sandbox iframe Isolation)**：
+   - **停用 `all_frames` 與 `match_about_blank`**：Content Script 僅注入頂層視窗（`window.top`），避免動態模組 Loader 注入至 YouTube/Bilibili 之廣告、追蹤或沙盒 iframe 觸發 `Unsafe attempt to load URL` 安全限制。
+   - **Page Lifecycle API (bfcache)**：監聽 `pagehide` 與 `pageshow` 事件。在分頁進入快退快進快取（bfcache）時主動中斷長連接 Port，喚醒時自動重連並恢復房間最新狀態。
+   - **主動捕捉 `chrome.runtime.lastError`**：於 `port.onDisconnect` 與後端訊息回呼中顯式存取 `lastError`，消除瀏覽器未捕捉異常警示。
 
 ---
 
@@ -385,7 +422,7 @@ export interface TogglePermissionMsg {
 以下項目列為系統長期演進之主要功能路線圖：
 
 ### 10.1 支援更多主流影音串流平台 (Streaming Platforms Integration)
-* **目標平台**：逐步擴展支援 **Vimeo**、**Netflix**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
+* **目標平台**：已正式實裝 **Netflix**；後續逐步擴展支援 **Vimeo**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
 * **技術要點**：針對各平台相異的播放器 DOM 結構、SPA 換集路由機制與自適應串流防禦（防跳幀、防廣告干擾）實裝專屬 Content Script 解析適配器。
 
 ### 10.2 本地影片 P2P 串流播放 (Local Video P2P Streaming)
@@ -408,3 +445,27 @@ export interface TogglePermissionMsg {
   * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
 
 
+
+---
+
+## 11. 伺服器端資安防禦與漏洞緩解規範 (Server Security Hardening)
+
+針對 Node.js 執行環境之底層記憶體缺陷（如 CVE-2026-111497 Brotli 邊界外寫入漏洞）與拒絕服務（DoS）攻擊，Syncine 中繼伺服器實裝以下主動式縱深防禦機制：
+
+### 11.1 外部壓縮酬載嚴格阻斷 (Anti-Decompression Bomb & Out-of-bounds Defense)
+* **規範**：Syncine 信令伺服器所有 REST 端點（如 `/health`）僅接收標準純文字 JSON，不支援亦不需要任何外部壓縮編碼。
+* **中介軟體攔截**：伺服器入口檢查 `Content-Encoding` 標頭。凡夾帶 `br` (Brotli)、`gzip`、`deflate` 之請求，在進入任何解析器前**立即中斷並回傳 `HTTP 415 Unsupported Media Type`**（錯誤代碼 `ERR_COMPRESSED_PAYLOAD_FORBIDDEN`），從網路層切斷針對 Node.js 底層解碼器的惡意位元組攻擊。
+* **記憶體配置上限**：`express.json` 限制最大請求酬載為 `64kb`，防止巨量畸形資料消耗系統記憶體。
+
+### 11.2 WebSocket 壓縮關閉與緩衝區邊界
+* **Socket.IO 安全參數**：
+  * `httpCompression: false`：停用 HTTP 長輪詢壓縮。
+  * `perMessageDeflate: false`：關閉 WebSocket 訊框壓縮協議，避免透過 WebSocket 連線觸發底層 zlib / Brotli 函式庫損壞。
+  * `maxHttpBufferSize: 64 * 1024`：嚴格限制單一 WebSocket 封包上限為 64KB。
+
+### 11.3 執行期安全基準稽核 (Runtime Security Auditing)
+* **安全基準版本**：
+  * Node.js 22.x: `>= 22.23.4`
+  * Node.js 24.x: `>= 24.22.1`
+  * Node.js 26.x: `>= 26.12.1`
+* **主動診斷**：伺服器啟動時自動呼叫 `checkNodeSecurityVersion()` 檢驗目前執行環境。若版本低於安全修復基準，主動輸出高亮資安警告日誌，指引維運人員升級。
