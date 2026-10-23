@@ -469,3 +469,18 @@ export interface TogglePermissionMsg {
   * Node.js 24.x: `>= 24.22.1`
   * Node.js 26.x: `>= 26.12.1`
 * **主動診斷**：伺服器啟動時自動呼叫 `checkNodeSecurityVersion()` 檢驗目前執行環境。若版本低於安全修復基準，主動輸出高亮資安警告日誌，指引維運人員升級。
+
+---
+
+## 12. Chrome MV3 擴充套件合規與禁止遠端程式碼規範 (No Remotely Hosted Code Policy)
+
+為落實 Google Chrome Web Store Manifest V3 開發者政策與權限申報規範（單一用途原則與隱私權限表），Syncine 擴充套件訂定最高資安合規紅線：
+
+### 12.1 嚴格禁止遠端託管程式碼 (Remotely Hosted Code)
+* **禁止動態代碼執行**：全端嚴禁呼叫 `eval()`、`new Function()` 或以字串型式調用 `setTimeout()` / `setInterval()`。
+* **禁止外部腳本引用**：擴充套件所有頁面（Popup、Offscreen、Background）嚴禁使用外部 `<script src="https://...">` 標籤，嚴禁向外部 CDN 取得可執行程式碼。
+* **禁止動態腳本注入**：嚴禁於 DOM 中動態呼叫 `document.createElement('script')` 載入遠端 URL，亦不使用 `chrome.scripting.executeScript` 執行遠端代碼。
+* **100% 本地靜態封裝**：所有前端依賴函式庫（React、Socket.IO Client、PeerJS、Lucide）必須於編譯期靜態打包於本地 `dist/` 與發布套件包中。
+
+### 12.2 自動化合規檢驗阻斷
+* 專案內建之 `npm run security:check`（`scan_secrets.js`）已納入遠端代碼模式偵測。任何引進動態代碼或外部腳本之變更將被自動標記為致命阻斷項，嚴格杜絕違規代碼合入主線。

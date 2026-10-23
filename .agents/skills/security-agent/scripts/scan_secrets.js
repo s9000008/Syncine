@@ -34,7 +34,10 @@ const SECRET_PATTERNS = [
   { name: 'GitHub Personal Token', regex: /gh[pousr]_[A-Za-z0-9_]{36,}/ },
   { name: 'AWS Access Key', regex: /AKIA[0-9A-Z]{16}/ },
   { name: 'Google API Key', regex: /AIza[0-9A-Za-z-_]{35}/ },
-  { name: '過度授權萬用網址 (<all_urls>)', regex: /<all_urls>/ }
+  { name: '過度授權萬用網址 (<all_urls>)', regex: /<all_urls>/ },
+  { name: '動態執行遠端代碼 (eval)', regex: /\beval\s*\(/ },
+  { name: '動態函式構造執行 (new Function)', regex: /new\s+Function\s*\(/ },
+  { name: '外部遠端腳本標籤 (Remote Script Tag)', regex: /<script[^>]+src=["']https?:\/\//i }
 ];
 
 // IPv4 正則表達式

@@ -42,4 +42,9 @@
    - 必須自 `main` 建立專屬的獨立工作分支（命名規範如 `feature/<功能名稱>`、`optimize/<優化項目>`、`fix/<問題描述>`）。
    - 於專屬分支上完成針對性開發、編譯與全套自動化測試驗證後，再進行合併或提交 Pull Request，確保主線分支隨時處於穩定可發布狀態。
 
+7. **嚴格禁止遠端程式碼 (No Remotely Hosted Code Policy)**：
+   - 依據 Google Chrome Web Store MV3 開發者政策與權限申報規範，擴充套件**絕對禁止引入、下載、動態注入或執行任何遠端託管程式碼（Remotely Hosted Code）**。
+   - 包含但不限於：嚴禁使用 `eval()`、`new Function()`、字串型態 `setTimeout`、外部 `<script src="https://...">`、動態建立 script 標籤載入外部 URL、`chrome.scripting.executeScript` 執行任意遠端字串、以及遠端 WebAssembly 下載。
+   - 所有外部第三方函式庫（如 React、Socket.IO Client、PeerJS）必須 100% 透過套件管理工具於本機建置階段完成靜態打包編譯（納入 `dist/` 與發布套件包中），確保所有執行代碼均封裝於擴充套件內部，維持 Google 開發者審查之絕對合規。
+
 
