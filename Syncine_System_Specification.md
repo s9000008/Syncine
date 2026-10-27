@@ -199,7 +199,7 @@ function verifyAndRedirect(targetUrl) {
 在建房 (CREATE_ROOM)、加入 (JOIN_ROOM)、綁定目標分頁與強制跳轉 (REDIRECT_ROOM) 前，全系統強制調用 getCanonicalVideoUrl(rawUrl)，徹底剔除各串流平台夾帶之冗餘追蹤標籤與上下文參數：
 * **Netflix**：剔除 trackId 與包含 Base64 推薦狀態之長字串 tctx，收斂至標準 https://www.netflix.com/watch/<id>。
 * **YouTube**：剔除推薦來源、播放清單與頻道參數 (ab_channel, list, index 等)，youtu.be 與 /embed/ 統一收斂至標準 https://www.youtube.com/watch?v=<id>。
-* **Bilibili**：剔除來源追蹤碼 (spm_id_from 等)，僅保留純淨 /video/BV... 或 /bangumi/play/ep...。
+* **Bilibili**：剔除來源追蹤碼 (spm_id_from 等)，保留純淨 /video/BV...（若為分 P 則保留 ?p=，p=1 略過）或 /bangumi/play/ep...。
 * **Niconico**：剔除 ref 檢索參數，僅保留 /watch/<id>。
 * **效益**：杜絕龐大追蹤標籤造成 URL 解析異常、降低網路通訊負擔、防止個人推薦 Token 洩漏，並保證跳轉白名單比對 100% 精準。
 
@@ -210,6 +210,55 @@ function verifyAndRedirect(targetUrl) {
     2. **後端/通道防線（核心安全）**：
        - **伺服器模式**：若 Guest 強行發送 `SYNC_STATE` 請求，後端伺服器校驗其 Socket 身分。若發送者非 Host，後端**直接丟棄（Drop）該請求**。
        - **P2P 模式**：房主端（Host Peer）在 DataChannel 監聽來自 Guest 的事件時，若 `allow_guest_control === false`，房主直接丟棄該訊息，不予本地執行與轉發。
+
+---
+
+### 5.3 跨平台播放清單與上下集 (Next/Prev Episode) 自動連播跳轉同步規範
+
+為解決使用者觀看播放清單、影集或番劇時需頻繁手動換片推播的問題，系統實裝「播放清單與上下集連播自動跳轉同步」標準架構。本規範為所有支援影音串流平台之標準適配模板：
+
+#### 5.3.1 嚴格條件化生效守衛 (Strict Conditional Guard)
+為杜絕一般獨立單部影片因非預期導航產生誤跳轉，跳轉同步必須滿足嚴格的條件閘道：
+1. **畫面能力偵測 (`isPlaylistOrEpisodeSupported()`)**：
+   - 僅當當前頁面或播放器具備「播放清單、分集選集抽屜、或可用的上下集按鈕」時，方判定為支援環境。
+   - 若為普通單支影片（無清單、無選集），此判定回傳 `false`，系統保持純進度同步，不觸發換片廣播。
+2. **行為捕捉時間戳記 (`markPlaylistActionTriggered`)**：
+   - 在捕獲階段 (Capture phase) 監聽使用者的換集／清單點擊行為，並記錄時間戳記 `lastPlaylistActionTime`。
+   - 當影片播放完畢觸發 `<video>` 的 `ended` 事件且當前處於清單／影集頁面時，自動登記換集信號（時間窗口有效期 15 秒）。
+3. **雙重門檻**：網址切換時，必須符合 `(isPlaylistOrEpisodeSupported() || isRecentAction)` 且 `currentVideoId !== roomVideoId`，方會啟動廣播。
+
+#### 5.3.2 房主本地無重整與全房無縫跳轉 (Host Seamless Navigation)
+- **問題**：房主在網頁上點擊「下一集」或自動連播時，瀏覽器分頁已由平台前端完成換片與播放器更新。若 Background 接獲廣播後再次對房主分頁呼叫 `chrome.tabs.update`，會導致房主分頁被強制重整、影片重頭載入與畫面閃爍。
+- **標準解決方案**：
+  - Background 在 `verifyAndRedirect(targetUrl)` 中比對：
+```typescript
+const activeVideoId = getVideoIdentifier(activeTab.url);
+const targetVideoId = getVideoIdentifier(cleanUrl);
+const isAlreadyOnVideo = (activeTab.url && activeTab.url === cleanUrl) || 
+                        (activeVideoId && targetVideoId && activeVideoId === targetVideoId);
+if (isAlreadyOnVideo) {
+  // 房主分頁已處於目標影片，僅發送狀態變更通知，略過 tabs.update
+  chrome.tabs.sendMessage(tabId, { type: 'CS_ROOM_STATE_CHANGED', payload: currentRoomState });
+} else {
+  // 觀眾端分頁執行跳轉導航
+  chrome.tabs.update(tabId, { url: cleanUrl });
+}
+```
+
+#### 5.3.3 劇集與分 P 唯一識別碼與標準網址規範
+各平台換集判定必須依賴標準化唯一識別碼：
+- **YouTube**：`yt:<id>`。播放清單切換時 ID 變更即觸發跳轉。
+- **Bilibili**：
+  - 普通影片（單 P）：`bili:<BV>`
+  - 多 P 影片：`bili:<BV>?p=<part>`（當 `p !== '1'` 時保留參數，確保分 P 切換正確辨識為不同視頻目標）
+  - 番劇劇集：`bili:<ep_id>`（如 `bili:ep12345`）
+- **Netflix**：`netflix:<watch_id>`（提取 `/watch/12345678`），徹底過濾 `tctx` 等追蹤參數。
+
+#### 5.3.4 防抖與全域導航事件監聽
+為相容各串流平台之單頁應用（SPA）與前端路由，Content Script 必須建立防抖導航監聽器（Debounce 400ms），統一彙整以下事件：
+1. 平台專屬導航事件（如 YouTube `yt-navigate-finish`）
+2. 瀏覽器歷史導航（`popstate` 與 `hashchange`）
+3. 頂層 DOM 監聽（`MutationObserver` 監控 `window.location.href` 變更）
 
 ---
 
@@ -235,6 +284,24 @@ AI 在編寫 Content Script 時，請針對當前核心支援平台採用以下�
 ### 7.2 Bilibili (嗶哩嗶哩)
 * **Video 選擇器**：`document.querySelector('.bpx-player-video-wrap video')`
 * **整合重點**：影片 DOM 元素採非同步動態載入。Content Script 啟動時元素可能尚未生成，必須使用 `MutationObserver` 監聽父節點，直到目標 `<video>` 出現在 DOM 中再行綁定。
+
+---
+
+### 7.3 Netflix
+* **Video 選擇器**：`document.querySelector('video')`
+* **原生播放器控制**：透過 Main World Bridge 調用 `netflix.appContext.state.playerApp.getAPI().videoPlayer.getVideoPlayerBySessionId(...)`。
+* **整合重點**：
+  - 由於 React 內部合成事件封鎖，直接修改 `video.currentTime` 不會生效，必須使用 Bridge 調用 `player.seek(ms)`。
+  - 下一集按鈕：`[data-uia="control-next"]`、`[data-uia*="next-episode"]`、`.button-nfVideos-next`。
+  - 劇集選集面板：`[data-uia="control-episodes"]`。
+
+### 7.4 播放清單與上下集按鈕選擇器規範表 (DOM Selectors Reference Table)
+未來新增任何平台支援時，必須於適配器實裝以下三組選擇器標準：
+| 平台 | 清單/選集容器能力偵測選擇器 | 下一部 / 下一集按鈕選擇器 |
+| :--- | :--- | :--- |
+| **YouTube** | `ytd-playlist-panel-renderer, #playlist, .ytd-playlist-panel-renderer, #playlist-items` | `.ytp-next-button, .ytp-prev-button, ytd-playlist-panel-video-renderer` |
+| **Bilibili** | `#multi_page, .cur-list, .ep-list-wrapper, .section-ep-wrapper` | `.bpx-player-ctrl-btn-next, .bpx-player-ctrl-btn-prev, .squirtle-video-next, .ep-item, .part-item` |
+| **Netflix** | `[data-uia="control-episodes"], [data-uia*="postplay"]` | `[data-uia="control-next"], [data-uia*="next-episode"], .button-nfVideos-next` |
 
 ---
 

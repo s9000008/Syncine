@@ -47,4 +47,20 @@
    - 包含但不限於：嚴禁使用 `eval()`、`new Function()`、字串型態 `setTimeout`、外部 `<script src="https://...">`、動態建立 script 標籤載入外部 URL、`chrome.scripting.executeScript` 執行任意遠端字串、以及遠端 WebAssembly 下載。
    - 所有外部第三方函式庫（如 React、Socket.IO Client、PeerJS）必須 100% 透過套件管理工具於本機建置階段完成靜態打包編譯（納入 `dist/` 與發布套件包中），確保所有執行代碼均封裝於擴充套件內部，維持 Google 開發者審查之絕對合規。
 
+8. **跨平台播放清單與上下集連播同步架構標準 (Playlist & Episode Navigation Sync Standard)**：
+   - **嚴格條件化生效守衛 (Strict Conditional Guard)**：
+     - 任何新增支援平台必須實作能力檢測 `isPlaylistOrEpisodeSupported()`。若當前網頁或畫面為獨立單部影片（未提供清單、選集或上下集按鈕），嚴禁觸發房間重導向廣播，保持純播放狀態同步，杜絕無端跳轉。
+   - **全生命週期動作捕捉 (Action & Event Capture)**：
+     - 必須在捕獲階段 (Capture phase) 監聽各平台「下一部／上一部」、「下一集／上一集」、「劇集／分 P 列表」點擊，呼叫 `markPlaylistActionTriggered()` 登記行為時間戳記。
+     - 必須監聽 HTML5 `<video>` 的 `ended` 事件以支援片尾自動連播換集。
+   - **房主專利與觀眾隔離 (Host Privilege & Guest Isolation)**：
+     - 換集跳轉廣播 (`BG_REDIRECT_ROOM`) 僅限房主身份 (`roomState.isInRoom && roomState.isHost`)，觀眾點擊或換片絕不影響其他成員。
+   - **房主本地無重整無縫體驗 (Host Seamless Playback Guard)**：
+     - Background 的 `verifyAndRedirect` 必須比對 `getVideoIdentifier(activeTab.url) === getVideoIdentifier(targetUrl)`（`isAlreadyOnVideo`）。若房主已在目標集數，略過 `chrome.tabs.update`，杜絕畫面重整中斷與閃爍，並保證觀眾端能順暢跳轉。
+   - **劇集與分 P 唯一識別碼規整 (Multi-Part Identifier & Canonical URL)**：
+     - 平台網址正規化必須精確支援分 P（如 Bilibili `?p=2`）與特定集數（如 `ep12345`、Netflix `/watch/81759292`），確保集數切換被精準識別為不同目標。
+   - **單元與涵蓋率測試基準 (Automated Testing Baseline)**：
+     - 所有新支援平台必須於測試套件補齊：識別碼解析矩陣、純淨標準網址過濾、DOM 選擇器匹配、防重整保護測試，達成 100% 自動化測試覆蓋。
+
+
 
