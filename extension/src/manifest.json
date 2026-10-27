@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "zh_TW",
   "name": "__MSG_appName__",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "__MSG_appDesc__",
   "permissions": [
     "storage",
@@ -17,9 +17,7 @@
     "https://www.nicovideo.jp/*",
     "https://anime1.me/*",
     "https://www.netflix.com/*",
-    "https://syncine.fly.dev/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "https://syncine.fly.dev/*"
   ],
   "background": {
     "service_worker": "src/background/index.ts",

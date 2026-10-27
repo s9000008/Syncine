@@ -1,6 +1,6 @@
 {
   "name": "syncine-server",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "Syncine Video Sync WebSocket Server",
   "main": "dist/index.js",
   "scripts": {

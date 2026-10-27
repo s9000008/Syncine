@@ -1,6 +1,6 @@
 {
   "name": "syncine-extension",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "Syncine - Video sync watch party Chrome Extension",
   "type": "module",
   "scripts": {
