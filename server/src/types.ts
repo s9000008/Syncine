@@ -272,3 +272,16 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
     return rawUrl.trim();
   }
 }
+
+export function isSameVideoOrWebsite(url1?: string, url2?: string): boolean {
+  if (!url1 || !url2) return false;
+  const clean1 = url1.trim();
+  const clean2 = url2.trim();
+  if (clean1 === clean2) return true;
+
+  const canon1 = getCanonicalVideoUrl(clean1);
+  const canon2 = getCanonicalVideoUrl(clean2);
+  if (canon1 && canon2 && canon1 === canon2) return true;
+
+  return false;
+}

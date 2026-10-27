@@ -295,3 +295,24 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
     return rawUrl.trim();
   }
 }
+
+/**
+ * 比較兩組網址是否對應至同一個影片或頁面
+ * 廣泛相容於原網址比對、影片唯一識別碼 (getVideoIdentifier) 以及純淨標準網址 (getCanonicalVideoUrl)
+ */
+export function isSameVideoOrWebsite(url1?: string, url2?: string): boolean {
+  if (!url1 || !url2) return false;
+  const clean1 = url1.trim();
+  const clean2 = url2.trim();
+  if (clean1 === clean2) return true;
+
+  const id1 = getVideoIdentifier(clean1);
+  const id2 = getVideoIdentifier(clean2);
+  if (id1 && id2 && id1 === id2) return true;
+
+  const canon1 = getCanonicalVideoUrl(clean1);
+  const canon2 = getCanonicalVideoUrl(clean2);
+  if (canon1 && canon2 && canon1 === canon2) return true;
+
+  return false;
+}

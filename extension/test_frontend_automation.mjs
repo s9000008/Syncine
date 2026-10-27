@@ -31,7 +31,7 @@ import { execSync } from 'child_process';
 const protoModulePath = path.join(__dirname, 'dist_test/protocol.mjs');
 fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
 execSync(`npx esbuild "${path.join(__dirname, 'src/types/protocol.ts')}" --bundle --format=esm --outfile="${protoModulePath}"`, { stdio: 'pipe' });
-const { getVideoIdentifier, getCanonicalVideoUrl } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
+const { getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
 
 // YouTube
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ') === 'yt:dQw4w9WgXcQ', 'YouTube 標準網址識別 (yt:dQw4w9WgXcQ)');
@@ -455,7 +455,70 @@ assert(getCanonicalVideoUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=2&spm
 assert(getCanonicalVideoUrl('https://www.bilibili.com/bangumi/play/ep12345?from_spmid=123') === 'https://www.bilibili.com/bangumi/play/ep12345', 'Bilibili 番劇網址純淨保留 /ep12345');
 
 // 4. Background 房主分頁切集無縫防重整驗證
-assert(bgSrc.includes('isAlreadyOnVideo') || bgSrc.includes('activeVideoId === targetVideoId'), 'Background 實裝切集防無效重整邏輯 (isAlreadyOnVideo)');
+assert(bgSrc.includes('isAlreadyOnVideo') || bgSrc.includes('isSameVideoOrWebsite'), 'Background 實裝切集防無效重整邏輯 (isAlreadyOnVideo)');
+
+
+// ----------------------------------------------------
+// 測試套件 10: 目標網站相同時杜絕強制刷新畫面 (No-Reload Guard) 測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 10: 目標網站相同時杜絕強制刷新畫面 (No-Reload Guard) 測試 ---');
+
+// 1. isSameVideoOrWebsite 多平台精確度矩陣驗證
+assert(
+  isSameVideoOrWebsite('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=50s'),
+  'YouTube 相同影片帶有時間軸參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://youtu.be/dQw4w9WgXcQ'),
+  'YouTube 短網址與標準網址判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=oHg5SJYRHA0'),
+  'YouTube 不同影片正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.bilibili.com/video/BV1xx411c7mD?p=2&spm_id=123', 'https://www.bilibili.com/video/BV1xx411c7mD?p=2'),
+  'Bilibili 同分 P 帶追蹤參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.bilibili.com/video/BV1xx411c7mD', 'https://www.bilibili.com/video/BV1xx411c7mD?p=1'),
+  'Bilibili 預設第 1 P 與無 p 參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.bilibili.com/video/BV1xx411c7mD?p=2', 'https://www.bilibili.com/video/BV1xx411c7mD?p=3'),
+  'Bilibili 不同分 P 正確判定為不同 (p=2 vs p=3)'
+);
+assert(
+  isSameVideoOrWebsite('https://www.bilibili.com/bangumi/play/ep12345?from_spm=1', 'https://www.bilibili.com/bangumi/play/ep12345'),
+  'Bilibili 番劇同集數帶追蹤參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.bilibili.com/bangumi/play/ep12345', 'https://www.bilibili.com/bangumi/play/ep12346'),
+  'Bilibili 番劇不同集數正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.netflix.com/watch/80057281?trackId=255', 'https://www.netflix.com/watch/80057281'),
+  'Netflix 相同觀看 ID 帶 trackId 判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.netflix.com/watch/80057281', 'https://www.netflix.com/watch/80057282'),
+  'Netflix 不同劇集正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.nicovideo.jp/watch/sm9?ref=search', 'https://www.nicovideo.jp/watch/sm9'),
+  'Niconico 相同影片帶 ref 參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://anime1.me/12345', 'https://anime1.me/12345/'),
+  'Anime1.me 相同集數頁面判定為相同'
+);
+
+// 2. Background 與 Content 原始碼防重整保護檢驗
+assert(bgSrc.includes('isSameVideoOrWebsite'), 'Background 實裝 isSameVideoOrWebsite 函式引用');
+assert(bgSrc.includes('不強制刷新畫面'), 'Background 具備當前分頁或現有分頁已在目標時不強制刷新畫面機制');
+assert(!bgSrc.includes('目標分頁尚未注入 Content Script，刷新分頁以注入'), 'Background 徹底移除錯誤強制刷新邏輯');
+assert(contentSrc.includes('isSameVideoOrWebsite(currentHref, roomState.currentUrl)'), 'Content Script 在目標網站相同時不觸發跳轉廣播');
+assert(contentSrc.includes('sendResponse?.({ received: true })'), 'Content Script 訊息通道提供正常響應');
 
 // ----------------------------------------------------
 // 總結報告

@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl } from '../types/protocol';
+import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
@@ -199,44 +199,49 @@ export function isUrlAllowed(rawUrl: string): boolean {
   return false;
 }
 
-function verifyAndRedirect(targetUrl: string) {
+export function verifyAndRedirect(targetUrl: string) {
   const cleanUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
   const isSafe = isUrlAllowed(cleanUrl);
   if (isSafe) {
-    console.log(`[Background] 通過安全白名單，跳轉至: ${cleanUrl}`);
-    // 優先查詢使用者當前焦點視窗的活躍分頁 (lastFocusedWindow)
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      const activeTab = tabs && tabs[0];
-      const tabId = activeTab?.id;
-      if (tabId) {
-        // 若分頁已在目標影片，檢查 Content Script 連線狀態 (避免房主切集後因參數微差被強制重整)
-        const activeVideoId = getVideoIdentifier(activeTab.url);
-        const targetVideoId = getVideoIdentifier(cleanUrl);
-        const isAlreadyOnVideo = (activeTab.url && activeTab.url === cleanUrl) || (activeVideoId && targetVideoId && activeVideoId === targetVideoId);
-        if (isAlreadyOnVideo) {
-          console.log(`[Background] 目標分頁已在目標影片: ${cleanUrl}`);
-          chrome.tabs.sendMessage(tabId, {
+    console.log(`[Background] 通過安全白名單，處理跳轉/同步: ${cleanUrl}`);
+    // 查詢全域所有分頁，判定觀眾或房主是否已在目標網站/影片
+    chrome.tabs.query({}, (tabs) => {
+      // 1. 優先查詢當前焦點視窗的活躍分頁，若無則查詢全域活躍分頁
+      const activeTab = tabs && (tabs.find((t) => t.active && (t as any).lastFocusedWindow) || tabs.find((t) => t.active));
+
+      // 2. 核心防重整守衛：若當前活躍分頁已在目標影片/網站，絕對不強制刷新畫面 (杜絕 tabs.update)
+      const isAlreadyOnVideo = activeTab && isSameVideoOrWebsite(activeTab.url, cleanUrl);
+      if (isAlreadyOnVideo) {
+        console.log(`[Background] 當前活躍分頁已在目標網站/影片 (Tab ID: ${activeTab.id}): ${cleanUrl}，不強制刷新畫面`);
+        if (activeTab.id) {
+          chrome.tabs.sendMessage(activeTab.id, {
             type: 'CS_ROOM_STATE_CHANGED',
             payload: currentRoomState
-          }).catch(() => {
-            // 若 sendMessage 失敗，表示 Content Script 尚未注入 (例如 SPA 跳轉過來的分頁)，刷新分頁以注入
-            console.log(`[Background] 目標分頁尚未注入 Content Script，刷新分頁以注入: ${cleanUrl}`);
-            chrome.tabs.update(tabId, { url: cleanUrl });
-          });
-          return;
+          }).catch(() => {});
         }
-        chrome.tabs.update(tabId, { url: cleanUrl });
+        return;
+      }
+
+      // 3. 檢查其他非活躍分頁中是否已有分頁在目標影片/網站
+      const existingTargetTab = tabs && tabs.find((t) => isSameVideoOrWebsite(t.url, cleanUrl));
+      if (existingTargetTab && existingTargetTab.id) {
+        console.log(`[Background] 偵測到現有分頁已在目標網站/影片 (Tab ID: ${existingTargetTab.id}): ${cleanUrl}，切換焦點，不強制刷新畫面`);
+        chrome.tabs.sendMessage(existingTargetTab.id, {
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: currentRoomState
+        }).catch(() => {});
+        // 僅切換至目標影片分頁，絕對不調用 chrome.tabs.update 重新載入網址
+        chrome.tabs.update(existingTargetTab.id, { active: true });
+        return;
+      }
+
+      // 4. 若所有分頁皆不在目標網站/影片，才執行導航跳轉至新影片
+      if (activeTab && activeTab.id) {
+        console.log(`[Background] 目標網站與觀眾當前畫面不同，導航活躍分頁至: ${cleanUrl}`);
+        chrome.tabs.update(activeTab.id, { url: cleanUrl });
       } else {
-        // 備援處理：若當前焦點視窗查無活躍分頁，查詢全域活躍分頁或自動開啟新分頁
-        chrome.tabs.query({ active: true }, (allActiveTabs) => {
-          const fallbackTab = allActiveTabs && allActiveTabs[0];
-          if (fallbackTab && fallbackTab.id) {
-            chrome.tabs.update(fallbackTab.id, { url: cleanUrl });
-          } else {
-            console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${cleanUrl}`);
-            chrome.tabs.create({ url: cleanUrl });
-          }
-        });
+        console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${cleanUrl}`);
+        chrome.tabs.create({ url: cleanUrl });
       }
     });
   } else {

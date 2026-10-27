@@ -1,4 +1,4 @@
-import { SyncData, getVideoIdentifier, getCanonicalVideoUrl } from '../types/protocol';
+import { SyncData, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
 import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
@@ -93,10 +93,7 @@ function isCurrentActiveVideoTab(): boolean {
   // 若房間未指定 currentUrl，暫不限制
   if (!roomState.currentUrl) return true;
 
-  const myId = getVideoIdentifier(window.location.href);
-  const roomId = getVideoIdentifier(roomState.currentUrl);
-  if (!myId || !roomId) return true;
-  return myId === roomId;
+  return isSameVideoOrWebsite(window.location.href, roomState.currentUrl);
 }
 
 // ----------------------------------------------------
@@ -843,7 +840,7 @@ export function checkAndBroadcastPlaylistNavigation(source: string) {
   const roomVideoId = getVideoIdentifier(roomState.currentUrl);
 
   // 1. 若影片 ID 未改變，不觸發房間跳轉
-  if (!currentVideoId || currentVideoId === roomVideoId) return;
+  if (!currentVideoId || currentVideoId === roomVideoId || isSameVideoOrWebsite(currentHref, roomState.currentUrl)) return;
 
   // 2. 條件檢查：「只有在畫面或網站有支援這個功能時才能生效，或是有觸發這個功能時才生效」
   const hasSupport = isPlaylistOrEpisodeSupported();
@@ -1030,7 +1027,7 @@ function queryInitialRoomState() {
 queryInitialRoomState();
 
 // 監聽來自 Background 的動態訊息
-chrome.runtime.onMessage.addListener((request) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   const { type, payload } = request;
 
   if (type === 'CS_SYNC_RECEIVED') {
@@ -1085,6 +1082,10 @@ chrome.runtime.onMessage.addListener((request) => {
     const ver = payload?.version ? ` [Syncine v${payload.version}]` : '';
     alert(`${alertMsg}${ver}\n(${payload?.url || ''})`);
   }
+
+  // 保持訊息通道暢通並確認已接收，避免 Background catch 到未捕獲之連線異常
+  sendResponse?.({ received: true });
+  return true;
 });
 
 initObserver();
