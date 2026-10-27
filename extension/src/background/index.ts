@@ -209,9 +209,12 @@ function verifyAndRedirect(targetUrl: string) {
       const activeTab = tabs && tabs[0];
       const tabId = activeTab?.id;
       if (tabId) {
-        // 若分頁已在目標網址，檢查 Content Script 連線狀態
-        if (activeTab.url && activeTab.url === cleanUrl) {
-          console.log(`[Background] 目標分頁已在目標網址，發送房間狀態通知: ${cleanUrl}`);
+        // 若分頁已在目標影片，檢查 Content Script 連線狀態 (避免房主切集後因參數微差被強制重整)
+        const activeVideoId = getVideoIdentifier(activeTab.url);
+        const targetVideoId = getVideoIdentifier(cleanUrl);
+        const isAlreadyOnVideo = (activeTab.url && activeTab.url === cleanUrl) || (activeVideoId && targetVideoId && activeVideoId === targetVideoId);
+        if (isAlreadyOnVideo) {
+          console.log(`[Background] 目標分頁已在目標影片: ${cleanUrl}`);
           chrome.tabs.sendMessage(tabId, {
             type: 'CS_ROOM_STATE_CHANGED',
             payload: currentRoomState

@@ -428,6 +428,36 @@ assert(bridgeSrc.includes('player.seek'), 'Netflix Bridge 調用 player.seek 原
 assert(bridgeSrc.includes('detail.currentTime * 1000'), 'Netflix Bridge 正確將秒數換算為毫秒 (ms)');
 
 // ----------------------------------------------------
+// 測試套件 9: 播放清單與上下集 (Next/Prev Episode) 自動跳轉同步測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 9: 清單與上下集 (Next/Prev Episode) 自動跳轉同步測試 ---');
+
+// 1. 原始碼與邏輯注入驗證
+assert(contentSrc.includes('isPlaylistOrEpisodeSupported'), 'Content Script 實裝 isPlaylistOrEpisodeSupported 支援判定函式');
+assert(contentSrc.includes('markPlaylistActionTriggered'), 'Content Script 實裝 markPlaylistActionTriggered 換集信號捕捉器');
+assert(contentSrc.includes('checkAndBroadcastPlaylistNavigation'), 'Content Script 實裝 checkAndBroadcastPlaylistNavigation 跳轉廣播發射器');
+assert(contentSrc.includes('initPlaylistClickListeners'), 'Content Script 實裝 initPlaylistClickListeners 換集點擊監聽');
+assert(contentSrc.includes('yt-navigate-finish'), 'Content Script 監聽 YouTube yt-navigate-finish 換片導航事件');
+assert(contentSrc.includes('popstate') && contentSrc.includes('hashchange'), 'Content Script 監聽 popstate 與 hashchange 歷史記錄導航');
+
+// 2. 選擇器涵蓋率驗證
+assert(contentSrc.includes('.ytp-next-button'), '涵蓋 YouTube 下一部按鈕 (.ytp-next-button)');
+assert(contentSrc.includes('.bpx-player-ctrl-btn-next') || contentSrc.includes('.squirtle-video-next'), '涵蓋 Bilibili 下一集按鈕');
+assert(contentSrc.includes('[data-uia="control-next"]') || contentSrc.includes('[data-uia*="next-episode"]'), '涵蓋 Netflix 下一集按鈕');
+assert(contentSrc.includes('ytd-playlist-panel-renderer'), '涵蓋 YouTube 播放清單面板');
+assert(contentSrc.includes('#multi_page') || contentSrc.includes('.ep-list-wrapper'), '涵蓋 Bilibili 分P與番劇選集清單');
+assert(contentSrc.includes('[data-uia="control-episodes"]'), '涵蓋 Netflix 影集選集抽屜按鈕');
+
+// 3. Bilibili 多 P 與番劇 ep 識別碼驗證
+assert(getVideoIdentifier('https://www.bilibili.com/video/BV1xx411c7mD?p=2') === 'bili:BV1xx411c7mD?p=2', 'Bilibili 分 P 識別碼精確提取 (bili:BV1xx411c7mD?p=2)');
+assert(getVideoIdentifier('https://www.bilibili.com/bangumi/play/ep12345') === 'bili:ep12345', 'Bilibili 番劇 ep 識別碼精確提取 (bili:ep12345)');
+assert(getCanonicalVideoUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=2&spm_id=123') === 'https://www.bilibili.com/video/BV1xx411c7mD?p=2', 'Bilibili 分 P 網址保留 ?p= 參數');
+assert(getCanonicalVideoUrl('https://www.bilibili.com/bangumi/play/ep12345?from_spmid=123') === 'https://www.bilibili.com/bangumi/play/ep12345', 'Bilibili 番劇網址純淨保留 /ep12345');
+
+// 4. Background 房主分頁切集無縫防重整驗證
+assert(bgSrc.includes('isAlreadyOnVideo') || bgSrc.includes('activeVideoId === targetVideoId'), 'Background 實裝切集防無效重整邏輯 (isAlreadyOnVideo)');
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

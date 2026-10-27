@@ -241,11 +241,12 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
       if (id) return `https://www.youtube.com/watch?v=${id}`;
     }
 
-    // 3. Bilibili: 僅保留純淨 /video/BV... 或 /bangumi/play/ep...
+    // 3. Bilibili: 僅保留純淨 /video/BV... 或 /bangumi/play/ep... (支援分 P 參數 ?p=)
     if (host.includes('bilibili.com')) {
       const bvMatch = url.pathname.match(/\/(BV[a-zA-Z0-9]+)/i);
       if (bvMatch && bvMatch[1]) {
-        return `https://www.bilibili.com/video/${bvMatch[1]}`;
+        const p = url.searchParams.get('p');
+        return p && p !== '1' ? `https://www.bilibili.com/video/${bvMatch[1]}?p=${p}` : `https://www.bilibili.com/video/${bvMatch[1]}`;
       }
       const epMatch = url.pathname.match(/\/bangumi\/play\/(ep[0-9]+|ss[0-9]+)/i);
       if (epMatch && epMatch[1]) {

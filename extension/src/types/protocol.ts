@@ -187,11 +187,16 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       if (id) return `yt:${id}`;
     }
 
-    // 2. Bilibili 影片辨識
+    // 2. Bilibili 影片辨識 (支援單影片 BV、分 P 參數 ?p= 以及番劇 ep/ss)
     if (url.hostname.includes('bilibili.com')) {
       const match = url.pathname.match(/\/(BV[a-zA-Z0-9]+)/i);
       if (match && match[1]) {
-        return `bili:${match[1]}`;
+        const p = url.searchParams.get('p');
+        return p && p !== '1' ? `bili:${match[1]}?p=${p}` : `bili:${match[1]}`;
+      }
+      const epMatch = url.pathname.match(/\/bangumi\/play\/(ep[0-9]+|ss[0-9]+)/i);
+      if (epMatch && epMatch[1]) {
+        return `bili:${epMatch[1]}`;
       }
     }
 
@@ -259,11 +264,12 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
       if (id) return `https://www.youtube.com/watch?v=${id}`;
     }
 
-    // 3. Bilibili: 僅保留純淨 /video/BV... 或 /bangumi/play/ep...
+    // 3. Bilibili: 僅保留純淨 /video/BV... 或 /bangumi/play/ep... (支援分 P 參數 ?p=)
     if (host.includes('bilibili.com')) {
       const bvMatch = url.pathname.match(/\/(BV[a-zA-Z0-9]+)/i);
       if (bvMatch && bvMatch[1]) {
-        return `https://www.bilibili.com/video/${bvMatch[1]}`;
+        const p = url.searchParams.get('p');
+        return p && p !== '1' ? `https://www.bilibili.com/video/${bvMatch[1]}?p=${p}` : `https://www.bilibili.com/video/${bvMatch[1]}`;
       }
       const epMatch = url.pathname.match(/\/bangumi\/play\/(ep[0-9]+|ss[0-9]+)/i);
       if (epMatch && epMatch[1]) {

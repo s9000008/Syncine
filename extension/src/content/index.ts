@@ -1,4 +1,4 @@
-import { SyncData, getVideoIdentifier } from '../types/protocol';
+import { SyncData, getVideoIdentifier, getCanonicalVideoUrl } from '../types/protocol';
 import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
@@ -715,7 +715,193 @@ function attachVideoListeners(video: HTMLVideoElement) {
       bufferingTimer = null;
     }
   });
+
+  // 監聽影片播放結束 (支援自動連播下一集/換集)
+  video.addEventListener('ended', () => {
+    if (roomState.isInRoom && roomState.isHost && isPlaylistOrEpisodeSupported()) {
+      markPlaylistActionTriggered('Video Ended (Auto-Play Next Trigger)');
+    }
+  });
 }
+
+// ----------------------------------------------------
+// 6.5 清單與上下集 (Next/Prev Episode) 自動跳轉同步管理
+// ----------------------------------------------------
+let lastPlaylistActionTime = 0;
+let lastAutoRedirectedUrl = '';
+let playlistCheckDebounceTimer: any = null;
+
+/**
+ * 檢查當前畫面或網站是否具備「清單、選集、上下集」功能支援
+ */
+export function isPlaylistOrEpisodeSupported(): boolean {
+  try {
+    const host = window.location.hostname.toLowerCase();
+    const path = window.location.pathname.toLowerCase();
+    const search = window.location.search;
+
+    // 1. YouTube 播放清單與下一部支援
+    if (host.includes('youtube.com')) {
+      if (search.includes('list=')) return true;
+      if (document.querySelector('ytd-playlist-panel-renderer, #playlist, .ytd-playlist-panel-renderer, #playlist-items')) {
+        return true;
+      }
+      const nextBtn = document.querySelector('.ytp-next-button') as HTMLElement | null;
+      if (nextBtn && nextBtn.style.display !== 'none' && !nextBtn.getAttribute('aria-disabled')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 2. Bilibili 番劇選集與分 P 支援
+    if (host.includes('bilibili.com')) {
+      if (path.includes('/bangumi/play/')) return true;
+      if (search.includes('p=')) return true;
+      if (document.querySelector('#multi_page, .cur-list, .ep-list-wrapper, .section-ep-wrapper, .bpx-player-ctrl-btn-next, .squirtle-video-next')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 3. Netflix 影集選集與下一集支援
+    if (host.includes('netflix.com')) {
+      if (!path.includes('/watch/')) return false;
+      if (document.querySelector('[data-uia="control-episodes"], [data-uia="control-next"], [data-uia*="next-episode"], .button-nfVideos-next, [data-uia*="next-episode-seamless"], [data-uia*="postplay"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 標記使用者已觸發換集或切換清單動作 (點擊或影片播放結束)
+ */
+export function markPlaylistActionTriggered(source: string) {
+  lastPlaylistActionTime = Date.now();
+  console.log(`[Syncine Playlist] 捕捉到換集/切片觸發信號 (${source})`);
+}
+
+/**
+ * 監聽畫面上的上下集按鈕與清單項目點擊
+ */
+function initPlaylistClickListeners() {
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (!roomState.isInRoom || !roomState.isHost) return;
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // YouTube: 下一部/上一部/清單條目/推薦下一部
+      if (
+        target.closest(
+          '.ytp-next-button, .ytp-prev-button, ytd-playlist-panel-video-renderer, #playlist-items ytd-playlist-panel-video-renderer, .ytp-upnext'
+        )
+      ) {
+        markPlaylistActionTriggered('YouTube Next/Prev/Playlist Click');
+        return;
+      }
+
+      // Bilibili: 下一集/上一集/選集條目/分P條目
+      if (
+        target.closest(
+          '.bpx-player-ctrl-btn-next, .bpx-player-ctrl-btn-prev, .squirtle-video-next, .ep-item, .section-ep-wrapper li, #multi_page .cur-list li, .part-item'
+        )
+      ) {
+        markPlaylistActionTriggered('Bilibili Episode/Part Click');
+        return;
+      }
+
+      // Netflix: 下一集/選集抽屜按鈕/片尾連播按鈕
+      if (
+        target.closest(
+          '[data-uia="control-next"], [data-uia*="next-episode"], [data-uia*="postplay"], [data-uia="control-episodes"], .button-nfVideos-next, [aria-label="Next Episode"], [aria-label="下一集"], [data-uia="next-episode-seamless-button"]'
+        )
+      ) {
+        markPlaylistActionTriggered('Netflix Next Episode Click');
+        return;
+      }
+    },
+    true
+  );
+}
+
+/**
+ * 檢查是否需要廣播清單或上下集跳轉
+ */
+export function checkAndBroadcastPlaylistNavigation(source: string) {
+  if (!roomState.isInRoom || !roomState.isHost) return;
+
+  const currentHref = window.location.href;
+  const currentVideoId = getVideoIdentifier(currentHref);
+  const roomVideoId = getVideoIdentifier(roomState.currentUrl);
+
+  // 1. 若影片 ID 未改變，不觸發房間跳轉
+  if (!currentVideoId || currentVideoId === roomVideoId) return;
+
+  // 2. 條件檢查：「只有在畫面或網站有支援這個功能時才能生效，或是有觸發這個功能時才生效」
+  const hasSupport = isPlaylistOrEpisodeSupported();
+  const isRecentAction = Date.now() - lastPlaylistActionTime < 15000; // 15秒內曾觸發換集或影片播畢
+
+  if (!hasSupport && !isRecentAction) {
+    console.log(`[Syncine Playlist] 忽略跳轉 (${source})：當前頁面不具備清單/選集支援且未偵測到換集觸發`);
+    return;
+  }
+
+  // 3. 取得純淨標準網址
+  const cleanTarget = getCanonicalVideoUrl(currentHref);
+  if (!cleanTarget) return;
+
+  // 避免重複廣播相同目標
+  if (cleanTarget === lastAutoRedirectedUrl) return;
+  lastAutoRedirectedUrl = cleanTarget;
+
+  console.log(`[Syncine Playlist] 🎬 房主觸發清單/上下集跳轉 (${source}): ${cleanTarget}，即時廣播全房同步！`);
+
+  chrome.runtime
+    .sendMessage({
+      type: 'BG_REDIRECT_ROOM',
+      targetUrl: cleanTarget
+    })
+    .then((res) => {
+      if (res?.success) {
+        roomState.currentUrl = cleanTarget;
+        console.log(`[Syncine Playlist] ✅ 全房換集跳轉廣播成功: ${cleanTarget}`);
+      }
+    })
+    .catch((err) => {
+      console.warn('[Syncine Playlist] 跳轉廣播失敗:', err);
+    });
+}
+
+function handleUrlOrVideoChange(triggerSource: string) {
+  if (!roomState.isInRoom || !roomState.isHost) return;
+
+  clearTimeout(playlistCheckDebounceTimer);
+  playlistCheckDebounceTimer = setTimeout(() => {
+    checkAndBroadcastPlaylistNavigation(triggerSource);
+  }, 400);
+}
+
+// 監聽 YouTube SPA 導航與標準歷史記錄變更事件
+window.addEventListener('yt-navigate-finish', () => {
+  handleUrlOrVideoChange('YouTube yt-navigate-finish');
+});
+window.addEventListener('popstate', () => {
+  handleUrlOrVideoChange('popstate');
+});
+window.addEventListener('hashchange', () => {
+  handleUrlOrVideoChange('hashchange');
+});
+
+// 初始化清單與上下集點擊監聽
+initPlaylistClickListeners();
 
 // ----------------------------------------------------
 // 7. MutationObserver 與初始化
@@ -731,10 +917,12 @@ function initObserver() {
 
   if (!domObserver && document.body) {
     domObserver = new MutationObserver(() => {
-      // Niconico / SPA 網址變更偵測
+      // 跨平台 SPA 網址變更偵測與上下集清單跳轉處理
       if (window.location.href !== lastObservedUrl) {
         lastObservedUrl = window.location.href;
-        if (window.location.hostname.includes('nicovideo.jp') || window.location.hostname.includes('netflix.com')) {
+        handleUrlOrVideoChange('MutationObserver URL Change');
+
+        if (window.location.hostname.includes('nicovideo.jp') || window.location.hostname.includes('netflix.com') || window.location.hostname.includes('bilibili.com') || window.location.hostname.includes('youtube.com')) {
           console.log('[Syncine] 偵測到 SPA 網頁導航切換');
           setTimeout(() => {
             const nextVideo = findVideoElement();
