@@ -127,7 +127,14 @@ export default function Popup() {
   const isDisney = activeTabUrl.includes('disneyplus.com/video/') || activeTabUrl.includes('disneyplus.com/play/') || activeTabUrl.includes('disneyplus.com/series/');
   const isPrime = activeTabUrl.includes('primevideo.com/detail/') || activeTabUrl.includes('amazon.com/gp/video/detail/');
   const isMyVideo = activeTabUrl.includes('myvideo.net.tw/details/') || activeTabUrl.includes('myvideo.net.tw/player/');
-  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo;
+  const isLineTV = activeTabUrl.includes('linetv.tw/drama/');
+  const isKKTV = activeTabUrl.includes('kktv.me/play/');
+  const isCrunchyroll = activeTabUrl.includes('crunchyroll.com/watch/') || (activeTabUrl.includes('crunchyroll.com/') && activeTabUrl.includes('/watch/'));
+  const isFriday = activeTabUrl.includes('video.friday.tw/');
+  const isMax = activeTabUrl.includes('max.com/video/watch') || activeTabUrl.includes('max.com/player/') || activeTabUrl.includes('hbomax.com/');
+  const isIQIYI = activeTabUrl.includes('iq.com/play/') || activeTabUrl.includes('iqiyi.com/v_') || activeTabUrl.includes('iqiyi.com/a_');
+  const isAppleTV = activeTabUrl.includes('tv.apple.com/');
+  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo || isLineTV || isKKTV || isCrunchyroll || isFriday || isMax || isIQIYI || isAppleTV;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -496,6 +503,20 @@ export default function Popup() {
               ? t.tabStatus.primeConnected
               : isMyVideo
               ? t.tabStatus.myVideoConnected
+              : isLineTV
+              ? t.tabStatus.lineTvConnected
+              : isKKTV
+              ? t.tabStatus.kktvConnected
+              : isCrunchyroll
+              ? t.tabStatus.crunchyrollConnected
+              : isFriday
+              ? t.tabStatus.fridayConnected
+              : isMax
+              ? t.tabStatus.maxConnected
+              : isIQIYI
+              ? t.tabStatus.iqiyiConnected
+              : isAppleTV
+              ? t.tabStatus.appleTvConnected
               : t.tabStatus.supportedTooltip
           }
           onClick={() => {
@@ -537,6 +558,20 @@ export default function Popup() {
                 ? t.tabStatus.primeConnected
                 : isMyVideo
                 ? t.tabStatus.myVideoConnected
+                : isLineTV
+                ? t.tabStatus.lineTvConnected
+                : isKKTV
+                ? t.tabStatus.kktvConnected
+                : isCrunchyroll
+                ? t.tabStatus.crunchyrollConnected
+                : isFriday
+                ? t.tabStatus.fridayConnected
+                : isMax
+                ? t.tabStatus.maxConnected
+                : isIQIYI
+                ? t.tabStatus.iqiyiConnected
+                : isAppleTV
+                ? t.tabStatus.appleTvConnected
                 : t.tabStatus.notSupported}
             </span>
           </div>

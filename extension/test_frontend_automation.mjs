@@ -83,6 +83,30 @@ assert(getVideoIdentifier('https://www.amazon.com/gp/video/detail/B08W5B4N7M') =
 assert(getVideoIdentifier('https://www.myvideo.net.tw/details/0/123456') === 'myvideo:0:123456', 'MyVideo 電影詳情頁識別');
 assert(getVideoIdentifier('https://www.myvideo.net.tw/player/654321') === 'myvideo:player:654321', 'MyVideo 播放器頁面識別');
 
+// 7. LINE TV
+assert(getVideoIdentifier('https://www.linetv.tw/drama/12345/eps/1') === 'linetv:12345:1', 'LINE TV 劇集與分集識別 (linetv:12345:1)');
+assert(getVideoIdentifier('https://www.linetv.tw/drama/12345') === 'linetv:12345', 'LINE TV 單一戲劇識別');
+
+// 8. KKTV
+assert(getVideoIdentifier('https://www.kktv.me/play/01000187010001') === 'kktv:01000187010001', 'KKTV 播放識別 (kktv:01000187010001)');
+
+// 9. Crunchyroll
+assert(getVideoIdentifier('https://www.crunchyroll.com/watch/GRDQ09WPY/the-day-it-began') === 'crunchyroll:GRDQ09WPY', 'Crunchyroll 動畫識別 (crunchyroll:GRDQ09WPY)');
+
+// 10. 遠傳 friDay 影音
+assert(getVideoIdentifier('https://video.friday.tw/drama/detail/12345?episode=2') === 'friday:drama:12345?episode=2', 'friDay 影音劇集與集數識別');
+assert(getVideoIdentifier('https://video.friday.tw/movie/detail/67890') === 'friday:movie:67890', 'friDay 電影識別');
+
+// 11. Max (HBO Max)
+assert(getVideoIdentifier('https://play.max.com/video/watch/UUID-1234-5678') === 'max:UUID-1234-5678', 'Max 影片識別 (max:UUID-1234-5678)');
+
+// 12. 愛奇藝 iQIYI
+assert(getVideoIdentifier('https://www.iq.com/play/12345678') === 'iqiyi:12345678', 'iQIYI 國際版播放識別');
+assert(getVideoIdentifier('https://www.iqiyi.com/v_12345.html') === 'iqiyi:12345', 'iQIYI 大陸版視頻識別');
+
+// 13. Apple TV+
+assert(getVideoIdentifier('https://tv.apple.com/episode/umc.cmc.4u280a5') === 'appletv:umc.cmc.4u280a5', 'Apple TV+ 劇集識別');
+
 
 // 測試套件 1.5: 跨平台純淨標準影片網址 (getCanonicalVideoUrl) 測試
 console.log('\n--- 測試套件 1.5: 跨平台純淨標準網址 (getCanonicalVideoUrl) 測試 ---');
@@ -107,6 +131,13 @@ assert(getCanonicalVideoUrl('https://www.twitch.tv/videos/1234567890?filter=arch
 assert(getCanonicalVideoUrl('https://www.disneyplus.com/video/4b045e77?track=1') === 'https://www.disneyplus.com/video/4b045e77', 'Disney+ 剔除 track 參數');
 assert(getCanonicalVideoUrl('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F/ref=atv_dp') === 'https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F', 'Prime Video 剔除 ref 參數');
 assert(getCanonicalVideoUrl('https://www.myvideo.net.tw/details/0/123456?source=banner') === 'https://www.myvideo.net.tw/details/0/123456', 'MyVideo 剔除 source 參數');
+assert(getCanonicalVideoUrl('https://www.linetv.tw/drama/12345/eps/1?track=1') === 'https://www.linetv.tw/drama/12345/eps/1', 'LINE TV 剔除 track 參數');
+assert(getCanonicalVideoUrl('https://www.kktv.me/play/01000187010001?source=1') === 'https://www.kktv.me/play/01000187010001', 'KKTV 剔除 source 參數');
+assert(getCanonicalVideoUrl('https://www.crunchyroll.com/watch/GRDQ09WPY/the-day-it-began?sp=1') === 'https://www.crunchyroll.com/watch/GRDQ09WPY', 'Crunchyroll 純淨化 watch 網址');
+assert(getCanonicalVideoUrl('https://video.friday.tw/drama/detail/12345?episode=2&ref=banner') === 'https://video.friday.tw/drama/detail/12345?episode=2', 'friDay 剔除 ref 參數');
+assert(getCanonicalVideoUrl('https://play.max.com/video/watch/UUID-1234-5678?trackId=1') === 'https://play.max.com/video/watch/UUID-1234-5678', 'Max 剔除 trackId 參數');
+assert(getCanonicalVideoUrl('https://www.iq.com/play/12345678?spm=1') === 'https://www.iq.com/play/12345678', 'iQIYI 剔除 spm 參數');
+assert(getCanonicalVideoUrl('https://tv.apple.com/episode/umc.cmc.4u280a5?ctx_brand=1') === 'https://tv.apple.com/episode/umc.cmc.4u280a5', 'Apple TV+ 剔除 ctx 參數');
 
 // ----------------------------------------------------
 // 測試套件 2: Background HOST_WHITELIST 資安防禦與釣魚攔截自動化測試
@@ -128,7 +159,16 @@ const HOST_WHITELIST = [
   /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/
+  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/,
+  /^https:\/\/(www\.)?linetv\.tw\/drama\/[0-9]+(\/eps\/[0-9]+)?/,
+  /^https:\/\/(www\.)?kktv\.me\/play\/[a-zA-Z0-9]+/,
+  /^https:\/\/(www\.)?crunchyroll\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/video\.friday\.tw\/(drama|movie|anime|show|detail)\/(detail\/)?[0-9]+/,
+  /^https:\/\/(www\.|play\.)?max\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/play\.hbomax\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?iq\.com\/play\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?iqiyi\.com\/[va]_[a-zA-Z0-9]+\.html/,
+  /^https:\/\/tv\.apple\.com\/.+/
 ];
 
 function isSafeUrl(url) {
@@ -154,6 +194,13 @@ assert(isSafeUrl('https://www.disneyplus.com/video/4b045e77-5060'), '放行合�
 assert(isSafeUrl('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F'), '放行合法 Prime Video 播放網址');
 assert(isSafeUrl('https://www.amazon.com/gp/video/detail/B08W5B4N7M'), '放行合法 Amazon Video 播放網址');
 assert(isSafeUrl('https://www.myvideo.net.tw/details/0/123456'), '放行合法 MyVideo 播放網址');
+assert(isSafeUrl('https://www.linetv.tw/drama/12345/eps/1'), '放行合法 LINE TV 播放網址');
+assert(isSafeUrl('https://www.kktv.me/play/01000187010001'), '放行合法 KKTV 播放網址');
+assert(isSafeUrl('https://www.crunchyroll.com/watch/GRDQ09WPY'), '放行合法 Crunchyroll 播放網址');
+assert(isSafeUrl('https://video.friday.tw/drama/detail/12345'), '放行合法 friDay 播放網址');
+assert(isSafeUrl('https://play.max.com/video/watch/UUID-1234-5678'), '放行合法 Max 播放網址');
+assert(isSafeUrl('https://www.iq.com/play/12345678'), '放行合法 iQIYI 播放網址');
+assert(isSafeUrl('https://tv.apple.com/episode/umc.cmc.4u280a5'), '放行合法 Apple TV+ 播放網址');
 
 // 新平台釣魚防禦
 assert(!isSafeUrl('https://evil-vimeo.com/76979871'), '攔截偽造 Vimeo 釣魚網域');
@@ -162,6 +209,13 @@ assert(!isSafeUrl('https://www.twitch.tv.evil.com/videos/123'), '攔截偽造 Tw
 assert(!isSafeUrl('https://disneyplus.com.fake.com/video/123'), '攔截偽造 Disney+ 釣魚網域');
 assert(!isSafeUrl('https://primevideo.com.hacker.com/detail/123'), '攔截偽造 Prime Video 釣魚網域');
 assert(!isSafeUrl('https://myvideo.net.tw.attacker.com/details/0/123'), '攔截偽造 MyVideo 釣魚網域');
+assert(!isSafeUrl('https://linetv.tw.evil.com/drama/123'), '攔截偽造 LINE TV 釣魚網域');
+assert(!isSafeUrl('https://kktv.me.fake.com/play/123'), '攔截偽造 KKTV 釣魚網域');
+assert(!isSafeUrl('https://crunchyroll.com.hacker.com/watch/123'), '攔截偽造 Crunchyroll 釣魚網域');
+assert(!isSafeUrl('https://video.friday.tw.attacker.com/drama/123'), '攔截偽造 friDay 釣魚網域');
+assert(!isSafeUrl('https://play.max.com.evil.com/watch/123'), '攔截偽造 Max 釣魚網域');
+assert(!isSafeUrl('https://iq.com.attacker.com/play/123'), '攔截偽造 iQIYI 釣魚網域');
+assert(!isSafeUrl('https://tv.apple.com.fake.com/episode/123'), '攔截偽造 Apple TV+ 釣魚網域');
 assert(isSafeUrl('https://vimeo.com/76979871'), '放行合法 Vimeo 影片網址');
 assert(isSafeUrl('https://ani.gamer.com.tw/animeVideo.php?sn=38210'), '放行合法動畫瘋播放網址');
 assert(isSafeUrl('https://www.twitch.tv/videos/1234567890'), '放行合法 Twitch VOD 網址');
@@ -411,10 +465,18 @@ function checkTargetSite(url) {
   const isDisney = url.includes('disneyplus.com/video/') || url.includes('disneyplus.com/play/') || url.includes('disneyplus.com/series/');
   const isPrime = url.includes('primevideo.com/detail/') || url.includes('amazon.com/gp/video/detail/');
   const isMyVideo = url.includes('myvideo.net.tw/details/') || url.includes('myvideo.net.tw/player/');
+  const isLineTV = url.includes('linetv.tw/drama/');
+  const isKKTV = url.includes('kktv.me/play/');
+  const isCrunchyroll = url.includes('crunchyroll.com/watch/') || (url.includes('crunchyroll.com/') && url.includes('/watch/'));
+  const isFriday = url.includes('video.friday.tw/');
+  const isMax = url.includes('max.com/video/watch') || url.includes('max.com/player/') || url.includes('hbomax.com/');
+  const isIQIYI = url.includes('iq.com/play/') || url.includes('iqiyi.com/v_') || url.includes('iqiyi.com/a_');
+  const isAppleTV = url.includes('tv.apple.com/');
   return {
     isYouTube, isBilibili, isNiconico, isAnime1, isNetflix,
     isVimeo, isGamer, isTwitch, isDisney, isPrime, isMyVideo,
-    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo
+    isLineTV, isKKTV, isCrunchyroll, isFriday, isMax, isIQIYI, isAppleTV,
+    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo || isLineTV || isKKTV || isCrunchyroll || isFriday || isMax || isIQIYI || isAppleTV
   };
 }
 
@@ -429,6 +491,13 @@ assert(checkTargetSite('https://www.twitch.tv/videos/1234567890').isTargetSite =
 assert(checkTargetSite('https://www.disneyplus.com/video/4b045e77').isTargetSite === true, 'Popup 識別 Disney+ 為支援目標頁面');
 assert(checkTargetSite('https://www.primevideo.com/detail/0STG2N4Y').isTargetSite === true, 'Popup 識別 Prime Video 為支援目標頁面');
 assert(checkTargetSite('https://www.myvideo.net.tw/details/0/123456').isTargetSite === true, 'Popup 識別 MyVideo 為支援目標頁面');
+assert(checkTargetSite('https://www.linetv.tw/drama/12345/eps/1').isTargetSite === true, 'Popup 識別 LINE TV 為支援目標頁面');
+assert(checkTargetSite('https://www.kktv.me/play/01000187010001').isTargetSite === true, 'Popup 識別 KKTV 為支援目標頁面');
+assert(checkTargetSite('https://www.crunchyroll.com/watch/GRDQ09WPY').isTargetSite === true, 'Popup 識別 Crunchyroll 為支援目標頁面');
+assert(checkTargetSite('https://video.friday.tw/drama/detail/12345').isTargetSite === true, 'Popup 識別 friDay 為支援目標頁面');
+assert(checkTargetSite('https://play.max.com/video/watch/UUID-1234-5678').isTargetSite === true, 'Popup 識別 Max 為支援目標頁面');
+assert(checkTargetSite('https://www.iq.com/play/12345678').isTargetSite === true, 'Popup 識別 iQIYI 為支援目標頁面');
+assert(checkTargetSite('https://tv.apple.com/episode/umc.cmc.4u280a5').isTargetSite === true, 'Popup 識別 Apple TV+ 為支援目標頁面');
 assert(checkTargetSite('https://vimeo.com/76979871').isTargetSite === true, 'Popup 識別 Vimeo 為支援目標頁面');
 assert(checkTargetSite('https://ani.gamer.com.tw/animeVideo.php?sn=38210').isTargetSite === true, 'Popup 識別動畫瘋為支援目標頁面');
 assert(checkTargetSite('https://www.twitch.tv/videos/1234567890').isTargetSite === true, 'Popup 識別 Twitch 為支援目標頁面');
@@ -476,6 +545,13 @@ assert(getSiteIndicatorState('https://www.twitch.tv/videos/1234567890').lightCol
 assert(getSiteIndicatorState('https://www.disneyplus.com/video/4b045e77').lightColor === 'GREEN', 'Disney+ 顯示綠燈支援標記');
 assert(getSiteIndicatorState('https://www.primevideo.com/detail/0STG2N4Y').lightColor === 'GREEN', 'Prime Video 顯示綠燈支援標記');
 assert(getSiteIndicatorState('https://www.myvideo.net.tw/details/0/123456').lightColor === 'GREEN', 'MyVideo 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.linetv.tw/drama/12345/eps/1').lightColor === 'GREEN', 'LINE TV 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.kktv.me/play/01000187010001').lightColor === 'GREEN', 'KKTV 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.crunchyroll.com/watch/GRDQ09WPY').lightColor === 'GREEN', 'Crunchyroll 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://video.friday.tw/drama/detail/12345').lightColor === 'GREEN', 'friDay 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://play.max.com/video/watch/UUID-1234-5678').lightColor === 'GREEN', 'Max 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.iq.com/play/12345678').lightColor === 'GREEN', 'iQIYI 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://tv.apple.com/episode/umc.cmc.4u280a5').lightColor === 'GREEN', 'Apple TV+ 顯示綠燈支援標記');
 
 const googleState = getSiteIndicatorState('https://www.google.com');
 assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈不支援標記');
@@ -546,6 +622,13 @@ assert(contentSrc.includes('player-next-video-button') || contentSrc.includes('c
 assert(contentSrc.includes('disneyplus.com') && contentSrc.includes('next-episode'), '涵蓋 Disney+ 下一集');
 assert(contentSrc.includes('primevideo.com') && contentSrc.includes('next-episode'), '涵蓋 Prime Video 下一集');
 assert(contentSrc.includes('myvideo.net.tw') && contentSrc.includes('episode-item'), '涵蓋 MyVideo 劇集選集');
+assert(contentSrc.includes('linetv.tw') && contentSrc.includes('eps-item'), '涵蓋 LINE TV 劇集選集與分集');
+assert(contentSrc.includes('kktv.me') && contentSrc.includes('play-series-item'), '涵蓋 KKTV 影集選集與下一集');
+assert(contentSrc.includes('crunchyroll.com') && contentSrc.includes('playable-card'), '涵蓋 Crunchyroll 動畫選集與下一集');
+assert(contentSrc.includes('friday.tw') && contentSrc.includes('episode-item'), '涵蓋 friDay 影音劇集選集');
+assert((contentSrc.includes('max.com') || contentSrc.includes('hbomax.com')) && contentSrc.includes('next-episode'), '涵蓋 Max 下一集支援');
+assert((contentSrc.includes('iq.com') || contentSrc.includes('iqiyi.com')) && contentSrc.includes('album-item'), '涵蓋 iQIYI 選集與下一集');
+assert(contentSrc.includes('tv.apple.com') && contentSrc.includes('next-episode'), '涵蓋 Apple TV+ 下一集支援');
 assert(contentSrc.includes('.ani-control__btn--next') || contentSrc.includes('section.season'), '涵蓋動畫瘋選集與下一集');
 assert(contentSrc.includes('.playlist-container') || contentSrc.includes('.showcase-item'), '涵蓋 Vimeo 播放清單與展示集');
 assert(contentSrc.includes('player-next-video-button') || contentSrc.includes('collection-item'), '涵蓋 Twitch 下一部與合輯');
@@ -640,6 +723,62 @@ assert(
 assert(
   isSameVideoOrWebsite('https://www.myvideo.net.tw/details/0/123456?from=1', 'https://www.myvideo.net.tw/details/0/123456'),
   'MyVideo 相同視頻帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.linetv.tw/drama/12345/eps/1?track=1', 'https://www.linetv.tw/drama/12345/eps/1'),
+  'LINE TV 相同劇集分集帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.linetv.tw/drama/12345/eps/1', 'https://www.linetv.tw/drama/12345/eps/2'),
+  'LINE TV 不同分集正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.kktv.me/play/01000187010001?from=banner', 'https://www.kktv.me/play/01000187010001'),
+  'KKTV 相同影片帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.kktv.me/play/01000187010001', 'https://www.kktv.me/play/01000187010002'),
+  'KKTV 不同集數正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.crunchyroll.com/watch/GRDQ09WPY/the-day-it-began?sp=1', 'https://www.crunchyroll.com/watch/GRDQ09WPY'),
+  'Crunchyroll 相同動畫帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.crunchyroll.com/watch/GRDQ09WPY', 'https://www.crunchyroll.com/watch/GRDQ09WPZ'),
+  'Crunchyroll 不同集數正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://video.friday.tw/drama/detail/12345?episode=1&from=1', 'https://video.friday.tw/drama/detail/12345?episode=1'),
+  'friDay 相同劇集集數帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://video.friday.tw/drama/detail/12345?episode=1', 'https://video.friday.tw/drama/detail/12345?episode=2'),
+  'friDay 不同集數正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://play.max.com/video/watch/UUID-1234-5678?t=10', 'https://play.max.com/video/watch/UUID-1234-5678'),
+  'Max 相同影片帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://play.max.com/video/watch/UUID-1234-5678', 'https://play.max.com/video/watch/UUID-9999-0000'),
+  'Max 不同影片正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.iq.com/play/12345678?spm=1', 'https://www.iq.com/play/12345678'),
+  'iQIYI 相同影片帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://www.iq.com/play/12345678', 'https://www.iq.com/play/87654321'),
+  'iQIYI 不同影片正確判定為不同'
+);
+assert(
+  isSameVideoOrWebsite('https://tv.apple.com/episode/umc.cmc.4u280a5?ctx=1', 'https://tv.apple.com/episode/umc.cmc.4u280a5'),
+  'Apple TV+ 相同影片帶參數判定為相同'
+);
+assert(
+  !isSameVideoOrWebsite('https://tv.apple.com/episode/umc.cmc.4u280a5', 'https://tv.apple.com/episode/umc.cmc.9z99999'),
+  'Apple TV+ 不同影片正確判定為不同'
 );
 
 // 2. Background 與 Content 原始碼防重整保護檢驗

@@ -21,7 +21,16 @@ const HOST_WHITELIST = [
   /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/
+  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/,
+  /^https:\/\/(www\.)?linetv\.tw\/drama\/[0-9]+(\/eps\/[0-9]+)?/,
+  /^https:\/\/(www\.)?kktv\.me\/play\/[a-zA-Z0-9]+/,
+  /^https:\/\/(www\.)?crunchyroll\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/video\.friday\.tw\/(drama|movie|anime|show|detail)\/(detail\/)?[0-9]+/,
+  /^https:\/\/(www\.|play\.)?max\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/play\.hbomax\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?iq\.com\/play\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?iqiyi\.com\/[va]_[a-zA-Z0-9]+\.html/,
+  /^https:\/\/tv\.apple\.com\/.+/
 ];
 
 let socket: Socket | null = null;
@@ -198,6 +207,61 @@ export function isUrlAllowed(rawUrl: string): boolean {
       (host === 'www.netflix.com' || host === 'netflix.com') &&
       parsed.pathname.startsWith('/watch/')
     ) {
+      return true;
+    }
+    // Vimeo
+    if (host === 'vimeo.com' || host === 'www.vimeo.com' || host === 'player.vimeo.com') {
+      return true;
+    }
+    // 巴哈姆特動畫瘋
+    if (host === 'ani.gamer.com.tw' && parsed.pathname.includes('/animeVideo.php') && parsed.searchParams.has('sn')) {
+      return true;
+    }
+    // Twitch
+    if (host === 'www.twitch.tv' || host === 'twitch.tv' || host === 'clips.twitch.tv') {
+      return true;
+    }
+    // Disney+
+    if ((host === 'www.disneyplus.com' || host === 'disneyplus.com') && (parsed.pathname.includes('/video/') || parsed.pathname.includes('/play/') || parsed.pathname.includes('/series/'))) {
+      return true;
+    }
+    // Prime Video / Amazon
+    if ((host === 'www.primevideo.com' || host === 'primevideo.com' || host === 'www.amazon.com') && (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/gp/video/'))) {
+      return true;
+    }
+    // MyVideo
+    if ((host === 'www.myvideo.net.tw' || host === 'myvideo.net.tw') && (parsed.pathname.startsWith('/details/') || parsed.pathname.startsWith('/player/'))) {
+      return true;
+    }
+    // LINE TV
+    if ((host === 'www.linetv.tw' || host === 'linetv.tw') && parsed.pathname.startsWith('/drama/')) {
+      return true;
+    }
+    // KKTV
+    if ((host === 'www.kktv.me' || host === 'kktv.me') && parsed.pathname.startsWith('/play/')) {
+      return true;
+    }
+    // Crunchyroll
+    if ((host === 'www.crunchyroll.com' || host === 'crunchyroll.com') && parsed.pathname.includes('/watch/')) {
+      return true;
+    }
+    // friDay
+    if (host === 'video.friday.tw' && (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/drama/') || parsed.pathname.includes('/movie/'))) {
+      return true;
+    }
+    // Max / HBO Max
+    if ((host === 'www.max.com' || host === 'max.com' || host === 'play.max.com' || host === 'play.hbomax.com') && (parsed.pathname.includes('/video/watch') || parsed.pathname.includes('/player/'))) {
+      return true;
+    }
+    // iQIYI
+    if ((host === 'www.iq.com' || host === 'iq.com') && parsed.pathname.startsWith('/play/')) {
+      return true;
+    }
+    if ((host === 'www.iqiyi.com' || host === 'iqiyi.com') && (parsed.pathname.startsWith('/v_') || parsed.pathname.startsWith('/a_'))) {
+      return true;
+    }
+    // Apple TV+
+    if (host === 'tv.apple.com' && (parsed.pathname.includes('/episode/') || parsed.pathname.includes('/movie/') || parsed.pathname.includes('/show/') || parsed.pathname.includes('umc.cmc.'))) {
       return true;
     }
   } catch (e) {
@@ -610,7 +674,16 @@ function broadcastToVideoTabs(msg: any) {
           tab.url.includes('disneyplus.com') ||
           tab.url.includes('primevideo.com') ||
           tab.url.includes('amazon.com') ||
-          tab.url.includes('myvideo.net.tw'))) ||
+          tab.url.includes('myvideo.net.tw') ||
+          tab.url.includes('linetv.tw') ||
+          tab.url.includes('kktv.me') ||
+          tab.url.includes('crunchyroll.com') ||
+          tab.url.includes('friday.tw') ||
+          tab.url.includes('max.com') ||
+          tab.url.includes('hbomax.com') ||
+          tab.url.includes('iq.com') ||
+          tab.url.includes('iqiyi.com') ||
+          tab.url.includes('tv.apple.com'))) ||
         (pendingUrl && (pendingUrl.includes('youtube.com') ||
           pendingUrl.includes('bilibili.com') ||
           pendingUrl.includes('nicovideo.jp') ||
@@ -622,7 +695,16 @@ function broadcastToVideoTabs(msg: any) {
           pendingUrl.includes('disneyplus.com') ||
           pendingUrl.includes('primevideo.com') ||
           pendingUrl.includes('amazon.com') ||
-          pendingUrl.includes('myvideo.net.tw'))))
+          pendingUrl.includes('myvideo.net.tw') ||
+          pendingUrl.includes('linetv.tw') ||
+          pendingUrl.includes('kktv.me') ||
+          pendingUrl.includes('crunchyroll.com') ||
+          pendingUrl.includes('friday.tw') ||
+          pendingUrl.includes('max.com') ||
+          pendingUrl.includes('hbomax.com') ||
+          pendingUrl.includes('iq.com') ||
+          pendingUrl.includes('iqiyi.com') ||
+          pendingUrl.includes('tv.apple.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
         sentCount++;

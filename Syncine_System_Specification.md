@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.6.1)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.9.0)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -9,12 +9,25 @@
 ### 1.1 系統目標
 本專案旨在開發一款瀏覽器擴充套件（Chrome Extension V3），配合彈性連線機制（預設中繼、自架伺服器、WebRTC P2P 直連），實現跨地理位置、跨網頁、低延遲的網頁影片「即時同步播放」服務。
 
-### 1.2 支援目標網站（當前版本）
+### 1.2 支援目標網站（當前版本已支援 18 大主流影音串流平台）
 1. **YouTube**：標準網頁版影片播放頁（處理 SPA 網頁架構與廣告過濾）。
-2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM）。
+2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM、分 P 與番劇 ep/ss）。
 3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
 4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
 5. **Netflix**：`netflix.com/watch/*` 播放頁（處理 SPA 路由導航、專屬播放容器 `.watch-video video` 選擇器、影片唯一識別碼 `netflix:<numericId>` 提取，並以 MV3 `world: "MAIN"` 橋接調用 Cadmium VideoPlayer API 進行安全 Seek/Play/Pause，防範直接修改 `currentTime` 觸發 DRM/播放器崩潰）。
+6. **Vimeo**：標準影片與 Showcase 展示集、頻道播放頁（處理 `.vp-video-wrapper video`、播放清單與 Next video）。
+7. **巴哈姆特動畫瘋**：`ani.gamer.com.tw/animeVideo.php?sn=*`（處理 Video.js 播放器與選集季別切換）。
+8. **Twitch**：VOD 隨選影片、Clips 剪輯與直播頻道頁。
+9. **Disney+**：`disneyplus.com/video/*`、`/play/*`、`/series/*`（處理專屬 BTM 播放器與 Next Episode 連播）。
+10. **Prime Video / Amazon**：`primevideo.com/detail/*` 與 `amazon.com/gp/video/*`。
+11. **MyVideo**：`myvideo.net.tw/details/*` 與 `/player/*` 繁中優質串流。
+12. **LINE TV**：`linetv.tw/drama/*` 台灣與亞洲戲劇/綜藝/動漫串流。
+13. **KKTV**：`kktv.me/play/*` 日劇動漫第一品牌串流。
+14. **Crunchyroll**：`crunchyroll.com/watch/*` 全球動漫旗艦平台。
+15. **遠傳 friDay 影音**：`video.friday.tw/(drama|movie|anime|show)/detail/*` 台灣院線與日韓獨家平台。
+16. **Max (HBO Max)**：`play.max.com/video/watch/*` 全球頂級影集電影平台。
+17. **愛奇藝 (iQIYI)**：`iq.com/play/*` 與 `iqiyi.com/v_*.html` 亞洲頂級華語與動漫串流。
+18. **Apple TV+**：`tv.apple.com/...` 全球頂級原創影集電影串流平台。
 
 > [!NOTE]
 > **功能範疇調整說明**：
@@ -308,6 +321,13 @@ AI 在編寫 Content Script 時，請針對當前核心支援平台採用以下�
 | **Disney+** | `[data-testid*="up-next"], [data-testid="episode-card"]` | `[data-testid*="next-episode"], [data-testid*="up-next"], .up-next-card` |
 | **Prime Video** | `.dv-player-next-episode, .nextUpCard` | `[data-testid="next-episode-button"], .next-episode, .nextUpCard` |
 | **MyVideo** | `.episode-item, .episode_list, .drama-episode, .season-list` | `.episode-item, .drama-episode, .season-list a, .episode_list a` |
+| **LINE TV** | `.eps-item, .ep-btn, [data-testid="next-episode"], .episode_li, .eps_item` | `.eps-item, .ep-btn, [data-testid="next-episode"], .episode_li, .eps_item` |
+| **KKTV** | `.play-series-item, .next-episode-btn, .series-item, [data-testid*="next-episode"]` | `.play-series-item, .next-episode-btn, .series-item, [data-testid*="next-episode"]` |
+| **Crunchyroll** | `[data-t="next-episode-btn"], .playable-card, [data-t="episode-card"], .next-episode-btn` | `[data-t="next-episode-btn"], .playable-card, [data-t="episode-card"], .next-episode-btn` |
+| **遠傳 friDay 影音** | `.episode-item, .drama-item, .item-episode, [data-episode]` | `.episode-item, .drama-item, .item-episode, [data-episode]` |
+| **Max (HBO Max)** | `[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"]` | `[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"]` |
+| **愛奇藝 (iQIYI)** | `.album-item, .episode-item, .iqp-btn-next, [data-player-hook="next-btn"]` | `.album-item, .episode-item, .iqp-btn-next, [data-player-hook="next-btn"]` |
+| **Apple TV+** | `[data-testid*="next-episode"], .upstream-next-item, [aria-label*="Next Episode"]` | `[data-testid*="next-episode"], .upstream-next-item, [aria-label*="Next Episode"]` |
 
 ---
 

@@ -204,6 +204,20 @@ function findVideoElement(): HTMLVideoElement | null {
     return document.querySelector('.webPlayerElement video, .rendererContainer video, [data-testid="web-player"] video, video') as HTMLVideoElement;
   } else if (host.includes('myvideo.net.tw')) {
     return document.querySelector('#video_player_html5_api, #playerContainer video, .vjs-tech, video') as HTMLVideoElement;
+  } else if (host.includes('linetv.tw')) {
+    return document.querySelector('#line-player video, .player-container video, video') as HTMLVideoElement;
+  } else if (host.includes('kktv.me')) {
+    return document.querySelector('.kktv-player video, #player video, video') as HTMLVideoElement;
+  } else if (host.includes('crunchyroll.com')) {
+    return document.querySelector('#player0 video, .video-player video, #vilos video, video') as HTMLVideoElement;
+  } else if (host.includes('friday.tw')) {
+    return document.querySelector('.player-container video, #player video, .vjs-tech, video') as HTMLVideoElement;
+  } else if (host.includes('max.com') || host.includes('hbomax.com')) {
+    return document.querySelector('video') as HTMLVideoElement;
+  } else if (host.includes('iq.com') || host.includes('iqiyi.com')) {
+    return document.querySelector('#iqpvid video, .iqp-player video, iq-player video, video') as HTMLVideoElement;
+  } else if (host.includes('tv.apple.com')) {
+    return document.querySelector('video') as HTMLVideoElement;
   } else if (host.includes('google.com')) {
     return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
   }
@@ -833,6 +847,64 @@ export function isPlaylistOrEpisodeSupported(): boolean {
       return false;
     }
 
+    // 10. LINE TV 劇集與分集支援
+    if (host.includes('linetv.tw')) {
+      if (path.includes('/eps/')) return true;
+      if (document.querySelector('.eps-item, .ep-btn, [data-testid="next-episode"], .episode_li, .eps_item')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 11. KKTV 影集與分集支援
+    if (host.includes('kktv.me')) {
+      if (document.querySelector('.play-series-item, .next-episode-btn, .series-item, [data-testid*="next-episode"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 12. Crunchyroll 動畫選集與下一集支援
+    if (host.includes('crunchyroll.com')) {
+      if (document.querySelector('[data-t="next-episode-btn"], .playable-card, [data-t="episode-card"], .next-episode-btn')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 13. 遠傳 friDay 影音劇集選集支援
+    if (host.includes('friday.tw')) {
+      if (search.includes('episode=')) return true;
+      if (document.querySelector('.episode-item, .drama-item, .item-episode, [data-episode]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 14. Max (HBO Max) 影集與下一集支援
+    if (host.includes('max.com') || host.includes('hbomax.com')) {
+      if (document.querySelector('[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"], [aria-label*="下一集"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 15. 愛奇藝 iQIYI 選集與下一集支援
+    if (host.includes('iq.com') || host.includes('iqiyi.com')) {
+      if (document.querySelector('.album-item, .episode-item, .iqp-btn-next, [data-player-hook="next-btn"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 16. Apple TV+ 影集選集與下一集支援
+    if (host.includes('tv.apple.com')) {
+      if (document.querySelector('[data-testid*="next-episode"], .upstream-next-item, [aria-label*="Next Episode"], [aria-label*="下一集"]')) {
+        return true;
+      }
+      return false;
+    }
+
     return false;
   } catch (e) {
     return false;
@@ -948,6 +1020,76 @@ function initPlaylistClickListeners() {
         markPlaylistActionTriggered('MyVideo Episode Click');
         return;
       }
+
+      // LINE TV: 分集點擊 / 下一集
+      if (
+        target.closest(
+          '.eps-item, .ep-btn, [data-testid="next-episode"], .episode_li, .eps_item'
+        )
+      ) {
+        markPlaylistActionTriggered('LINE TV Episode/Next Click');
+        return;
+      }
+
+      // KKTV: 選集點擊 / 下一集
+      if (
+        target.closest(
+          '.play-series-item, .next-episode-btn, .series-item, [data-testid*="next-episode"]'
+        )
+      ) {
+        markPlaylistActionTriggered('KKTV Episode/Next Click');
+        return;
+      }
+
+      // Crunchyroll: 選集卡片 / 下一集
+      if (
+        target.closest(
+          '[data-t="next-episode-btn"], .playable-card, [data-t="episode-card"], .next-episode-btn'
+        )
+      ) {
+        markPlaylistActionTriggered('Crunchyroll Next/Episode Click');
+        return;
+      }
+
+      // 遠傳 friDay 影音: 分集列表點擊
+      if (
+        target.closest(
+          '.episode-item, .drama-item, .item-episode, [data-episode]'
+        )
+      ) {
+        markPlaylistActionTriggered('friDay Episode Click');
+        return;
+      }
+
+      // Max (HBO Max): 下一集點擊
+      if (
+        target.closest(
+          '[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"], [aria-label*="下一集"]'
+        )
+      ) {
+        markPlaylistActionTriggered('Max Next Episode Click');
+        return;
+      }
+
+      // 愛奇藝 iQIYI: 選集與下一集點擊
+      if (
+        target.closest(
+          '.album-item, .episode-item, .iqp-btn-next, [data-player-hook="next-btn"]'
+        )
+      ) {
+        markPlaylistActionTriggered('iQIYI Episode/Next Click');
+        return;
+      }
+
+      // Apple TV+: 下一集點擊
+      if (
+        target.closest(
+          '[data-testid*="next-episode"], .upstream-next-item, [aria-label*="Next Episode"], [aria-label*="下一集"]'
+        )
+      ) {
+        markPlaylistActionTriggered('Apple TV+ Next Episode Click');
+        return;
+      }
     },
     true
   );
@@ -1044,7 +1186,7 @@ function initObserver() {
         handleUrlOrVideoChange('MutationObserver URL Change');
 
         const h = window.location.hostname;
-        if (h.includes('nicovideo.jp') || h.includes('netflix.com') || h.includes('bilibili.com') || h.includes('youtube.com') || h.includes('vimeo.com') || h.includes('gamer.com.tw') || h.includes('twitch.tv') || h.includes('disneyplus.com') || h.includes('primevideo.com') || h.includes('amazon.com') || h.includes('myvideo.net.tw')) {
+        if (h.includes('nicovideo.jp') || h.includes('netflix.com') || h.includes('bilibili.com') || h.includes('youtube.com') || h.includes('vimeo.com') || h.includes('gamer.com.tw') || h.includes('twitch.tv') || h.includes('disneyplus.com') || h.includes('primevideo.com') || h.includes('amazon.com') || h.includes('myvideo.net.tw') || h.includes('linetv.tw') || h.includes('kktv.me') || h.includes('crunchyroll.com') || h.includes('friday.tw') || h.includes('max.com') || h.includes('hbomax.com') || h.includes('iq.com') || h.includes('iqiyi.com') || h.includes('tv.apple.com')) {
           console.log('[Syncine] 偵測到 SPA 網頁導航切換');
           setTimeout(() => {
             const nextVideo = findVideoElement();

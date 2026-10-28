@@ -296,6 +296,75 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       }
     }
 
+    // 12. LINE TV (如: linetv.tw/drama/12345/eps/1 或 /drama/12345)
+    if (url.hostname.includes('linetv.tw')) {
+      const dramaMatch = url.pathname.match(/\/drama\/([0-9]+)(?:\/eps\/([0-9]+))?/);
+      if (dramaMatch && dramaMatch[1]) {
+        return dramaMatch[2] ? `linetv:${dramaMatch[1]}:${dramaMatch[2]}` : `linetv:${dramaMatch[1]}`;
+      }
+    }
+
+    // 13. KKTV (如: kktv.me/play/01000187010001)
+    if (url.hostname.includes('kktv.me')) {
+      const match = url.pathname.match(/\/play\/([a-zA-Z0-9]+)/);
+      if (match && match[1]) {
+        return `kktv:${match[1]}`;
+      }
+    }
+
+    // 14. Crunchyroll (如: crunchyroll.com/watch/GRDQ09WPY/the-day-it-began 或 /watch/GRDQ09WPY)
+    if (url.hostname.includes('crunchyroll.com')) {
+      const match = url.pathname.match(/\/watch\/([a-zA-Z0-9]+)/);
+      if (match && match[1]) {
+        return `crunchyroll:${match[1]}`;
+      }
+    }
+
+    // 15. 遠傳 friDay 影音 (如: video.friday.tw/drama/detail/12345 或 /movie/detail/12345, 或 ?episode=1)
+    if (url.hostname.includes('friday.tw')) {
+      const match = url.pathname.match(/\/(drama|movie|anime|show|detail)\/(?:detail\/)?([0-9]+)/);
+      if (match && match[2]) {
+        const type = match[1];
+        const id = match[2];
+        const ep = url.searchParams.get('episode');
+        return ep ? `friday:${type}:${id}?episode=${ep}` : `friday:${type}:${id}`;
+      }
+    }
+
+    // 16. Max / HBO Max (如: play.max.com/video/watch/UUID 或 /player/...)
+    if (url.hostname.includes('max.com') || url.hostname.includes('hbomax.com')) {
+      const match = url.pathname.match(/\/(?:video\/watch|player)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `max:${match[1]}`;
+      }
+    }
+
+    // 17. 愛奇藝 iQIYI (如: iq.com/play/UUID 或 iqiyi.com/v_12345.html / a_12345.html)
+    if (url.hostname.includes('iq.com')) {
+      const match = url.pathname.match(/\/play\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `iqiyi:${match[1]}`;
+      }
+    }
+    if (url.hostname.includes('iqiyi.com')) {
+      const match = url.pathname.match(/\/[va]_([a-zA-Z0-9]+)\.html/);
+      if (match && match[1]) {
+        return `iqiyi:${match[1]}`;
+      }
+    }
+
+    // 18. Apple TV+ (如: tv.apple.com/.../episode/.../umc.cmc.4u280a... 或 /movie/.../umc.cmc.... 或 /episode/...)
+    if (url.hostname.includes('tv.apple.com')) {
+      const umcMatch = url.pathname.match(/(umc\.cmc\.[a-zA-Z0-9]+)/);
+      if (umcMatch && umcMatch[1]) {
+        return `appletv:${umcMatch[1]}`;
+      }
+      const epMatch = url.pathname.match(/\/(?:episode|movie|show)\/(?:[^\/]+\/)?([a-zA-Z0-9._-]+)/);
+      if (epMatch && epMatch[1]) {
+        return `appletv:${epMatch[1]}`;
+      }
+    }
+
     // 其它網址以去除 query/hash 之 pathname 為識別
     return `${url.origin}${url.pathname}`;
   } catch (e) {
@@ -427,6 +496,79 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
       const playerMatch = url.pathname.match(/\/player\/([0-9]+)/);
       if (playerMatch && playerMatch[1]) {
         return `https://www.myvideo.net.tw/player/${playerMatch[1]}`;
+      }
+    }
+
+    // 12. LINE TV: 僅保留標準 drama/eps 路徑
+    if (host.includes('linetv.tw')) {
+      const dramaMatch = url.pathname.match(/\/drama\/([0-9]+)(?:\/eps\/([0-9]+))?/);
+      if (dramaMatch && dramaMatch[1]) {
+        return dramaMatch[2]
+          ? `https://www.linetv.tw/drama/${dramaMatch[1]}/eps/${dramaMatch[2]}`
+          : `https://www.linetv.tw/drama/${dramaMatch[1]}`;
+      }
+    }
+
+    // 13. KKTV: 僅保留標準 /play/<id>
+    if (host.includes('kktv.me')) {
+      const match = url.pathname.match(/\/play\/([a-zA-Z0-9]+)/);
+      if (match && match[1]) {
+        return `https://www.kktv.me/play/${match[1]}`;
+      }
+    }
+
+    // 14. Crunchyroll: 僅保留標準 /watch/<id>
+    if (host.includes('crunchyroll.com')) {
+      const match = url.pathname.match(/\/watch\/([a-zA-Z0-9]+)/);
+      if (match && match[1]) {
+        return `https://www.crunchyroll.com/watch/${match[1]}`;
+      }
+    }
+
+    // 15. 遠傳 friDay 影音: 僅保留純淨 detail 與 episode
+    if (host.includes('friday.tw')) {
+      const match = url.pathname.match(/\/(drama|movie|anime|show|detail)\/(?:detail\/)?([0-9]+)/);
+      if (match && match[2]) {
+        const type = match[1];
+        const id = match[2];
+        const ep = url.searchParams.get('episode');
+        return ep
+          ? `https://video.friday.tw/${type}/detail/${id}?episode=${ep}`
+          : `https://video.friday.tw/${type}/detail/${id}`;
+      }
+    }
+
+    // 16. Max: 僅保留標準 /video/watch/<id>
+    if (host.includes('max.com') || host.includes('hbomax.com')) {
+      const match = url.pathname.match(/\/(?:video\/watch|player)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `https://play.max.com/video/watch/${match[1]}`;
+      }
+    }
+
+    // 17. 愛奇藝 iQIYI: 僅保留標準 /play/<id> 或 /v_<id>.html
+    if (host.includes('iq.com')) {
+      const match = url.pathname.match(/\/play\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `https://www.iq.com/play/${match[1]}`;
+      }
+    }
+    if (host.includes('iqiyi.com')) {
+      const match = url.pathname.match(/\/[va]_([a-zA-Z0-9]+)\.html/);
+      if (match && match[1]) {
+        return `https://www.iqiyi.com/v_${match[1]}.html`;
+      }
+    }
+
+    // 18. Apple TV+: 保留純淨標準網址
+    if (host.includes('tv.apple.com')) {
+      const umcMatch = url.pathname.match(/(umc\.cmc\.[a-zA-Z0-9]+)/);
+      if (umcMatch && umcMatch[1]) {
+        return `https://tv.apple.com/episode/${umcMatch[1]}`;
+      }
+      const epMatch = url.pathname.match(/\/(?:episode|movie|show)\/(?:[^\/]+\/)?([a-zA-Z0-9._-]+)/);
+      if (epMatch && epMatch[1]) {
+        return `https://tv.apple.com/episode/${epMatch[1]}`;
       }
     }
 
