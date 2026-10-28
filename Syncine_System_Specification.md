@@ -326,6 +326,13 @@ if (isTopFrame && isSiteActive) {
 - **嚴格維持二元狀態 (Strict Bi-State)**：僅提供「綠燈（已啟用支援）」與「紅燈（不支援）」。
 - **不得展示黃燈或籌備中特殊標籤**：依規格嚴格禁止顯示「即將推出 / 籌備中」之特權樣式或黃色燈號，一律退回標準未支援之紅燈警告，避免干擾使用者判斷。
 
+#### 5.4.6 隱藏測試彩蛋 (Triple-Click Easter Egg) 與通用影片方案 (Generic Fallback)
+為便於內部測試與先導體驗，系統實裝隱藏式全開開關：
+1. **版本號 3 次連擊觸發**：使用者於 Popup 控制面板右上角之版本號標籤連續點擊 3 次，即可切換儲存旗標 `syncine_unlock_candidates`。
+2. **全開預計支援名單**：解鎖狀態下，所有已於 Manifest 預宣告之 9 大候選串流平台（CatchPlay+、LiTV、WeTV、Bilibili 國際版、Hulu、Peacock、Paramount+、HBO GO 等）全面轉為綠燈支援狀態。
+3. **後端白名單全面放行**：伺服器端 `isServerUrlAllowed` 採用 `isPlatformPermitted` 驗證，直接放行所有授權名單中之候選平台跳轉與同步廣播。
+4. **標準影片通用方案 (findGenericVideoElement)**：針對尚未開發客製化選擇器的候選網站，Content Script 自動以 HTML5 `<video>` 元素的可見面積、播放時長與已載入來源進行智能探測，並調用原生 `play()`, `pause()`, `currentTime` 執行標準同步控制。
+
 ---
 
 ## 6. Chrome Extension MV3 限制與保活架構 (Keep-Alive)

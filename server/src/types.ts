@@ -1,4 +1,4 @@
-import { isPlatformActive } from './platforms';
+import { isPlatformActive, isPlatformPermitted } from './platforms';
 
 export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
 
@@ -199,9 +199,15 @@ export interface RoomState {
 export function isServerUrlAllowed(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const targetUrl = rawUrl.trim();
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'https:') return false;
+  } catch (e) {
+    return false;
+  }
 
-  // 0. 局部開放守衛：只有正式啟用 (enabled: true) 的平台才放行伺服器端跳轉
-  if (!isPlatformActive(targetUrl)) {
+  // 0. 伺服器端白名單守衛：開放所有在權限名單中之目標平台 (包含現行 18 個活躍平台與 9 個候選預授權平台)
+  if (!isPlatformPermitted(targetUrl)) {
     return false;
   }
   if (SERVER_HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {

@@ -487,7 +487,7 @@ console.log('\n--- 測試套件 4: Content Script 無權限觀眾 Seeking 回滾
 // ----------------------------------------------------
 console.log('\n--- 測試套件 5: Popup 目標網站辨識與狀態切換自動化測試 ---');
 
-function checkTargetSite(url) {
+function checkTargetSite(url, candidatesUnlocked = false) {
   const isYouTube = url.includes('youtube.com/watch');
   const isBilibili = url.includes('bilibili.com/video') || url.includes('bilibili.com/bangumi');
   const isNiconico = url.includes('nicovideo.jp/watch/');
@@ -510,10 +510,15 @@ function checkTargetSite(url) {
     isYouTube, isBilibili, isNiconico, isAnime1, isNetflix,
     isVimeo, isGamer, isTwitch, isDisney, isPrime, isMyVideo,
     isLineTV, isKKTV, isCrunchyroll, isFriday, isMax, isIQIYI, isAppleTV,
-    isTargetSite: isPlatformActive(url)
+    isTargetSite: isPlatformActive(url, candidatesUnlocked)
   };
 }
 
+assert(checkTargetSite('https://www.catchplay.com/watch/123', false).isTargetSite === false, '預設狀態下 CatchPlay 標記為不支援 (紅燈)');
+assert(checkTargetSite('https://www.catchplay.com/watch/123', true).isTargetSite === true, '彩蛋解鎖後 CatchPlay 標記為支援 (綠燈)');
+assert(checkTargetSite('https://www.litv.tv/vod/123', false).isTargetSite === false, '預設狀態下 LiTV 標記為不支援 (紅燈)');
+assert(checkTargetSite('https://www.litv.tv/vod/123', true).isTargetSite === true, '彩蛋解鎖後 LiTV 標記為支援 (綠燈)');
+assert(checkTargetSite('https://www.google.com', true).isTargetSite === false, '非串流網站解鎖後仍為不支援 (紅燈)');
 assert(checkTargetSite('https://www.youtube.com/watch?v=123').isTargetSite === true, 'Popup 識別 YouTube 為支援目標頁面');
 assert(checkTargetSite('https://www.bilibili.com/video/BV1xx').isTargetSite === true, 'Popup 識別 Bilibili 為支援目標頁面');
 assert(checkTargetSite('https://www.nicovideo.jp/watch/sm9').isTargetSite === true, 'Popup 識別 Niconico 為支援目標頁面');
@@ -625,6 +630,14 @@ assert(contentSrc.includes('pagehide'), 'content/index.ts 監聽 pagehide 事件
 assert(contentSrc.includes('pageshow'), 'content/index.ts 監聽 pageshow 事件以恢復 Port 與狀態');
 assert(contentSrc.includes('event.persisted'), 'content/index.ts 依據 event.persisted 判定 bfcache 生命週期');
 assert(contentSrc.includes('chrome.runtime.lastError'), 'content/index.ts 存取 chrome.runtime.lastError 消除未捕獲異常');
+
+assert(contentSrc.includes('findGenericVideoElement'), 'content/index.ts 實裝標準影片通用檢索方案 (findGenericVideoElement)');
+assert(contentSrc.includes('syncine_unlock_candidates'), 'content/index.ts 監聽彩蛋解鎖儲存旗標 (syncine_unlock_candidates)');
+
+const popupSrc = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+assert(popupSrc.includes('handleVersionTripleClick'), 'Popup.tsx 實裝版本號點擊 3 次隱藏彩蛋觸發器 (handleVersionTripleClick)');
+assert(popupSrc.includes('syncine_unlock_candidates'), 'Popup.tsx 透過 syncine_unlock_candidates 儲存解鎖狀態');
+assert(popupSrc.includes('isPlatformActive(activeTabUrl, candidatesUnlocked)'), 'Popup.tsx 根據彩蛋解鎖狀態計算目標支援判定');
 
 const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
 assert(bgSrc.includes('isPlatformActive'), 'background/index.ts 實裝 isPlatformActive 廣播與白名單過濾守衛');

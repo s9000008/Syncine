@@ -264,9 +264,10 @@ export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
 /**
  * 檢查當前網址是否為「已正式開放啟用支援 (Active)」之影音平台
  */
-export function isPlatformActive(rawUrl?: string): boolean {
+export function isPlatformActive(rawUrl?: string, allowCandidates = false): boolean {
   const p = getPlatformByUrl(rawUrl);
-  return Boolean(p && p.enabled);
+  if (!p) return false;
+  return allowCandidates ? true : Boolean(p.enabled);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { SyncData, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive } from '../platforms';
+import { isPlatformActive, isPlatformPermitted } from '../platforms';
 import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
@@ -7,7 +7,7 @@ console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === w
 // 頂層視窗防禦守衛 (防止注入廣告/沙盒 iframe)
 const isTopFrame = window.self === window.top;
 // 局部開放守衛 (若處於授權清單但尚未正式開放支援，完全靜默休眠退出)
-const isSiteActive = isPlatformActive(window.location.href);
+let isSiteActive = isPlatformActive(window.location.href);
 
 // ----------------------------------------------------
 // 1. MV3 長連接 Port 保活與 bfcache 生命週期管理
@@ -185,6 +185,33 @@ function findAnime1Video(): HTMLVideoElement | null {
 
   // 4. 預設選擇第一個可視的 video.vjs-tech
   return videos.find((v) => v.offsetWidth > 0) || videos[0];
+}
+
+/**
+ * 標準影片的通用方案 (Generic HTML5 Video Fallback)
+ * 針對尚未正式支援或未配置專屬選擇器的影音網站，
+ * 智能探測頁面中的標準 HTML5 <video> 元素（按可見面積、是否具備真實時長/來源過濾微縮背景與廣告視窗）
+ */
+function findGenericVideoElement(): HTMLVideoElement | null {
+  const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+  if (videos.length === 0) return null;
+  if (videos.length === 1) return videos[0];
+
+  let bestVideo: HTMLVideoElement | null = null;
+  let maxArea = 0;
+  for (const v of videos) {
+    try {
+      const rect = v.getBoundingClientRect();
+      const style = window.getComputedStyle(v);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+      const area = rect.width * rect.height;
+      if (area > maxArea && (v.duration > 0 || v.src || v.currentSrc || v.readyState > 0 || area > 20000)) {
+        maxArea = area;
+        bestVideo = v;
+      }
+    } catch (_) {}
+  }
+  return bestVideo || videos[0];
 }
 
 function findVideoElement(): HTMLVideoElement | null {
@@ -1368,4 +1395,40 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   return true;
 });
 
-initObserver();
+
+let isInitialized = false;
+function activateContentScript() {
+  if (isInitialized || !isTopFrame) return;
+  isInitialized = true;
+  setupKeepAlivePort();
+  initObserver();
+  initPlaylistClickListeners();
+  queryInitialRoomState();
+}
+
+// 啟動守衛：正式開放平台立即同步啟動；候選網站監聽彩蛋解鎖狀態
+if (isTopFrame) {
+  if (isSiteActive) {
+    activateContentScript();
+  } else {
+    if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+      chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
+        if (res?.syncine_unlock_candidates && isPlatformPermitted(window.location.href)) {
+          isSiteActive = true;
+          activateContentScript();
+        }
+      });
+    }
+  }
+
+  if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.syncine_unlock_candidates) {
+        if (changes.syncine_unlock_candidates.newValue && isPlatformPermitted(window.location.href)) {
+          isSiteActive = true;
+          activateContentScript();
+        }
+      }
+    });
+  }
+}

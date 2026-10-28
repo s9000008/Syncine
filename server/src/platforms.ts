@@ -225,20 +225,31 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
   }
 ];
 
-export function isPlatformActive(rawUrl?: string): boolean {
-  if (!rawUrl || typeof rawUrl !== 'string') return false;
+export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
   try {
     const url = new URL(rawUrl.trim());
     const host = url.hostname.toLowerCase();
     for (const p of PLATFORM_REGISTRY) {
-      if (p.enabled && p.domains.some((d) => host === d || host.endsWith('.' + d))) {
+      if (p.domains.some((d) => host === d || host.endsWith('.' + d))) {
         if (p.matchUrl(url)) {
-          return true;
+          return p;
         }
       }
     }
   } catch (e) {
-    return false;
+    return null;
   }
-  return false;
+  return null;
+}
+
+export function isPlatformActive(rawUrl?: string, allowCandidates = false): boolean {
+  const p = getPlatformByUrl(rawUrl);
+  if (!p) return false;
+  return allowCandidates ? true : Boolean(p.enabled);
+}
+
+export function isPlatformPermitted(rawUrl?: string): boolean {
+  const p = getPlatformByUrl(rawUrl);
+  return Boolean(p);
 }

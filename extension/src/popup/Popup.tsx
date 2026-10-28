@@ -17,10 +17,11 @@ import {
   UserCheck,
   UserX,
   Clock,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Sparkles
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
-import { isPlatformActive } from '../platforms';
+import { isPlatformActive, isPlatformPermitted, getPlatformByUrl } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -53,6 +54,47 @@ export default function Popup() {
   const [diagnosticToast, setDiagnosticToast] = useState<boolean>(false);
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
   const [serverHealth, setServerHealth] = useState<'CHECKING' | 'ONLINE' | 'OFFLINE'>('CHECKING');
+  const [candidatesUnlocked, setCandidatesUnlocked] = useState<boolean>(false);
+  const [versionClicks, setVersionClicks] = useState<number>(0);
+  const [unlockToast, setUnlockToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+      chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
+        if (res && typeof res.syncine_unlock_candidates === 'boolean') {
+          setCandidatesUnlocked(res.syncine_unlock_candidates);
+        }
+      });
+    }
+    if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+      const listener = (changes: any, area: string) => {
+        if (area === 'local' && changes.syncine_unlock_candidates) {
+          setCandidatesUnlocked(Boolean(changes.syncine_unlock_candidates.newValue));
+        }
+      };
+      chrome.storage.onChanged.addListener(listener);
+      return () => chrome.storage.onChanged.removeListener(listener);
+    }
+  }, []);
+
+  const handleVersionTripleClick = () => {
+    setVersionClicks((prev) => {
+      const next = prev + 1;
+      if (next >= 3) {
+        const newUnlocked = !candidatesUnlocked;
+        setCandidatesUnlocked(newUnlocked);
+        if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+          chrome.storage.local.set({ syncine_unlock_candidates: newUnlocked });
+        }
+        setUnlockToast(newUnlocked ? '🔓 全開目前預計支援名單 (通用模式已啟用)' : '🔒 已關閉預計支援名單');
+        setTimeout(() => setUnlockToast(null), 2500);
+        return 0;
+      }
+      setTimeout(() => setVersionClicks(0), 1500);
+      return next;
+    });
+  };
+
 
   const getVersion = (): string => {
     if (typeof chrome !== 'undefined' && chrome?.runtime?.getManifest) {
@@ -137,7 +179,8 @@ export default function Popup() {
   const isAppleTV = activeTabUrl.includes('tv.apple.com/');
   // 依據中央平台註冊表判定是否為「已正式開放啟用支援 (Active)」之影音分頁
   // 未開放支援的網站（即使在 Manifest 權限名單內）均顯示為不支援 (紅燈)，不作特殊提示
-  const isTargetSite = isPlatformActive(activeTabUrl);
+  const currentPlatform = getPlatformByUrl(activeTabUrl);
+  const isTargetSite = isPlatformActive(activeTabUrl, candidatesUnlocked);
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -404,7 +447,15 @@ export default function Popup() {
                 <h1 className="font-bold text-base tracking-wide bg-gradient-to-r from-emerald-400 via-teal-300 to-sky-300 bg-clip-text text-transparent truncate">
                   {t.app.name}
                 </h1>
-                <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700 flex-shrink-0">
+                <span
+                  onClick={handleVersionTripleClick}
+                  className={`px-1.5 py-0.5 text-[9px] font-semibold rounded bg-slate-800 border flex-shrink-0 cursor-pointer select-none transition ${
+                    candidatesUnlocked
+                      ? 'text-amber-300 border-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                      : 'text-slate-300 border-slate-700 hover:border-slate-600'
+                  }`}
+                  title={candidatesUnlocked ? '🔓 全開預計支援名單 (點擊3下關閉)' : getVersion()}
+                >
                   {getVersion()}
                 </span>
               </div>
@@ -575,6 +626,8 @@ export default function Popup() {
                 ? t.tabStatus.iqiyiConnected
                 : isAppleTV
                 ? t.tabStatus.appleTvConnected
+                : isTargetSite && currentPlatform
+                ? `${currentPlatform.name} (通用模式)`
                 : t.tabStatus.notSupported}
             </span>
           </div>

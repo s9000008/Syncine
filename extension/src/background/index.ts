@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive } from '../platforms';
+import { isPlatformActive, isPlatformPermitted } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
@@ -162,13 +162,37 @@ async function closeOffscreenDocument() {
 /**
  * 網域安全白名單檢驗函式 (雙重防禦：正則 + 原生 URL 語法解析)
  */
-export function isUrlAllowed(rawUrl: string): boolean {
+// 隱藏功能：彩蛋解鎖之預計支援候選名單旗標
+let candidatesUnlocked = false;
+
+if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+  chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
+    candidatesUnlocked = Boolean(res?.syncine_unlock_candidates);
+  });
+}
+
+if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.syncine_unlock_candidates) {
+      candidatesUnlocked = Boolean(changes.syncine_unlock_candidates.newValue);
+    }
+  });
+}
+
+export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const targetUrl = rawUrl.trim();
 
-  // 0. 局部開放守衛：只有正式啟用 (enabled: true) 的平台才放行跳轉
-  if (!isPlatformActive(targetUrl)) {
+  const allowCandidates = allowCandidatesOverride !== undefined ? allowCandidatesOverride : candidatesUnlocked;
+
+  // 0. 局部開放守衛：只有正式啟用，或已由彩蛋解鎖之候選平台才放行
+  if (!isPlatformActive(targetUrl, allowCandidates)) {
     return false;
+  }
+
+  // 1. 若處於解鎖模式且為合規候選平台，直接放行 (其網域已在 PLATFORM_REGISTRY 嚴格比對通過)
+  if (allowCandidates && isPlatformPermitted(targetUrl)) {
+    return true;
   }
 
   // 1. 正則白名單檢驗
@@ -672,7 +696,7 @@ function broadcastToVideoTabs(msg: any) {
       if (
         tab.id &&
         targetUrl &&
-        (isPlatformActive(targetUrl) ||
+        (isPlatformActive(targetUrl, candidatesUnlocked) ||
           (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
