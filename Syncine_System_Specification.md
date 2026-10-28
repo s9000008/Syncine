@@ -302,6 +302,12 @@ AI 在編寫 Content Script 時，請針對當前核心支援平台採用以下�
 | **YouTube** | `ytd-playlist-panel-renderer, #playlist, .ytd-playlist-panel-renderer, #playlist-items` | `.ytp-next-button, .ytp-prev-button, ytd-playlist-panel-video-renderer` |
 | **Bilibili** | `#multi_page, .cur-list, .ep-list-wrapper, .section-ep-wrapper` | `.bpx-player-ctrl-btn-next, .bpx-player-ctrl-btn-prev, .squirtle-video-next, .ep-item, .part-item` |
 | **Netflix** | `[data-uia="control-episodes"], [data-uia*="postplay"]` | `[data-uia="control-next"], [data-uia*="next-episode"], .button-nfVideos-next` |
+| **巴哈姆特動畫瘋** | `section.season, .ani-tabs, .season ul li, .ani-episode__item` | `.ani-control__btn--next, section.season a, .ani-tabs a` |
+| **Vimeo** | `.playlist-container, .showcase-item, .vp-teleport-tray` | `[aria-label*="Next video"], .vp-teleport-tray a, .showcase-item a` |
+| **Twitch** | `[data-a-target="collection-item"], collection=` | `[data-a-target="player-next-video-button"], [data-a-target="collection-item"]` |
+| **Disney+** | `[data-testid*="up-next"], [data-testid="episode-card"]` | `[data-testid*="next-episode"], [data-testid*="up-next"], .up-next-card` |
+| **Prime Video** | `.dv-player-next-episode, .nextUpCard` | `[data-testid="next-episode-button"], .next-episode, .nextUpCard` |
+| **MyVideo** | `.episode-item, .episode_list, .drama-episode, .season-list` | `.episode-item, .drama-episode, .season-list a, .episode_list a` |
 
 ---
 

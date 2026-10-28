@@ -8,7 +8,15 @@ export const SERVER_HOST_WHITELIST: RegExp[] = [
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
-  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
+  /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
+  /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
+  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+)?)/,
+  /^https:\/\/clips\.twitch\.tv\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/
 ];
 
 export type SyncineEvent = 
@@ -202,6 +210,30 @@ export function isServerUrlAllowed(rawUrl: string): boolean {
     if ((host === 'www.netflix.com' || host === 'netflix.com') && parsed.pathname.startsWith('/watch/')) {
       return true;
     }
+    // Vimeo
+    if (host === 'vimeo.com' || host === 'www.vimeo.com' || host === 'player.vimeo.com') {
+      return true;
+    }
+    // 巴哈姆特動畫瘋
+    if (host === 'ani.gamer.com.tw' && parsed.pathname.includes('/animeVideo.php') && parsed.searchParams.has('sn')) {
+      return true;
+    }
+    // Twitch
+    if (host === 'www.twitch.tv' || host === 'twitch.tv' || host === 'clips.twitch.tv') {
+      return true;
+    }
+    // Disney+
+    if ((host === 'www.disneyplus.com' || host === 'disneyplus.com') && (parsed.pathname.includes('/video/') || parsed.pathname.includes('/play/') || parsed.pathname.includes('/series/'))) {
+      return true;
+    }
+    // Prime Video / Amazon
+    if ((host === 'www.primevideo.com' || host === 'primevideo.com' || host === 'www.amazon.com') && (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/gp/video/'))) {
+      return true;
+    }
+    // MyVideo
+    if ((host === 'www.myvideo.net.tw' || host === 'myvideo.net.tw') && (parsed.pathname.startsWith('/details/') || parsed.pathname.startsWith('/player/'))) {
+      return true;
+    }
   } catch (e) {
     return false;
   }
@@ -265,6 +297,74 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
     // 5. Anime1.me
     if (host.includes('anime1.me')) {
       return `${url.origin}${url.pathname}`;
+    }
+
+    // 6. Vimeo: 僅保留標準 https://vimeo.com/<id>
+    if (host.includes('vimeo.com')) {
+      const match = url.pathname.match(/\/([0-9]{5,})/);
+      if (match && match[1]) {
+        return `https://vimeo.com/${match[1]}`;
+      }
+    }
+
+    // 7. 巴哈姆特動畫瘋: 僅保留標準 https://ani.gamer.com.tw/animeVideo.php?sn=<sn>
+    if (host.includes('gamer.com.tw')) {
+      const sn = url.searchParams.get('sn');
+      if (sn) {
+        return `https://ani.gamer.com.tw/animeVideo.php?sn=${sn}`;
+      }
+    }
+
+    // 8. Twitch: 剔除追蹤參數，保留標準網址
+    if (host.includes('twitch.tv')) {
+      const vodMatch = url.pathname.match(/\/videos\/([0-9]+)/);
+      if (vodMatch && vodMatch[1]) {
+        return `https://www.twitch.tv/videos/${vodMatch[1]}`;
+      }
+      if (host.includes('clips.twitch.tv')) {
+        const clipId = url.pathname.slice(1).split('/')[0];
+        if (clipId) return `https://clips.twitch.tv/${clipId}`;
+      }
+      const clipMatch = url.pathname.match(/\/clip\/([a-zA-Z0-9_-]+)/);
+      if (clipMatch && clipMatch[1]) {
+        return `https://clips.twitch.tv/${clipMatch[1]}`;
+      }
+      const channelMatch = url.pathname.match(/^\/([a-zA-Z0-9_]{3,25})$/);
+      if (channelMatch && channelMatch[1] && !['directory', 'p', 'settings', 'search', 'videos'].includes(channelMatch[1])) {
+        return `https://www.twitch.tv/${channelMatch[1]}`;
+      }
+    }
+
+    // 9. Disney+: 僅保留標準 /video/<id>
+    if (host.includes('disneyplus.com')) {
+      const match = url.pathname.match(/\/(?:video|play)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `https://www.disneyplus.com/video/${match[1]}`;
+      }
+    }
+
+    // 10. Prime Video / Amazon: 僅保留標準 /detail/<id>
+    if (host.includes('primevideo.com') || host.includes('amazon.com')) {
+      const primeMatch = url.pathname.match(/\/detail\/(?:[^\/]+\/)?([a-zA-Z0-9_-]{10,})/i);
+      if (primeMatch && primeMatch[1]) {
+        return `https://www.primevideo.com/detail/${primeMatch[1]}`;
+      }
+      const amazonMatch = url.pathname.match(/\/gp\/video\/detail\/([a-zA-Z0-9_-]{10,})/i);
+      if (amazonMatch && amazonMatch[1]) {
+        return `https://www.amazon.com/gp/video/detail/${amazonMatch[1]}`;
+      }
+    }
+
+    // 11. MyVideo: 保留純淨 details 或 player 路徑
+    if (host.includes('myvideo.net.tw')) {
+      const detailsMatch = url.pathname.match(/\/details\/([0-9]+)\/([0-9]+)/);
+      if (detailsMatch && detailsMatch[1] && detailsMatch[2]) {
+        return `https://www.myvideo.net.tw/details/${detailsMatch[1]}/${detailsMatch[2]}`;
+      }
+      const playerMatch = url.pathname.match(/\/player\/([0-9]+)/);
+      if (playerMatch && playerMatch[1]) {
+        return `https://www.myvideo.net.tw/player/${playerMatch[1]}`;
+      }
     }
 
     return `${url.origin}${url.pathname}`;

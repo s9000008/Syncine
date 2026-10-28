@@ -224,6 +224,78 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       }
     }
 
+    // 6. Vimeo 影片辨識 (如: vimeo.com/76979871, channels/.../76979871)
+    if (url.hostname.includes('vimeo.com')) {
+      const match = url.pathname.match(/\/([0-9]{5,})/);
+      if (match && match[1]) {
+        return `vimeo:${match[1]}`;
+      }
+    }
+
+    // 7. 巴哈姆特動畫瘋 (如: ani.gamer.com.tw/animeVideo.php?sn=38210)
+    if (url.hostname.includes('gamer.com.tw')) {
+      const sn = url.searchParams.get('sn');
+      if (sn) {
+        return `gamer:${sn}`;
+      }
+    }
+
+    // 8. Twitch (VOD / Clip / Channel)
+    if (url.hostname.includes('twitch.tv')) {
+      const vodMatch = url.pathname.match(/\/videos\/([0-9]+)/);
+      if (vodMatch && vodMatch[1]) {
+        return `twitch:video:${vodMatch[1]}`;
+      }
+      if (url.hostname.includes('clips.twitch.tv')) {
+        const clipId = url.pathname.slice(1).split('/')[0];
+        if (clipId) return `twitch:clip:${clipId}`;
+      }
+      const clipMatch = url.pathname.match(/\/clip\/([a-zA-Z0-9_-]+)/);
+      if (clipMatch && clipMatch[1]) {
+        return `twitch:clip:${clipMatch[1]}`;
+      }
+      const channelMatch = url.pathname.match(/^\/([a-zA-Z0-9_]{3,25})$/);
+      if (channelMatch && channelMatch[1] && !['directory', 'p', 'settings', 'search', 'videos'].includes(channelMatch[1])) {
+        return `twitch:channel:${channelMatch[1]}`;
+      }
+    }
+
+    // 9. Disney+ (如: /video/4b045e77-5060-449e-8c35-3c121408801c 或 /play/...)
+    if (url.hostname.includes('disneyplus.com')) {
+      const match = url.pathname.match(/\/(?:video|play)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `disney:${match[1]}`;
+      }
+      const seriesMatch = url.pathname.match(/\/series\/[^\/]+\/([a-zA-Z0-9_-]+)/);
+      if (seriesMatch && seriesMatch[1]) {
+        return `disney:series:${seriesMatch[1]}`;
+      }
+    }
+
+    // 10. Prime Video / Amazon (如: primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F)
+    if (url.hostname.includes('primevideo.com') || url.hostname.includes('amazon.com')) {
+      const primeMatch = url.pathname.match(/\/detail\/(?:[^\/]+\/)?([a-zA-Z0-9_-]{10,})/i);
+      if (primeMatch && primeMatch[1]) {
+        return `prime:${primeMatch[1]}`;
+      }
+      const amazonMatch = url.pathname.match(/\/gp\/video\/detail\/([a-zA-Z0-9_-]{10,})/i);
+      if (amazonMatch && amazonMatch[1]) {
+        return `prime:${amazonMatch[1]}`;
+      }
+    }
+
+    // 11. MyVideo (如: myvideo.net.tw/details/0/123456 或 /player/123456)
+    if (url.hostname.includes('myvideo.net.tw')) {
+      const detailsMatch = url.pathname.match(/\/details\/([0-9]+)\/([0-9]+)/);
+      if (detailsMatch && detailsMatch[1] && detailsMatch[2]) {
+        return `myvideo:${detailsMatch[1]}:${detailsMatch[2]}`;
+      }
+      const playerMatch = url.pathname.match(/\/player\/([0-9]+)/);
+      if (playerMatch && playerMatch[1]) {
+        return `myvideo:player:${playerMatch[1]}`;
+      }
+    }
+
     // 其它網址以去除 query/hash 之 pathname 為識別
     return `${url.origin}${url.pathname}`;
   } catch (e) {
@@ -288,6 +360,74 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
     // 5. Anime1.me
     if (host.includes('anime1.me')) {
       return `${url.origin}${url.pathname}`;
+    }
+
+    // 6. Vimeo: 僅保留標準 https://vimeo.com/<id>
+    if (host.includes('vimeo.com')) {
+      const match = url.pathname.match(/\/([0-9]{5,})/);
+      if (match && match[1]) {
+        return `https://vimeo.com/${match[1]}`;
+      }
+    }
+
+    // 7. 巴哈姆特動畫瘋: 僅保留標準 https://ani.gamer.com.tw/animeVideo.php?sn=<sn>
+    if (host.includes('gamer.com.tw')) {
+      const sn = url.searchParams.get('sn');
+      if (sn) {
+        return `https://ani.gamer.com.tw/animeVideo.php?sn=${sn}`;
+      }
+    }
+
+    // 8. Twitch: 剔除追蹤參數，保留標準網址
+    if (host.includes('twitch.tv')) {
+      const vodMatch = url.pathname.match(/\/videos\/([0-9]+)/);
+      if (vodMatch && vodMatch[1]) {
+        return `https://www.twitch.tv/videos/${vodMatch[1]}`;
+      }
+      if (host.includes('clips.twitch.tv')) {
+        const clipId = url.pathname.slice(1).split('/')[0];
+        if (clipId) return `https://clips.twitch.tv/${clipId}`;
+      }
+      const clipMatch = url.pathname.match(/\/clip\/([a-zA-Z0-9_-]+)/);
+      if (clipMatch && clipMatch[1]) {
+        return `https://clips.twitch.tv/${clipMatch[1]}`;
+      }
+      const channelMatch = url.pathname.match(/^\/([a-zA-Z0-9_]{3,25})$/);
+      if (channelMatch && channelMatch[1] && !['directory', 'p', 'settings', 'search', 'videos'].includes(channelMatch[1])) {
+        return `https://www.twitch.tv/${channelMatch[1]}`;
+      }
+    }
+
+    // 9. Disney+: 僅保留標準 /video/<id>
+    if (host.includes('disneyplus.com')) {
+      const match = url.pathname.match(/\/(?:video|play)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        return `https://www.disneyplus.com/video/${match[1]}`;
+      }
+    }
+
+    // 10. Prime Video / Amazon: 僅保留標準 /detail/<id>
+    if (host.includes('primevideo.com') || host.includes('amazon.com')) {
+      const primeMatch = url.pathname.match(/\/detail\/(?:[^\/]+\/)?([a-zA-Z0-9_-]{10,})/i);
+      if (primeMatch && primeMatch[1]) {
+        return `https://www.primevideo.com/detail/${primeMatch[1]}`;
+      }
+      const amazonMatch = url.pathname.match(/\/gp\/video\/detail\/([a-zA-Z0-9_-]{10,})/i);
+      if (amazonMatch && amazonMatch[1]) {
+        return `https://www.amazon.com/gp/video/detail/${amazonMatch[1]}`;
+      }
+    }
+
+    // 11. MyVideo: 保留純淨 details 或 player 路徑
+    if (host.includes('myvideo.net.tw')) {
+      const detailsMatch = url.pathname.match(/\/details\/([0-9]+)\/([0-9]+)/);
+      if (detailsMatch && detailsMatch[1] && detailsMatch[2]) {
+        return `https://www.myvideo.net.tw/details/${detailsMatch[1]}/${detailsMatch[2]}`;
+      }
+      const playerMatch = url.pathname.match(/\/player\/([0-9]+)/);
+      if (playerMatch && playerMatch[1]) {
+        return `https://www.myvideo.net.tw/player/${playerMatch[1]}`;
+      }
     }
 
     return `${url.origin}${url.pathname}`;

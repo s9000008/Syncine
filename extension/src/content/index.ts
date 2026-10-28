@@ -192,6 +192,18 @@ function findVideoElement(): HTMLVideoElement | null {
     return findAnime1Video();
   } else if (host.includes('netflix.com')) {
     return findNetflixVideo();
+  } else if (host.includes('vimeo.com')) {
+    return document.querySelector('.vp-video-wrapper video, .player-container video, video') as HTMLVideoElement;
+  } else if (host.includes('gamer.com.tw')) {
+    return document.querySelector('#ani_video_html5_api, video.vjs-tech, #ani_video video, video') as HTMLVideoElement;
+  } else if (host.includes('twitch.tv')) {
+    return document.querySelector('div[data-a-target="video-player"] video, .video-player__container video, video') as HTMLVideoElement;
+  } else if (host.includes('disneyplus.com')) {
+    return document.querySelector('video.btm-media-client, #video-player video, .hive-media-client-video, video') as HTMLVideoElement;
+  } else if (host.includes('primevideo.com') || host.includes('amazon.com')) {
+    return document.querySelector('.webPlayerElement video, .rendererContainer video, [data-testid="web-player"] video, video') as HTMLVideoElement;
+  } else if (host.includes('myvideo.net.tw')) {
+    return document.querySelector('#video_player_html5_api, #playerContainer video, .vjs-tech, video') as HTMLVideoElement;
   } else if (host.includes('google.com')) {
     return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
   }
@@ -769,6 +781,58 @@ export function isPlaylistOrEpisodeSupported(): boolean {
       return false;
     }
 
+    // 4. 巴哈姆特動畫瘋選集與下一集支援
+    if (host.includes('gamer.com.tw')) {
+      if (document.querySelector('section.season, .ani-tabs, .season ul li, .ani-episode__item, .ani-control__btn--next')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 5. Vimeo 播放清單與展示集支援
+    if (host.includes('vimeo.com')) {
+      if (path.includes('/showcase/') || path.includes('/channels/') || path.includes('/groups/')) return true;
+      if (document.querySelector('.playlist-container, .showcase-item, .vp-teleport-tray, [aria-label*="Next video"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 6. Twitch VOD 清單與合輯支援
+    if (host.includes('twitch.tv')) {
+      if (search.includes('collection=')) return true;
+      if (document.querySelector('[data-a-target="player-next-video-button"], [data-a-target="collection-item"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 7. Disney+ 影集選集與下一集支援
+    if (host.includes('disneyplus.com')) {
+      if (path.includes('/series/')) return true;
+      if (document.querySelector('[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"], [aria-label*="下一集"], .up-next-card, [data-testid="episode-card"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 8. Prime Video 影集選集與下一集支援
+    if (host.includes('primevideo.com') || host.includes('amazon.com')) {
+      if (document.querySelector('[data-testid="next-episode-button"], .next-episode, [aria-label*="Next Episode"], [aria-label*="下一集"], .dv-player-next-episode, .nextUpCard')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 9. MyVideo 劇集選集支援
+    if (host.includes('myvideo.net.tw')) {
+      if (path.includes('/details/3/')) return true;
+      if (document.querySelector('.episode-item, .episode_list, .drama-episode, .season-list, [data-testid="next-episode"]')) {
+        return true;
+      }
+      return false;
+    }
+
     return false;
   } catch (e) {
     return false;
@@ -822,6 +886,66 @@ function initPlaylistClickListeners() {
         )
       ) {
         markPlaylistActionTriggered('Netflix Next Episode Click');
+        return;
+      }
+
+      // 巴哈姆特動畫瘋: 集數點擊 / 下一集點擊
+      if (
+        target.closest(
+          'section.season a, .ani-tabs a, .season ul li a, .ani-episode__item a, .ani-control__btn--next'
+        )
+      ) {
+        markPlaylistActionTriggered('Bahamut Episode/Next Click');
+        return;
+      }
+
+      // Vimeo: 下一部 / 展示集點擊
+      if (
+        target.closest(
+          '[aria-label*="Next video"], .vp-teleport-tray a, .showcase-item a, .vp-video-tray a'
+        )
+      ) {
+        markPlaylistActionTriggered('Vimeo Next/Playlist Click');
+        return;
+      }
+
+      // Twitch: 下一部影片 / 合輯項目點擊
+      if (
+        target.closest(
+          '[data-a-target="player-next-video-button"], [data-a-target="collection-item"]'
+        )
+      ) {
+        markPlaylistActionTriggered('Twitch Next/Collection Click');
+        return;
+      }
+
+      // Disney+: 下一集 / 推薦卡片點擊
+      if (
+        target.closest(
+          '[data-testid*="next-episode"], [data-testid*="up-next"], .up-next-card, [aria-label*="Next Episode"], [aria-label*="下一集"]'
+        )
+      ) {
+        markPlaylistActionTriggered('Disney+ Next Episode Click');
+        return;
+      }
+
+      // Prime Video: 下一集點擊
+      if (
+        target.closest(
+          '[data-testid="next-episode-button"], .next-episode, [aria-label*="Next Episode"], [aria-label*="下一集"], .nextUpCard'
+        )
+      ) {
+        markPlaylistActionTriggered('Prime Video Next Episode Click');
+        return;
+      }
+
+      // MyVideo: 劇集列表點擊
+      if (
+        target.closest(
+          '.episode-item, .drama-episode, .season-list a, .episode_list a'
+        )
+      ) {
+        markPlaylistActionTriggered('MyVideo Episode Click');
         return;
       }
     },
@@ -919,7 +1043,8 @@ function initObserver() {
         lastObservedUrl = window.location.href;
         handleUrlOrVideoChange('MutationObserver URL Change');
 
-        if (window.location.hostname.includes('nicovideo.jp') || window.location.hostname.includes('netflix.com') || window.location.hostname.includes('bilibili.com') || window.location.hostname.includes('youtube.com')) {
+        const h = window.location.hostname;
+        if (h.includes('nicovideo.jp') || h.includes('netflix.com') || h.includes('bilibili.com') || h.includes('youtube.com') || h.includes('vimeo.com') || h.includes('gamer.com.tw') || h.includes('twitch.tv') || h.includes('disneyplus.com') || h.includes('primevideo.com') || h.includes('amazon.com') || h.includes('myvideo.net.tw')) {
           console.log('[Syncine] 偵測到 SPA 網頁導航切換');
           setTimeout(() => {
             const nextVideo = findVideoElement();

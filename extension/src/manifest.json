@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "zh_TW",
   "name": "__MSG_appName__",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "__MSG_appDesc__",
   "permissions": [
     "storage",
@@ -17,6 +17,19 @@
     "https://www.nicovideo.jp/*",
     "https://anime1.me/*",
     "https://www.netflix.com/*",
+    "https://vimeo.com/*",
+    "https://*.vimeo.com/*",
+    "https://ani.gamer.com.tw/*",
+    "https://www.twitch.tv/*",
+    "https://twitch.tv/*",
+    "https://clips.twitch.tv/*",
+    "https://www.disneyplus.com/*",
+    "https://disneyplus.com/*",
+    "https://www.primevideo.com/*",
+    "https://primevideo.com/*",
+    "https://www.amazon.com/*",
+    "https://www.myvideo.net.tw/*",
+    "https://myvideo.net.tw/*",
     "https://syncine.fly.dev/*"
   ],
   "background": {
@@ -34,7 +47,20 @@
         "https://www.nicovideo.jp/watch/*",
         "https://anime1.me/*",
         "https://www.netflix.com/*",
-        "https://www.netflix.com/watch*"
+        "https://www.netflix.com/watch*",
+        "https://vimeo.com/*",
+        "https://*.vimeo.com/*",
+        "https://ani.gamer.com.tw/*",
+        "https://www.twitch.tv/*",
+        "https://twitch.tv/*",
+        "https://clips.twitch.tv/*",
+        "https://www.disneyplus.com/*",
+        "https://disneyplus.com/*",
+        "https://www.primevideo.com/*",
+        "https://primevideo.com/*",
+        "https://www.amazon.com/*",
+        "https://www.myvideo.net.tw/*",
+        "https://myvideo.net.tw/*"
       ],
       "js": [
         "src/content/index.ts"

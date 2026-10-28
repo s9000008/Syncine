@@ -13,7 +13,15 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
-  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
+  /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
+  /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
+  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+)?)/,
+  /^https:\/\/clips\.twitch\.tv\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/
 ];
 
 let socket: Socket | null = null;
@@ -594,11 +602,27 @@ function broadcastToVideoTabs(msg: any) {
         ((tab.url && (tab.url.includes('youtube.com') ||
           tab.url.includes('bilibili.com') ||
           tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))) ||
+          tab.url.includes('anime1.me') ||
+          tab.url.includes('netflix.com') ||
+          tab.url.includes('vimeo.com') ||
+          tab.url.includes('gamer.com.tw') ||
+          tab.url.includes('twitch.tv') ||
+          tab.url.includes('disneyplus.com') ||
+          tab.url.includes('primevideo.com') ||
+          tab.url.includes('amazon.com') ||
+          tab.url.includes('myvideo.net.tw'))) ||
         (pendingUrl && (pendingUrl.includes('youtube.com') ||
           pendingUrl.includes('bilibili.com') ||
           pendingUrl.includes('nicovideo.jp') ||
-          pendingUrl.includes('anime1.me') || pendingUrl.includes('netflix.com'))))
+          pendingUrl.includes('anime1.me') ||
+          pendingUrl.includes('netflix.com') ||
+          pendingUrl.includes('vimeo.com') ||
+          pendingUrl.includes('gamer.com.tw') ||
+          pendingUrl.includes('twitch.tv') ||
+          pendingUrl.includes('disneyplus.com') ||
+          pendingUrl.includes('primevideo.com') ||
+          pendingUrl.includes('amazon.com') ||
+          pendingUrl.includes('myvideo.net.tw'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
         sentCount++;

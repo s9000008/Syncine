@@ -121,7 +121,13 @@ export default function Popup() {
   const isNiconico = activeTabUrl.includes('nicovideo.jp/watch/');
   const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(activeTabUrl);
   const isNetflix = activeTabUrl.includes('netflix.com/watch/');
-  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix;
+  const isVimeo = /^https?:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/|groups\/|showcase\/)/.test(activeTabUrl);
+  const isGamer = activeTabUrl.includes('ani.gamer.com.tw/animeVideo.php');
+  const isTwitch = activeTabUrl.includes('twitch.tv/videos/') || activeTabUrl.includes('clips.twitch.tv/') || /^https?:\/\/(www\.)?twitch\.tv\/[a-zA-Z0-9_]{3,25}$/.test(activeTabUrl);
+  const isDisney = activeTabUrl.includes('disneyplus.com/video/') || activeTabUrl.includes('disneyplus.com/play/') || activeTabUrl.includes('disneyplus.com/series/');
+  const isPrime = activeTabUrl.includes('primevideo.com/detail/') || activeTabUrl.includes('amazon.com/gp/video/detail/');
+  const isMyVideo = activeTabUrl.includes('myvideo.net.tw/details/') || activeTabUrl.includes('myvideo.net.tw/player/');
+  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -478,6 +484,18 @@ export default function Popup() {
               ? t.tabStatus.anime1Connected
               : isNetflix
               ? t.tabStatus.netflixConnected
+              : isVimeo
+              ? t.tabStatus.vimeoConnected
+              : isGamer
+              ? t.tabStatus.gamerConnected
+              : isTwitch
+              ? t.tabStatus.twitchConnected
+              : isDisney
+              ? t.tabStatus.disneyConnected
+              : isPrime
+              ? t.tabStatus.primeConnected
+              : isMyVideo
+              ? t.tabStatus.myVideoConnected
               : t.tabStatus.supportedTooltip
           }
           onClick={() => {
@@ -507,6 +525,18 @@ export default function Popup() {
                 ? t.tabStatus.anime1Connected
                 : isNetflix
                 ? t.tabStatus.netflixConnected
+                : isVimeo
+                ? t.tabStatus.vimeoConnected
+                : isGamer
+                ? t.tabStatus.gamerConnected
+                : isTwitch
+                ? t.tabStatus.twitchConnected
+                : isDisney
+                ? t.tabStatus.disneyConnected
+                : isPrime
+                ? t.tabStatus.primeConnected
+                : isMyVideo
+                ? t.tabStatus.myVideoConnected
                 : t.tabStatus.notSupported}
             </span>
           </div>

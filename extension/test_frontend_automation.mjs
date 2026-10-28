@@ -58,6 +58,31 @@ assert(getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%
 assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix:80057281', 'Netflix 標準觀看頁識別 (netflix:80057281)');
 assert(getVideoIdentifier('https://www.netflix.com/watch/80057281?trackId=255824129') === 'netflix:80057281', 'Netflix 帶 trackId 查詢參數仍精準識別');
 
+// 1. Vimeo
+assert(getVideoIdentifier('https://vimeo.com/76979871') === 'vimeo:76979871', 'Vimeo 標準影片頁識別 (vimeo:76979871)');
+assert(getVideoIdentifier('https://vimeo.com/channels/staffpicks/76979871') === 'vimeo:76979871', 'Vimeo 頻道路徑影片識別');
+
+// 2. 巴哈姆特動畫瘋
+assert(getVideoIdentifier('https://ani.gamer.com.tw/animeVideo.php?sn=38210') === 'gamer:38210', '巴哈姆特動畫瘋 sn 號識別 (gamer:38210)');
+assert(getVideoIdentifier('https://ani.gamer.com.tw/animeVideo.php?sn=38210&from=banner') === 'gamer:38210', '動畫瘋帶追蹤參數仍精準識別');
+
+// 3. Twitch
+assert(getVideoIdentifier('https://www.twitch.tv/videos/1234567890') === 'twitch:video:1234567890', 'Twitch VOD 影片識別 (twitch:video:1234567890)');
+assert(getVideoIdentifier('https://clips.twitch.tv/GentleFunnyPenguin-1234') === 'twitch:clip:GentleFunnyPenguin-1234', 'Twitch 剪輯短片識別');
+assert(getVideoIdentifier('https://www.twitch.tv/shroud') === 'twitch:channel:shroud', 'Twitch 直播頻道識別');
+
+// 4. Disney+
+assert(getVideoIdentifier('https://www.disneyplus.com/video/4b045e77-5060-449e-8c35-3c121408801c') === 'disney:4b045e77-5060-449e-8c35-3c121408801c', 'Disney+ 影片 ID 識別');
+assert(getVideoIdentifier('https://www.disneyplus.com/play/4b045e77-5060-449e-8c35-3c121408801c') === 'disney:4b045e77-5060-449e-8c35-3c121408801c', 'Disney+ Play 播放頁識別');
+
+// 5. Prime Video / Amazon
+assert(getVideoIdentifier('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F') === 'prime:0STG2N4YOGQJNVUG5VOS0O8R4F', 'Prime Video 詳情頁識別');
+assert(getVideoIdentifier('https://www.amazon.com/gp/video/detail/B08W5B4N7M') === 'prime:B08W5B4N7M', 'Amazon Video 詳情頁識別');
+
+// 6. MyVideo
+assert(getVideoIdentifier('https://www.myvideo.net.tw/details/0/123456') === 'myvideo:0:123456', 'MyVideo 電影詳情頁識別');
+assert(getVideoIdentifier('https://www.myvideo.net.tw/player/654321') === 'myvideo:player:654321', 'MyVideo 播放器頁面識別');
+
 
 // 測試套件 1.5: 跨平台純淨標準影片網址 (getCanonicalVideoUrl) 測試
 console.log('\n--- 測試套件 1.5: 跨平台純淨標準網址 (getCanonicalVideoUrl) 測試 ---');
@@ -76,6 +101,13 @@ assert(getCanonicalVideoUrl(dirtyBili) === 'https://www.bilibili.com/video/BV1xx
 const dirtyNico = 'https://www.nicovideo.jp/watch/sm9?ref=search_key_video';
 assert(getCanonicalVideoUrl(dirtyNico) === 'https://www.nicovideo.jp/watch/sm9', 'Niconico 剔除 ref 追蹤參數');
 
+assert(getCanonicalVideoUrl('https://vimeo.com/76979871?share=copy&autoplay=1') === 'https://vimeo.com/76979871', 'Vimeo 剔除 share 參數');
+assert(getCanonicalVideoUrl('https://ani.gamer.com.tw/animeVideo.php?sn=38210&from=banner&t=30') === 'https://ani.gamer.com.tw/animeVideo.php?sn=38210', '動畫瘋剔除 from/t 參數');
+assert(getCanonicalVideoUrl('https://www.twitch.tv/videos/1234567890?filter=archives') === 'https://www.twitch.tv/videos/1234567890', 'Twitch 剔除 filter 參數');
+assert(getCanonicalVideoUrl('https://www.disneyplus.com/video/4b045e77?track=1') === 'https://www.disneyplus.com/video/4b045e77', 'Disney+ 剔除 track 參數');
+assert(getCanonicalVideoUrl('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F/ref=atv_dp') === 'https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F', 'Prime Video 剔除 ref 參數');
+assert(getCanonicalVideoUrl('https://www.myvideo.net.tw/details/0/123456?source=banner') === 'https://www.myvideo.net.tw/details/0/123456', 'MyVideo 剔除 source 參數');
+
 // ----------------------------------------------------
 // 測試套件 2: Background HOST_WHITELIST 資安防禦與釣魚攔截自動化測試
 // ----------------------------------------------------
@@ -88,7 +120,15 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
-  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/
+  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
+  /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
+  /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
+  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+)?)/,
+  /^https:\/\/clips\.twitch\.tv\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/
 ];
 
 function isSafeUrl(url) {
@@ -106,6 +146,38 @@ assert(isSafeUrl('https://anime1.me/23456'), '放行合法 Anime1.me 單集網�
 assert(isSafeUrl('https://anime1.me/category/my-anime/'), '放行合法 Anime1.me 分類網址');
 assert(isSafeUrl('https://www.netflix.com/watch/80057281'), '放行合法 Netflix 播放網址');
 assert(isSafeUrl('https://netflix.com/watch/80057281'), '放行無 www 前綴之合法 Netflix 播放網址');
+assert(isSafeUrl('https://vimeo.com/76979871'), '放行合法 Vimeo 影片網址');
+assert(isSafeUrl('https://ani.gamer.com.tw/animeVideo.php?sn=38210'), '放行合法動畫瘋播放網址');
+assert(isSafeUrl('https://www.twitch.tv/videos/1234567890'), '放行合法 Twitch VOD 網址');
+assert(isSafeUrl('https://clips.twitch.tv/GentleFunnyPenguin-1234'), '放行合法 Twitch 剪輯網址');
+assert(isSafeUrl('https://www.disneyplus.com/video/4b045e77-5060'), '放行合法 Disney+ 播放網址');
+assert(isSafeUrl('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F'), '放行合法 Prime Video 播放網址');
+assert(isSafeUrl('https://www.amazon.com/gp/video/detail/B08W5B4N7M'), '放行合法 Amazon Video 播放網址');
+assert(isSafeUrl('https://www.myvideo.net.tw/details/0/123456'), '放行合法 MyVideo 播放網址');
+
+// 新平台釣魚防禦
+assert(!isSafeUrl('https://evil-vimeo.com/76979871'), '攔截偽造 Vimeo 釣魚網域');
+assert(!isSafeUrl('https://ani.gamer.com.tw.attacker.com/animeVideo.php?sn=123'), '攔截偽造動畫瘋釣魚網域');
+assert(!isSafeUrl('https://www.twitch.tv.evil.com/videos/123'), '攔截偽造 Twitch 釣魚網域');
+assert(!isSafeUrl('https://disneyplus.com.fake.com/video/123'), '攔截偽造 Disney+ 釣魚網域');
+assert(!isSafeUrl('https://primevideo.com.hacker.com/detail/123'), '攔截偽造 Prime Video 釣魚網域');
+assert(!isSafeUrl('https://myvideo.net.tw.attacker.com/details/0/123'), '攔截偽造 MyVideo 釣魚網域');
+assert(isSafeUrl('https://vimeo.com/76979871'), '放行合法 Vimeo 影片網址');
+assert(isSafeUrl('https://ani.gamer.com.tw/animeVideo.php?sn=38210'), '放行合法動畫瘋播放網址');
+assert(isSafeUrl('https://www.twitch.tv/videos/1234567890'), '放行合法 Twitch VOD 網址');
+assert(isSafeUrl('https://clips.twitch.tv/GentleFunnyPenguin-1234'), '放行合法 Twitch 剪輯網址');
+assert(isSafeUrl('https://www.disneyplus.com/video/4b045e77-5060'), '放行合法 Disney+ 播放網址');
+assert(isSafeUrl('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F'), '放行合法 Prime Video 播放網址');
+assert(isSafeUrl('https://www.amazon.com/gp/video/detail/B08W5B4N7M'), '放行合法 Amazon Video 播放網址');
+assert(isSafeUrl('https://www.myvideo.net.tw/details/0/123456'), '放行合法 MyVideo 播放網址');
+
+// 新平台釣魚防禦
+assert(!isSafeUrl('https://evil-vimeo.com/76979871'), '攔截偽造 Vimeo 釣魚網域');
+assert(!isSafeUrl('https://ani.gamer.com.tw.attacker.com/animeVideo.php?sn=123'), '攔截偽造動畫瘋釣魚網域');
+assert(!isSafeUrl('https://www.twitch.tv.evil.com/videos/123'), '攔截偽造 Twitch 釣魚網域');
+assert(!isSafeUrl('https://disneyplus.com.fake.com/video/123'), '攔截偽造 Disney+ 釣魚網域');
+assert(!isSafeUrl('https://primevideo.com.hacker.com/detail/123'), '攔截偽造 Prime Video 釣魚網域');
+assert(!isSafeUrl('https://myvideo.net.tw.attacker.com/details/0/123'), '攔截偽造 MyVideo 釣魚網域');
 
 // 惡意與偽造網址攔截測試 (Security Defenses)
 assert(!isSafeUrl('https://evil-youtube.com/watch?v=dQw4w9WgXcQ'), '攔截偽造 YouTube 釣魚網域');
@@ -333,13 +405,16 @@ function checkTargetSite(url) {
   const isNiconico = url.includes('nicovideo.jp/watch/');
   const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(url);
   const isNetflix = url.includes('netflix.com/watch/');
+  const isVimeo = /^https?:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/|groups\/|showcase\/)/.test(url);
+  const isGamer = url.includes('ani.gamer.com.tw/animeVideo.php');
+  const isTwitch = url.includes('twitch.tv/videos/') || url.includes('clips.twitch.tv/') || /^https?:\/\/(www\.)?twitch\.tv\/[a-zA-Z0-9_]{3,25}$/.test(url);
+  const isDisney = url.includes('disneyplus.com/video/') || url.includes('disneyplus.com/play/') || url.includes('disneyplus.com/series/');
+  const isPrime = url.includes('primevideo.com/detail/') || url.includes('amazon.com/gp/video/detail/');
+  const isMyVideo = url.includes('myvideo.net.tw/details/') || url.includes('myvideo.net.tw/player/');
   return {
-    isYouTube,
-    isBilibili,
-    isNiconico,
-    isAnime1,
-    isNetflix,
-    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix
+    isYouTube, isBilibili, isNiconico, isAnime1, isNetflix,
+    isVimeo, isGamer, isTwitch, isDisney, isPrime, isMyVideo,
+    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo
   };
 }
 
@@ -348,6 +423,18 @@ assert(checkTargetSite('https://www.bilibili.com/video/BV1xx').isTargetSite === 
 assert(checkTargetSite('https://www.nicovideo.jp/watch/sm9').isTargetSite === true, 'Popup 識別 Niconico 為支援目標頁面');
 assert(checkTargetSite('https://anime1.me/23456').isTargetSite === true, 'Popup 識別 Anime1.me 為支援目標頁面');
 assert(checkTargetSite('https://www.netflix.com/watch/80057281').isTargetSite === true, 'Popup 識別 Netflix 為支援目標頁面');
+assert(checkTargetSite('https://vimeo.com/76979871').isTargetSite === true, 'Popup 識別 Vimeo 為支援目標頁面');
+assert(checkTargetSite('https://ani.gamer.com.tw/animeVideo.php?sn=38210').isTargetSite === true, 'Popup 識別動畫瘋為支援目標頁面');
+assert(checkTargetSite('https://www.twitch.tv/videos/1234567890').isTargetSite === true, 'Popup 識別 Twitch 為支援目標頁面');
+assert(checkTargetSite('https://www.disneyplus.com/video/4b045e77').isTargetSite === true, 'Popup 識別 Disney+ 為支援目標頁面');
+assert(checkTargetSite('https://www.primevideo.com/detail/0STG2N4Y').isTargetSite === true, 'Popup 識別 Prime Video 為支援目標頁面');
+assert(checkTargetSite('https://www.myvideo.net.tw/details/0/123456').isTargetSite === true, 'Popup 識別 MyVideo 為支援目標頁面');
+assert(checkTargetSite('https://vimeo.com/76979871').isTargetSite === true, 'Popup 識別 Vimeo 為支援目標頁面');
+assert(checkTargetSite('https://ani.gamer.com.tw/animeVideo.php?sn=38210').isTargetSite === true, 'Popup 識別動畫瘋為支援目標頁面');
+assert(checkTargetSite('https://www.twitch.tv/videos/1234567890').isTargetSite === true, 'Popup 識別 Twitch 為支援目標頁面');
+assert(checkTargetSite('https://www.disneyplus.com/video/4b045e77').isTargetSite === true, 'Popup 識別 Disney+ 為支援目標頁面');
+assert(checkTargetSite('https://www.primevideo.com/detail/0STG2N4Y').isTargetSite === true, 'Popup 識別 Prime Video 為支援目標頁面');
+assert(checkTargetSite('https://www.myvideo.net.tw/details/0/123456').isTargetSite === true, 'Popup 識別 MyVideo 為支援目標頁面');
 assert(checkTargetSite('https://www.netflix.com/browse').isTargetSite === false, 'Popup 識別 Netflix 首頁非觀看頁面 (安全防護)');
 assert(checkTargetSite('https://www.google.com').isTargetSite === false, 'Popup 識別 Google 非目標頁面 (顯示請開啟支援影片提示)');
 assert(checkTargetSite('https://anime1.me/').isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
@@ -383,6 +470,12 @@ assert(anime1State.lightColor === 'GREEN', 'Anime1.me 顯示綠燈支援標記')
 
 const netflixState = getSiteIndicatorState('https://www.netflix.com/watch/80057281');
 assert(netflixState.lightColor === 'GREEN', 'Netflix 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://vimeo.com/76979871').lightColor === 'GREEN', 'Vimeo 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://ani.gamer.com.tw/animeVideo.php?sn=38210').lightColor === 'GREEN', '動畫瘋顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.twitch.tv/videos/1234567890').lightColor === 'GREEN', 'Twitch 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.disneyplus.com/video/4b045e77').lightColor === 'GREEN', 'Disney+ 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.primevideo.com/detail/0STG2N4Y').lightColor === 'GREEN', 'Prime Video 顯示綠燈支援標記');
+assert(getSiteIndicatorState('https://www.myvideo.net.tw/details/0/123456').lightColor === 'GREEN', 'MyVideo 顯示綠燈支援標記');
 
 const googleState = getSiteIndicatorState('https://www.google.com');
 assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈不支援標記');
@@ -447,6 +540,18 @@ assert(contentSrc.includes('[data-uia="control-next"]') || contentSrc.includes('
 assert(contentSrc.includes('ytd-playlist-panel-renderer'), '涵蓋 YouTube 播放清單面板');
 assert(contentSrc.includes('#multi_page') || contentSrc.includes('.ep-list-wrapper'), '涵蓋 Bilibili 分P與番劇選集清單');
 assert(contentSrc.includes('[data-uia="control-episodes"]'), '涵蓋 Netflix 影集選集抽屜按鈕');
+assert(contentSrc.includes('.ani-control__btn--next') || contentSrc.includes('section.season'), '涵蓋動畫瘋選集與下一集');
+assert(contentSrc.includes('.playlist-container') || contentSrc.includes('.showcase-item'), '涵蓋 Vimeo 播放清單與展示集');
+assert(contentSrc.includes('player-next-video-button') || contentSrc.includes('collection-item'), '涵蓋 Twitch 下一部與合輯');
+assert(contentSrc.includes('disneyplus.com') && contentSrc.includes('next-episode'), '涵蓋 Disney+ 下一集');
+assert(contentSrc.includes('primevideo.com') && contentSrc.includes('next-episode'), '涵蓋 Prime Video 下一集');
+assert(contentSrc.includes('myvideo.net.tw') && contentSrc.includes('episode-item'), '涵蓋 MyVideo 劇集選集');
+assert(contentSrc.includes('.ani-control__btn--next') || contentSrc.includes('section.season'), '涵蓋動畫瘋選集與下一集');
+assert(contentSrc.includes('.playlist-container') || contentSrc.includes('.showcase-item'), '涵蓋 Vimeo 播放清單與展示集');
+assert(contentSrc.includes('player-next-video-button') || contentSrc.includes('collection-item'), '涵蓋 Twitch 下一部與合輯');
+assert(contentSrc.includes('disneyplus.com') && contentSrc.includes('next-episode'), '涵蓋 Disney+ 下一集');
+assert(contentSrc.includes('primevideo.com') && contentSrc.includes('next-episode'), '涵蓋 Prime Video 下一集');
+assert(contentSrc.includes('myvideo.net.tw') && contentSrc.includes('episode-item'), '涵蓋 MyVideo 劇集選集');
 
 // 3. Bilibili 多 P 與番劇 ep 識別碼驗證
 assert(getVideoIdentifier('https://www.bilibili.com/video/BV1xx411c7mD?p=2') === 'bili:BV1xx411c7mD?p=2', 'Bilibili 分 P 識別碼精確提取 (bili:BV1xx411c7mD?p=2)');
@@ -511,6 +616,30 @@ assert(
 assert(
   isSameVideoOrWebsite('https://anime1.me/12345', 'https://anime1.me/12345/'),
   'Anime1.me 相同集數頁面判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://vimeo.com/76979871?share=copy', 'https://vimeo.com/76979871'),
+  'Vimeo 相同影片帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://ani.gamer.com.tw/animeVideo.php?sn=38210&from=1', 'https://ani.gamer.com.tw/animeVideo.php?sn=38210'),
+  '動畫瘋相同 sn 帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.twitch.tv/videos/1234567890?filter=1', 'https://www.twitch.tv/videos/1234567890'),
+  'Twitch 相同 VOD 帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.disneyplus.com/video/4b045e77?ref=1', 'https://www.disneyplus.com/video/4b045e77'),
+  'Disney+ 相同視頻帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F/ref=1', 'https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F'),
+  'Prime Video 相同視頻帶參數判定為相同'
+);
+assert(
+  isSameVideoOrWebsite('https://www.myvideo.net.tw/details/0/123456?from=1', 'https://www.myvideo.net.tw/details/0/123456'),
+  'MyVideo 相同視頻帶參數判定為相同'
 );
 
 // 2. Background 與 Content 原始碼防重整保護檢驗
