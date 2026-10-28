@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
+import { isPlatformActive } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
@@ -164,6 +165,11 @@ async function closeOffscreenDocument() {
 export function isUrlAllowed(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const targetUrl = rawUrl.trim();
+
+  // 0. 局部開放守衛：只有正式啟用 (enabled: true) 的平台才放行跳轉
+  if (!isPlatformActive(targetUrl)) {
+    return false;
+  }
 
   // 1. 正則白名單檢驗
   if (HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
@@ -661,50 +667,13 @@ function broadcastToVideoTabs(msg: any) {
     let sentCount = 0;
     tabs.forEach((tab) => {
       const pendingUrl = (tab as any).pendingUrl;
+      const targetUrl = tab.url || pendingUrl;
+      // 局部開放守衛：僅向已正式啟用支援之分頁發送廣播 (涵蓋 tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))
       if (
         tab.id &&
-        ((tab.url && (tab.url.includes('youtube.com') ||
-          tab.url.includes('bilibili.com') ||
-          tab.url.includes('nicovideo.jp') ||
-          tab.url.includes('anime1.me') ||
-          tab.url.includes('netflix.com') ||
-          tab.url.includes('vimeo.com') ||
-          tab.url.includes('gamer.com.tw') ||
-          tab.url.includes('twitch.tv') ||
-          tab.url.includes('disneyplus.com') ||
-          tab.url.includes('primevideo.com') ||
-          tab.url.includes('amazon.com') ||
-          tab.url.includes('myvideo.net.tw') ||
-          tab.url.includes('linetv.tw') ||
-          tab.url.includes('kktv.me') ||
-          tab.url.includes('crunchyroll.com') ||
-          tab.url.includes('friday.tw') ||
-          tab.url.includes('max.com') ||
-          tab.url.includes('hbomax.com') ||
-          tab.url.includes('iq.com') ||
-          tab.url.includes('iqiyi.com') ||
-          tab.url.includes('tv.apple.com'))) ||
-        (pendingUrl && (pendingUrl.includes('youtube.com') ||
-          pendingUrl.includes('bilibili.com') ||
-          pendingUrl.includes('nicovideo.jp') ||
-          pendingUrl.includes('anime1.me') ||
-          pendingUrl.includes('netflix.com') ||
-          pendingUrl.includes('vimeo.com') ||
-          pendingUrl.includes('gamer.com.tw') ||
-          pendingUrl.includes('twitch.tv') ||
-          pendingUrl.includes('disneyplus.com') ||
-          pendingUrl.includes('primevideo.com') ||
-          pendingUrl.includes('amazon.com') ||
-          pendingUrl.includes('myvideo.net.tw') ||
-          pendingUrl.includes('linetv.tw') ||
-          pendingUrl.includes('kktv.me') ||
-          pendingUrl.includes('crunchyroll.com') ||
-          pendingUrl.includes('friday.tw') ||
-          pendingUrl.includes('max.com') ||
-          pendingUrl.includes('hbomax.com') ||
-          pendingUrl.includes('iq.com') ||
-          pendingUrl.includes('iqiyi.com') ||
-          pendingUrl.includes('tv.apple.com'))))
+        targetUrl &&
+        (isPlatformActive(targetUrl) ||
+          (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
         sentCount++;

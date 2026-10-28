@@ -12,7 +12,7 @@
 
 ## 🌟 專案特色
 
-* 🎬 **跨平台支援**：現行版本支援 **YouTube**、**Bilibili**、**Niconico**、**Anime1.me**、**Netflix**、**Vimeo**、**巴哈姆特動畫瘋**、**Twitch**、**Disney+**、**Prime Video**、**MyVideo**、**LINE TV**、**KKTV**、**Crunchyroll**、**遠傳 friDay 影音**、**Max (HBO Max)**、**愛奇藝 (iQIYI)** 與 **Apple TV+** 等 18 大串流影音平台，具備清單連播同步、換集無縫切換與防誤觸機制。
+* 🎬 **跨平台支援與解耦架構**：現行版本支援 **YouTube**、**Bilibili**、**Niconico**、**Anime1.me**、**Netflix**、**Vimeo**、**巴哈姆特動畫瘋**、**Twitch**、**Disney+**、**Prime Video**、**MyVideo**、**LINE TV**、**KKTV**、**Crunchyroll**、**遠傳 friDay 影音**、**Max (HBO Max)**、**愛奇藝 (iQIYI)** 與 **Apple TV+** 等 18 大串流影音平台。並實裝「權限預授權與支援名單解耦架構」（v2.10.0），中央登錄表精確控制啟用狀態，候選平台零 DOM 注入開銷，且避免未來更新觸發 Chrome 權限停用警告。
 * ⚡ **5 秒時間容差與單程延遲補償**：被動心跳控制在 5 秒差值內不強制跳轉進度（避免抖動卡頓），大於 5 秒強制定位；主動操作 (Play/Pause/Seek) 無視容差強制秒級同步。
 * 🌐 **三大彈性連線架構**：
   1. **預設中繼連線 (Default Relay)**：連線至預設中繼伺服器，開箱即用免設定。
@@ -42,7 +42,7 @@ Syncine/
 ├── .env.example              # 專案環境變數範例檔
 ├── .gitignore                # 版控排除清單 (嚴格防洩)
 ├── README.md                 # 專案完整說明文件
-├── Syncine_System_Specification.md # 系統規格書 (v2.9.0)
+├── Syncine_System_Specification.md # 系統規格書 (v2.10.0)
 │
 ├── server/                   # WebSocket 後端伺服器 (Node.js + Express + Socket.IO)
 │   ├── src/

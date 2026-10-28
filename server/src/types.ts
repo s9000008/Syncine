@@ -1,3 +1,5 @@
+import { isPlatformActive } from './platforms';
+
 export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
 
 // 伺服器端目標網址安全白名單 (縱深防禦：防範惡意 Host 廣播釣魚或偽協定網址)
@@ -197,6 +199,11 @@ export interface RoomState {
 export function isServerUrlAllowed(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const targetUrl = rawUrl.trim();
+
+  // 0. 局部開放守衛：只有正式啟用 (enabled: true) 的平台才放行伺服器端跳轉
+  if (!isPlatformActive(targetUrl)) {
+    return false;
+  }
   if (SERVER_HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
     return true;
   }

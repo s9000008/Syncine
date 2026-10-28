@@ -33,6 +33,40 @@ fs.mkdirSync(path.join(__dirname, 'dist_test'), { recursive: true });
 execSync(`npx esbuild "${path.join(__dirname, 'src/types/protocol.ts')}" --bundle --format=esm --outfile="${protoModulePath}"`, { stdio: 'pipe' });
 const { getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } = await import(`file://${protoModulePath.replace(/\\/g, '/')}`);
 
+const platformsModulePath = path.join(__dirname, 'dist_test/platforms.mjs');
+execSync(`npx esbuild "${path.join(__dirname, 'src/platforms.ts')}" --bundle --format=esm --outfile="${platformsModulePath}"`, { stdio: 'pipe' });
+const { isPlatformActive, isPlatformPermitted, getPlatformByUrl, getActivePlatforms } = await import(`file://${platformsModulePath.replace(/\\/g, '/')}`);
+
+// ----------------------------------------------------
+// 測試套件 0: 權限名單與支援名單解耦 (Permission Decoupling) 測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 0: 權限名單與支援名單解耦架構 (Permission Decoupling) 測試 ---');
+assert(isPlatformActive('https://www.youtube.com/watch?v=123') === true, 'YouTube 處於正式啟用支援名單 (Active)');
+assert(isPlatformPermitted('https://www.youtube.com/watch?v=123') === true, 'YouTube 處於授權名單中 (Permitted)');
+
+assert(isPlatformActive('https://www.linetv.tw/drama/12345/eps/1') === true, 'LINE TV 處於正式啟用支援名單 (Active)');
+assert(isPlatformPermitted('https://www.linetv.tw/drama/12345/eps/1') === true, 'LINE TV 處於授權名單中 (Permitted)');
+
+assert(isPlatformActive('https://tv.apple.com/episode/umc.cmc.123') === true, 'Apple TV+ 處於正式啟用支援名單 (Active)');
+assert(isPlatformPermitted('https://tv.apple.com/episode/umc.cmc.123') === true, 'Apple TV+ 處於授權名單中 (Permitted)');
+
+// 預授權候選網站 (enabled: false)
+assert(isPlatformActive('https://www.catchplay.com/watch/123') === false, 'CatchPlay 預留權限但尚未開放支援 (Active: false)');
+assert(isPlatformPermitted('https://www.catchplay.com/watch/123') === true, 'CatchPlay 處於 Manifest 預授權名單中 (Permitted: true)');
+
+assert(isPlatformActive('https://www.hulu.com/watch/123') === false, 'Hulu 預留權限但尚未開放支援 (Active: false)');
+assert(isPlatformPermitted('https://www.hulu.com/watch/123') === true, 'Hulu 處於 Manifest 預授權名單中 (Permitted: true)');
+
+assert(isPlatformActive('https://www.litv.tv/vod/123') === false, 'LiTV 預留權限但尚未開放支援 (Active: false)');
+assert(isPlatformPermitted('https://www.litv.tv/vod/123') === true, 'LiTV 處於 Manifest 預授權名單中 (Permitted: true)');
+
+assert(isPlatformActive('https://wetv.vip/play/123') === false, 'WeTV 預留權限但尚未開放支援 (Active: false)');
+assert(isPlatformPermitted('https://wetv.vip/play/123') === true, 'WeTV 處於 Manifest 預授權名單中 (Permitted: true)');
+
+assert(isPlatformActive('https://www.google.com') === false, 'Google 非活躍支援平台');
+assert(isPlatformPermitted('https://www.google.com') === false, 'Google 不在授權名單中');
+assert(getActivePlatforms().length === 18, '目前正式局部開放支援之平台總數為 18');
+
 // YouTube
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ') === 'yt:dQw4w9WgXcQ', 'YouTube 標準網址識別 (yt:dQw4w9WgXcQ)');
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&index=1') === 'yt:dQw4w9WgXcQ', 'YouTube 帶播放清單參數仍精準識別 (yt:dQw4w9WgXcQ)');
@@ -476,7 +510,7 @@ function checkTargetSite(url) {
     isYouTube, isBilibili, isNiconico, isAnime1, isNetflix,
     isVimeo, isGamer, isTwitch, isDisney, isPrime, isMyVideo,
     isLineTV, isKKTV, isCrunchyroll, isFriday, isMax, isIQIYI, isAppleTV,
-    isTargetSite: isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo || isLineTV || isKKTV || isCrunchyroll || isFriday || isMax || isIQIYI || isAppleTV
+    isTargetSite: isPlatformActive(url)
   };
 }
 
@@ -507,6 +541,10 @@ assert(checkTargetSite('https://www.myvideo.net.tw/details/0/123456').isTargetSi
 assert(checkTargetSite('https://www.netflix.com/browse').isTargetSite === false, 'Popup 識別 Netflix 首頁非觀看頁面 (安全防護)');
 assert(checkTargetSite('https://www.google.com').isTargetSite === false, 'Popup 識別 Google 非目標頁面 (顯示請開啟支援影片提示)');
 assert(checkTargetSite('https://anime1.me/').isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
+// 預先取得授權但尚未正式開放平台測試 (使用者規範：不特別顯示、不亮黃燈)
+assert(checkTargetSite('https://www.catchplay.com/watch/123').isTargetSite === false, 'Popup 識別 CatchPlay 為未開放支援 (isTargetSite: false)');
+assert(checkTargetSite('https://www.hulu.com/watch/123').isTargetSite === false, 'Popup 識別 Hulu 為未開放支援 (isTargetSite: false)');
+assert(checkTargetSite('https://www.litv.tv/vod/123').isTargetSite === false, 'Popup 識別 LiTV 為未開放支援 (isTargetSite: false)');
 
 // ----------------------------------------------------
 // 測試套件 6: 燈號狀態標記 (綠燈支援 / 紅燈不支援) 與商店清單自動化測試
@@ -558,6 +596,15 @@ assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈�
 assert(googleState.badgeKey === 'unsupportedBadge', '非支援網站顯示不支援徽章');
 assert(googleState.storeRedirectAvailable === true, '非支援網站支援點擊前往 Chrome 商店查看完整支援清單');
 
+// 嚴格落實使用者需求：處於授權名單但未開放的網站，一律顯示紅燈不支援 (杜絕特殊顯示或黃燈)
+const catchplayState = getSiteIndicatorState('https://www.catchplay.com/watch/123');
+assert(catchplayState.lightColor === 'RED', '未正式開放支援網站 (CatchPlay) 嚴格顯示紅燈 (杜絕黃燈)');
+assert(catchplayState.badgeKey === 'unsupportedBadge', '未正式開放支援網站顯示不支援徽章');
+
+const huluState = getSiteIndicatorState('https://www.hulu.com/watch/123');
+assert(huluState.lightColor === 'RED', '未正式開放支援網站 (Hulu) 嚴格顯示紅燈 (杜絕黃燈)');
+assert(huluState.badgeKey === 'unsupportedBadge', '未正式開放支援網站顯示不支援徽章');
+
 const CHROME_STORE_URL =
   'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip?authuser=0&hl=zh-TW';
 assert(CHROME_STORE_URL.startsWith('https://chromewebstore.google.com/detail/syncine-'), 'Chrome 商店官方發布網址正確無誤');
@@ -572,6 +619,7 @@ assert(manifestObj.content_scripts[0].all_frames === false, 'manifest.json 停�
 assert(!manifestObj.content_scripts[0].match_about_blank, 'manifest.json 移除 match_about_blank');
 
 const contentSrc = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+assert(contentSrc.includes('isPlatformActive'), 'content/index.ts 實裝 isPlatformActive 局部開放靜默退出守衛');
 assert(contentSrc.includes('window.self !== window.top'), 'content/index.ts 包含頂層視窗防禦守衛 (window.self !== window.top)');
 assert(contentSrc.includes('pagehide'), 'content/index.ts 監聽 pagehide 事件以釋放 Port');
 assert(contentSrc.includes('pageshow'), 'content/index.ts 監聽 pageshow 事件以恢復 Port 與狀態');
@@ -579,6 +627,7 @@ assert(contentSrc.includes('event.persisted'), 'content/index.ts 依據 event.pe
 assert(contentSrc.includes('chrome.runtime.lastError'), 'content/index.ts 存取 chrome.runtime.lastError 消除未捕獲異常');
 
 const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+assert(bgSrc.includes('isPlatformActive'), 'background/index.ts 實裝 isPlatformActive 廣播與白名單過濾守衛');
 assert(bgSrc.includes('chrome.runtime.lastError'), 'background/index.ts 存取 chrome.runtime.lastError 消除斷開異常');
 
 // ----------------------------------------------------

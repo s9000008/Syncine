@@ -6,11 +6,12 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 1. 編譯 Content Script 為獨立原生 IIFE 單檔（徹底消除動態 import Loader）
+// 1. 編譯 Content Script 為獨立原生 IIFE 格式（徹底消除外部 import Loader）
 const entryFile = path.join(__dirname, 'src/content/index.ts');
 const outputFile = path.join(__dirname, 'dist/content.js');
 const netflixEntryFile = path.join(__dirname, 'src/content/netflix_bridge.ts');
 const netflixOutputFile = path.join(__dirname, 'dist/netflix_bridge.js');
+const srcManifestFile = path.join(__dirname, 'src/manifest.json');
 const manifestFile = path.join(__dirname, 'dist/manifest.json');
 
 esbuild.buildSync({
@@ -37,22 +38,14 @@ esbuild.buildSync({
   }
 });
 
-// 2. 更新 dist/manifest.json，讓 Chrome 原生直接加載 content.js 與 netflix_bridge.js
-if (fs.existsSync(manifestFile)) {
+// 2. 更新 dist/manifest.json，動態繼承 src/manifest.json 之完整授權名單並指定原生 bundle
+if (fs.existsSync(manifestFile) && fs.existsSync(srcManifestFile)) {
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const srcManifest = JSON.parse(fs.readFileSync(srcManifestFile, 'utf8'));
+
   manifest.content_scripts = [
     {
-      matches: [
-        "https://www.youtube.com/*",
-        "https://www.youtube.com/watch*",
-        "https://www.bilibili.com/*",
-        "https://www.bilibili.com/video/*",
-        "https://www.bilibili.com/bangumi/play/*",
-        "https://www.nicovideo.jp/watch/*",
-        "https://anime1.me/*",
-        "https://www.netflix.com/*",
-        "https://www.netflix.com/watch*"
-      ],
+      matches: srcManifest.content_scripts[0]?.matches || [],
       js: ['content.js'],
       all_frames: false,
       run_at: 'document_end'

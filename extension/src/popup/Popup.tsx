@@ -20,6 +20,7 @@ import {
   MessageSquarePlus
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
+import { isPlatformActive } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -134,7 +135,9 @@ export default function Popup() {
   const isMax = activeTabUrl.includes('max.com/video/watch') || activeTabUrl.includes('max.com/player/') || activeTabUrl.includes('hbomax.com/');
   const isIQIYI = activeTabUrl.includes('iq.com/play/') || activeTabUrl.includes('iqiyi.com/v_') || activeTabUrl.includes('iqiyi.com/a_');
   const isAppleTV = activeTabUrl.includes('tv.apple.com/');
-  const isTargetSite = isYouTube || isBilibili || isNiconico || isAnime1 || isNetflix || isVimeo || isGamer || isTwitch || isDisney || isPrime || isMyVideo || isLineTV || isKKTV || isCrunchyroll || isFriday || isMax || isIQIYI || isAppleTV;
+  // 依據中央平台註冊表判定是否為「已正式開放啟用支援 (Active)」之影音分頁
+  // 未開放支援的網站（即使在 Manifest 權限名單內）均顯示為不支援 (紅燈)，不作特殊提示
+  const isTargetSite = isPlatformActive(activeTabUrl);
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {

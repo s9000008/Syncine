@@ -1,7 +1,13 @@
 import { SyncData, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
+import { isPlatformActive } from '../platforms';
 import { getStandaloneText } from '../locales/standalone';
 
 console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
+
+// 頂層視窗防禦守衛 (防止注入廣告/沙盒 iframe)
+const isTopFrame = window.self === window.top;
+// 局部開放守衛 (若處於授權清單但尚未正式開放支援，完全靜默休眠退出)
+const isSiteActive = isPlatformActive(window.location.href);
 
 // ----------------------------------------------------
 // 1. MV3 長連接 Port 保活與 bfcache 生命週期管理
@@ -48,8 +54,10 @@ window.addEventListener('pageshow', (event) => {
   }
 });
 
-// 初始化啟動保活 Port
-setupKeepAlivePort();
+// 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才啟動保活 Port
+if (isTopFrame && isSiteActive) {
+  setupKeepAlivePort();
+}
 
 // ----------------------------------------------------
 // 2. 全域狀態變數
@@ -1163,8 +1171,10 @@ window.addEventListener('hashchange', () => {
   handleUrlOrVideoChange('hashchange');
 });
 
-// 初始化清單與上下集點擊監聽
-initPlaylistClickListeners();
+// 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才掛載換集監聽
+if (isTopFrame && isSiteActive) {
+  initPlaylistClickListeners();
+}
 
 // ----------------------------------------------------
 // 7. MutationObserver 與初始化
@@ -1249,7 +1259,10 @@ if (
 window.addEventListener('yt-navigate-finish', () => {
   console.log('[Syncine] 偵測到 YouTube SPA 網頁導航切換');
   setTimeout(() => {
-    initObserver();
+    // 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才啟動 Observer
+if (isTopFrame && isSiteActive) {
+  initObserver();
+}
     if (roomState.isInRoom && roomState.isHost) {
       if (isCurrentActiveVideoTab()) {
         startHeartbeat();

@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.9.0)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.10.0)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -272,6 +272,59 @@ if (isAlreadyOnVideo) {
 1. 平台專屬導航事件（如 YouTube `yt-navigate-finish`）
 2. 瀏覽器歷史導航（`popstate` 與 `hashchange`）
 3. 頂層 DOM 監聽（`MutationObserver` 監控 `window.location.href` 變更）
+
+### 5.4 權限宣告與支援名單解耦架構 (Permission Scope vs. Platform Registry)
+
+為防止未來每新增一個支援網站就導致 Chrome Web Store 觸發「擴充功能已停用，需要接受新權限」之彈跳警告並中斷使用者體驗，自 **v2.10.0** 起全面導入「權限預授權與支援名單解耦架構」：
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        權限宣告與支援名單解耦分層                        │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. 廣義權限預授權層 (Manifest Level)                                  │
+│    manifest.json 中的 host_permissions 與 content_scripts.matches      │
+│    一次性宣告所有現行 (18個) 與潛在候選 (9個+) 串流影音網域               │
+├────────────────────────────────────────────────────────────────────────┤
+│ 2. 中央平台登錄表 (Central Platform Registry)                          │
+│    platforms.ts 定義 PLATFORM_REGISTRY，各平台配置 enabled 特性開關     │
+│    提供 isPlatformActive(url) 與 isPlatformPermitted(url)              │
+├────────────────────────────────────────────────────────────────────────┤
+│ 3. 執行期動態控制 (Runtime Early Bailout & Strict Filtering)          │
+│    - Content Script: 未啟用網域立即 early return，零 DOM/Port 開銷     │
+│    - Background & Server: 嚴格僅放行 isPlatformActive，杜絕越權跳轉    │
+│    - Popup UI: 候選未啟用平台嚴格視為未支援 (純紅燈/無黃燈/無特權標籤) │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 5.4.1 設計動機與 Chrome MV3 權限規範
+- **痛點**：Chrome 擴充套件若在版本更新中於 `host_permissions` 新增先前未宣告之 Host，Chrome 瀏覽器會自動停用該擴充套件，並向使用者展示高度戒備之安全權限授權對話框，嚴重影響用戶留存率與更新體驗。
+- **解法**：在初期發行與大版本升級時，預先在 `manifest.json` 宣告潛在候選平台網域（例如 CatchPlay+、LiTV、WeTV、Bilibili 國際版、Dailymotion、Hulu、Peacock、Paramount+、HBO GO Asia 等 9 大候選網域）。
+
+#### 5.4.2 中央平台登錄表 (platforms.ts) 規範
+前端 `extension/src/platforms.ts` 與後端 `server/src/platforms.ts` 雙向同步維護平台資料庫：
+- **`enabled: true` (現行活躍支援平台，共 18 個)**：YouTube、Bilibili、Niconico、Anime1.me、Netflix、Vimeo、巴哈姆特動畫瘋、Twitch、Disney+、Prime Video、MyVideo、LINE TV、KKTV、Crunchyroll、遠傳 friDay 影音、Max、愛奇藝、Apple TV+。
+- **`enabled: false` (候選預宣告平台，共 9 個)**：已在 Manifest 註冊授權，但尚未實裝專屬選擇器或商業就緒，處於 Stage 停用狀態。
+
+#### 5.4.3 執行期零負載提早返回 (Zero-Overhead Early Bailout)
+Content Script 注入目標網頁頂層時：
+```typescript
+const isSiteActive = isPlatformActive(location.href);
+if (isTopFrame && isSiteActive) {
+  setupKeepAlivePort();
+  initObserver();
+  initPlaylistClickListeners();
+}
+// 若 isSiteActive === false，完全不註冊任何 DOM 監聽、Port 或事件
+```
+
+#### 5.4.4 前後端雙重安全白名單過濾
+- **Background SW (`isUrlAllowed`)**：所有發起跳轉或廣播之 URL，必須經由 `isPlatformActive(targetUrl)` 檢驗，未啟用平台無法進行同步與自動導航。
+- **後端伺服器 (`isServerUrlAllowed`)**：後端比對 `REDIRECT_ROOM` 與跳轉請求時，亦強制調用 `isPlatformActive` 驗證，杜絕未開放網域指令透過 WebSocket 繞過。
+
+#### 5.4.5 控制面板 (Popup UI) 嚴格二元狀態原則
+為維持 UI 乾淨直觀，針對已在 Manifest 宣告但 `enabled: false` 之候選網站：
+- **嚴格維持二元狀態 (Strict Bi-State)**：僅提供「綠燈（已啟用支援）」與「紅燈（不支援）」。
+- **不得展示黃燈或籌備中特殊標籤**：依規格嚴格禁止顯示「即將推出 / 籌備中」之特權樣式或黃色燈號，一律退回標準未支援之紅燈警告，避免干擾使用者判斷。
 
 ---
 
