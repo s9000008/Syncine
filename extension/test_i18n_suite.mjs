@@ -174,6 +174,11 @@ for (const file of localeFiles) {
   assert(content.includes('unsupportedBadge:'), `${file} 包含 unsupportedBadge 徽章`);
   assert(content.includes('footerFeedbackBtn:'), `${file} 包含 footerFeedbackBtn 回報按鈕`);
   assert(content.includes('footerFeedbackTooltip:'), `${file} 包含 footerFeedbackTooltip 懸停提示`);
+  assert(content.includes('genericModeConnected:'), `${file} 包含 genericModeConnected 通用模式翻譯`);
+  assert(content.includes('unlockToastOn:'), `${file} 包含 unlockToastOn 彩蛋開啟提示`);
+  assert(content.includes('unlockToastOff:'), `${file} 包含 unlockToastOff 彩蛋關閉提示`);
+  assert(content.includes('unlockBadgeTooltip:'), `${file} 包含 unlockBadgeTooltip 徽章提示`);
+  assert(content.includes('diagnosticFallbackTitle:'), `${file} 包含 diagnosticFallbackTitle 診斷標題翻譯`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
   for (const code of standardCodes) {
@@ -477,9 +482,25 @@ for (const file of localeFiles) {
   assert(content.includes('netflixConnected:'), `${file} 包含 netflixConnected 翻譯`);
 }
 assert(
-  popupTsx.includes('isNiconico') && popupTsx.includes('isAnime1') && popupTsx.includes('isNetflix'),
-  'Popup.tsx 支援偵測並顯示 Niconico、Anime1.me 與 Netflix 連線狀態'
+  popupTsx.includes('PLATFORM_TAB_STATUS_KEY_MAP') &&
+    popupTsx.includes("niconico: 'niconicoConnected'") &&
+    popupTsx.includes("anime1: 'anime1Connected'") &&
+    popupTsx.includes("netflix: 'netflixConnected'"),
+  'Popup.tsx 透過單一真理來源 PLATFORM_TAB_STATUS_KEY_MAP 支援偵測並顯示 Niconico、Anime1.me 與 Netflix 連線狀態'
 );
+
+// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132) 與隱藏候選名單不外洩驗證
+const storeLocales = ['zh_TW', 'en', 'ja', 'zh_CN'];
+const hiddenKeywords = ['catchplay', 'litv', 'wetv', 'dailymotion', 'hulu', 'peacock', 'paramount', 'hbogoasia'];
+for (const loc of storeLocales) {
+  const msgObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/_locales', loc, 'messages.json'), 'utf-8'));
+  const desc = msgObj?.appDesc?.message || '';
+  assert(desc.length > 10 && desc.length <= 132, `_locales/${loc}/messages.json appDesc 長度合規 (${desc.length} <= 132)`);
+  assert(desc.includes('Netflix'), `_locales/${loc}/messages.json appDesc 已同步更新多平台資訊`);
+  for (const kw of hiddenKeywords) {
+    assert(!desc.toLowerCase().includes(kw), `_locales/${loc}/messages.json 未外洩隱藏候選平台 (${kw})`);
+  }
+}
 
 console.log('\n====================================================');
 console.log(`📊 擴充測試執行完畢: 共 ${passed + failed} 項測試 | 通過: ${passed} | 失敗: ${failed}`);

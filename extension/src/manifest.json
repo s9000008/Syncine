@@ -13,10 +13,16 @@
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://youtu.be/*",
     "https://www.bilibili.com/*",
+    "https://bilibili.com/*",
     "https://www.nicovideo.jp/*",
+    "https://nicovideo.jp/*",
     "https://anime1.me/*",
     "https://www.netflix.com/*",
+    "https://netflix.com/*",
     "https://vimeo.com/*",
     "https://*.vimeo.com/*",
     "https://ani.gamer.com.tw/*",
@@ -36,10 +42,13 @@
     "https://kktv.me/*",
     "https://www.crunchyroll.com/*",
     "https://crunchyroll.com/*",
+    "https://static.crunchyroll.com/*",
     "https://video.friday.tw/*",
     "https://www.max.com/*",
     "https://max.com/*",
     "https://play.max.com/*",
+    "https://www.hbomax.com/*",
+    "https://hbomax.com/*",
     "https://play.hbomax.com/*",
     "https://www.iq.com/*",
     "https://iq.com/*",
@@ -77,12 +86,19 @@
       "matches": [
         "https://www.youtube.com/*",
         "https://www.youtube.com/watch*",
+        "https://youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://youtu.be/*",
         "https://www.bilibili.com/*",
+        "https://bilibili.com/*",
         "https://www.bilibili.com/video/*",
         "https://www.bilibili.com/bangumi/play/*",
+        "https://www.nicovideo.jp/*",
+        "https://nicovideo.jp/*",
         "https://www.nicovideo.jp/watch/*",
         "https://anime1.me/*",
         "https://www.netflix.com/*",
+        "https://netflix.com/*",
         "https://www.netflix.com/watch*",
         "https://vimeo.com/*",
         "https://*.vimeo.com/*",
@@ -107,6 +123,8 @@
         "https://www.max.com/*",
         "https://max.com/*",
         "https://play.max.com/*",
+        "https://www.hbomax.com/*",
+        "https://hbomax.com/*",
         "https://play.hbomax.com/*",
         "https://www.iq.com/*",
         "https://iq.com/*",
@@ -143,6 +161,7 @@
     {
       "matches": [
         "https://www.netflix.com/*",
+        "https://netflix.com/*",
         "https://www.netflix.com/watch*"
       ],
       "js": [
@@ -150,6 +169,16 @@
       ],
       "world": "MAIN",
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://static.crunchyroll.com/*"
+      ],
+      "js": [
+        "src/content/index.ts"
+      ],
+      "all_frames": true,
+      "run_at": "document_end"
     }
   ],
   "action": {

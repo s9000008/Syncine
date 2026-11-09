@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 1. 編譯 Content Script 為獨立原生 IIFE 格式（徹底消除外部 import Loader）
+// 1. 編譯 Content Script 為獨立原生 IIFE 格式（徹底消除外部 import Loader，並於正式建置剝除一般 console.log 避免外露非必要資訊）
 const entryFile = path.join(__dirname, 'src/content/index.ts');
 const outputFile = path.join(__dirname, 'dist/content.js');
 const netflixEntryFile = path.join(__dirname, 'src/content/netflix_bridge.ts');
@@ -21,6 +21,7 @@ esbuild.buildSync({
   format: 'iife',
   outfile: outputFile,
   target: ['chrome100'],
+  pure: ['console.log', 'console.debug'],
   define: {
     'process.env.NODE_ENV': '"production"'
   }
@@ -33,6 +34,7 @@ esbuild.buildSync({
   format: 'iife',
   outfile: netflixOutputFile,
   target: ['chrome100'],
+  pure: ['console.log', 'console.debug'],
   define: {
     'process.env.NODE_ENV': '"production"'
   }
@@ -51,16 +53,24 @@ if (fs.existsSync(manifestFile) && fs.existsSync(srcManifestFile)) {
       run_at: 'document_end'
     },
     {
-      matches: [
-        "https://www.netflix.com/*",
-        "https://www.netflix.com/watch*"
+      matches: srcManifest.content_scripts[1]?.matches || [
+        'https://www.netflix.com/*',
+        'https://netflix.com/*',
+        'https://www.netflix.com/watch*'
       ],
       js: ['netflix_bridge.js'],
       world: 'MAIN',
       run_at: 'document_start'
+    },
+    {
+      matches: srcManifest.content_scripts[2]?.matches || [
+        'https://static.crunchyroll.com/*'
+      ],
+      js: ['content.js'],
+      all_frames: true,
+      run_at: 'document_end'
     }
   ];
-  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
+  console.log('✅ Content Script 與 Netflix MAIN Bridge 原生 IIFE 封裝完成！');
 }
-
-console.log('✅ Content Script 原生獨立打包完成 (已包含 Isolated Content Script 與 Netflix Main World Bridge)');

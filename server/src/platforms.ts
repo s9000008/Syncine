@@ -18,10 +18,15 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     domains: ['youtube.com', 'youtu.be'],
     matchUrl: (url) => {
       const h = url.hostname.toLowerCase();
-      if (h.includes('youtube.com')) {
-        return (url.pathname === '/watch' && url.searchParams.has('v')) || url.pathname.startsWith('/embed/');
+      if (h === 'youtube.com' || h.endsWith('.youtube.com')) {
+        return (
+          (url.pathname === '/watch' && url.searchParams.has('v')) ||
+          url.pathname.startsWith('/embed/') ||
+          url.pathname.startsWith('/shorts/') ||
+          url.pathname.startsWith('/live/')
+        );
       }
-      if (h.includes('youtu.be')) {
+      if (h === 'youtu.be' || h.endsWith('.youtu.be')) {
         return url.pathname.length > 1;
       }
       return false;
@@ -34,7 +39,11 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     domains: ['bilibili.com'],
     matchUrl: (url) => {
       const p = url.pathname.toLowerCase();
-      return p.includes('/video/') || p.includes('/bangumi/play/');
+      return (
+        p.includes('/video/') ||
+        p.includes('/bangumi/play/') ||
+        (p.startsWith('/list/') && url.searchParams.has('bvid'))
+      );
     }
   },
   {
@@ -49,7 +58,7 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: 'Anime1.me',
     enabled: true,
     domains: ['anime1.me'],
-    matchUrl: (url) => url.pathname.length > 1 && url.pathname !== '/'
+    matchUrl: (url) => (url.pathname.length > 1 && url.pathname !== '/') || url.searchParams.has('cat')
   },
   {
     id: 'netflix',
@@ -63,7 +72,7 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: 'Vimeo',
     enabled: true,
     domains: ['vimeo.com'],
-    matchUrl: (url) => /\/([0-9]{5,}|channels\/|groups\/|showcase\/)/.test(url.pathname)
+    matchUrl: (url) => /\/([0-9]{5,}|video\/[0-9]+|channels\/|groups\/|showcase\/)/.test(url.pathname)
   },
   {
     id: 'gamer',
@@ -81,7 +90,7 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
       if (url.hostname.includes('clips.twitch.tv')) return url.pathname.length > 1;
       if (url.pathname.includes('/videos/') || url.pathname.includes('/clip/')) return true;
       const ch = url.pathname.slice(1).split('/')[0];
-      return Boolean(ch && !['directory', 'p', 'settings', 'search', 'videos'].includes(ch));
+      return Boolean(ch && !['directory', 'p', 'settings', 'search', 'videos', 'downloads', 'wallet', 'subscriptions', 'inventory', 'drops', 'moderator'].includes(ch.toLowerCase()));
     }
   },
   {
@@ -96,7 +105,10 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: 'Prime Video',
     enabled: true,
     domains: ['primevideo.com', 'amazon.com'],
-    matchUrl: (url) => url.pathname.includes('/detail/') || url.pathname.includes('/gp/video/detail/')
+    matchUrl: (url) =>
+      url.pathname.includes('/detail/') ||
+      url.pathname.includes('/gp/video/detail/') ||
+      (url.pathname.includes('/watch') && url.searchParams.has('gti'))
   },
   {
     id: 'myvideo',
@@ -110,14 +122,14 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: 'LINE TV',
     enabled: true,
     domains: ['linetv.tw'],
-    matchUrl: (url) => url.pathname.startsWith('/drama/')
+    matchUrl: (url) => url.pathname.includes('/drama/')
   },
   {
     id: 'kktv',
     name: 'KKTV',
     enabled: true,
     domains: ['kktv.me'],
-    matchUrl: (url) => url.pathname.startsWith('/play/')
+    matchUrl: (url) => url.pathname.includes('/play/')
   },
   {
     id: 'crunchyroll',
@@ -131,14 +143,16 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: '遠傳 friDay 影音',
     enabled: true,
     domains: ['friday.tw'],
-    matchUrl: (url) => url.hostname.includes('video.friday.tw') && (url.pathname.includes('/detail/') || url.pathname.includes('/drama/') || url.pathname.includes('/movie/'))
+    matchUrl: (url) =>
+      url.hostname.includes('video.friday.tw') &&
+      (/\/(detail|drama|movie|anime|show|sn)\//.test(url.pathname) || url.pathname.includes('/player'))
   },
   {
     id: 'max',
     name: 'Max (HBO)',
     enabled: true,
     domains: ['max.com', 'hbomax.com'],
-    matchUrl: (url) => url.pathname.includes('/video/watch') || url.pathname.includes('/player/')
+    matchUrl: (url) => url.pathname.includes('/video/watch') || url.pathname.includes('/player/') || url.pathname.includes('/watch/')
   },
   {
     id: 'iqiyi',
@@ -146,8 +160,8 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     enabled: true,
     domains: ['iq.com', 'iqiyi.com'],
     matchUrl: (url) => {
-      if (url.hostname.includes('iq.com')) return url.pathname.startsWith('/play/');
-      if (url.hostname.includes('iqiyi.com')) return url.pathname.startsWith('/v_') || url.pathname.startsWith('/a_');
+      if (url.hostname.includes('iq.com')) return url.pathname.includes('/play/');
+      if (url.hostname.includes('iqiyi.com')) return url.pathname.includes('/v_') || url.pathname.includes('/a_');
       return false;
     }
   },
@@ -156,7 +170,12 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     name: 'Apple TV+',
     enabled: true,
     domains: ['tv.apple.com'],
-    matchUrl: (url) => url.pathname.includes('/episode/') || url.pathname.includes('/movie/') || url.pathname.includes('/show/') || url.pathname.includes('umc.cmc.')
+    matchUrl: (url) =>
+      url.pathname.includes('/episode/') ||
+      url.pathname.includes('/movie/') ||
+      url.pathname.includes('/show/') ||
+      url.pathname.includes('/sport/') ||
+      url.pathname.includes('umc.cmc.')
   },
 
   // 預先授權但尚未開放支援之平台 (enabled: false)
@@ -229,6 +248,7 @@ export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
   try {
     const url = new URL(rawUrl.trim());
+    if (url.protocol !== 'https:') return null;
     const host = url.hostname.toLowerCase();
     for (const p of PLATFORM_REGISTRY) {
       if (p.domains.some((d) => host === d || host.endsWith('.' + d))) {

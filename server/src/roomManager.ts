@@ -39,6 +39,26 @@ export class RoomManager {
   }
 
   /**
+   * 若該 Socket 已存在於其他房間中，先將其自舊房間安全退出，防止幽靈成員與記憶體洩漏
+   */
+  public leavePreviousRoomIfNeeded(
+    socketId: string,
+    targetRoomId?: string
+  ): { previousRoomId?: string; isHost: boolean; roomClosed: boolean } {
+    const existingRoomId = this.socketToRoom.get(socketId);
+    if (!existingRoomId) return { isHost: false, roomClosed: false };
+    if (targetRoomId && existingRoomId === targetRoomId.toUpperCase()) {
+      return { isHost: false, roomClosed: false };
+    }
+    const res = this.handleDisconnect(socketId, undefined, true);
+    return {
+      previousRoomId: res.roomId,
+      isHost: res.isHost,
+      roomClosed: res.roomClosed
+    };
+  }
+
+  /**
    * 建立新房間
    */
   public createRoom(
@@ -49,6 +69,9 @@ export class RoomManager {
     mode: ConnectionMode = 'DEFAULT',
     hostLanguage?: string
   ): RoomState {
+    // 若此 Socket 已在舊房間中，先自動退出舊房間以防止跨房廣播與記憶體洩漏
+    this.leavePreviousRoomIfNeeded(socketId);
+
     const roomId = this.generateRoomId();
     const hostResumeToken = this.generateResumeToken();
     const hostMember: RoomMember = {
@@ -88,10 +111,14 @@ export class RoomManager {
     userId: string,
     resumeToken?: string
   ): { success: boolean; room?: RoomState; error?: string; code?: string; isHost?: boolean } {
-    const room = this.rooms.get(roomId.toUpperCase());
+    const normalizedRoomId = roomId.toUpperCase();
+    const room = this.rooms.get(normalizedRoomId);
     if (!room) {
-      return { success: false, error: '房間不存在或已關閉', code: 'ERR_ROOM_NOT_FOUND' };
+      return { success: false, error: 'ERR_ROOM_NOT_FOUND', code: 'ERR_ROOM_NOT_FOUND' };
     }
+
+    // 若此 Socket 原先屬於其他不同房間，先自動退出舊房間以防幽靈成員洩漏
+    this.leavePreviousRoomIfNeeded(socketId, normalizedRoomId);
 
     // 檢查是否為合法持有效 Token 之 Host 重連回魂
     const isAuthenticHost = Boolean(
@@ -104,7 +131,7 @@ export class RoomManager {
     const isExistingMember = room.members.has(socketId) || isAuthenticHost;
     if (!isExistingMember && room.members.size >= MAX_ROOM_MEMBERS) {
       console.warn(`[RoomManager] 房間 ${sanitizeLog(room.roomId)} 已達人數上限 (${MAX_ROOM_MEMBERS} 人)，拒絕新成員加入: ${sanitizeLog(userId)}`);
-      return { success: false, error: '房間已滿員，無法加入。', code: 'ERR_ROOM_FULL' };
+      return { success: false, error: 'ERR_ROOM_FULL', code: 'ERR_ROOM_FULL' };
     }
 
     // 若房間正在處於全空 60 秒寬限倒數，有成員重連進來時立即解除倒數
@@ -120,6 +147,13 @@ export class RoomManager {
         clearTimeout(room.hostDisconnectTimer);
         room.hostDisconnectTimer = undefined;
         console.log(`[RoomManager] 房主驗證憑證成功，取消離線倒數並恢復房主身分: ${sanitizeLog(room.roomId)}`);
+      }
+      // 清理舊連線可能尚未逾時釋放之殘留房主 Socket，避免人數虛增
+      if (room.hostSocketId && room.hostSocketId !== socketId && room.members.has(room.hostSocketId)) {
+        room.members.delete(room.hostSocketId);
+        if (this.socketToRoom.get(room.hostSocketId) === room.roomId) {
+          this.socketToRoom.delete(room.hostSocketId);
+        }
       }
       room.hostSocketId = socketId;
       room.hostUserId = userId;

@@ -30,9 +30,9 @@
 18. **Apple TV+**：`tv.apple.com/...` 全球頂級原創影集電影串流平台。
 
 > [!NOTE]
-> **功能範疇調整說明**：
-> 1. **WebRTC P2P 點對點連線**：已於 **v2.3 正式實裝**，採用 Chrome MV3 官方推薦之 `chrome.offscreen` Document 承載 WebRTC DataChannel，並結合現有 Socket 伺服器進行初始 SDP 信令交換與自動降級機制。
-> 2. **未來平台擴充**：預計逐步擴充支援 Vimeo、Netflix、巴哈姆特動畫瘋等平台，專注於純影音即時同步體驗（詳見第 10 章）。
+> **功能範疇演進說明**：
+> 1. **WebRTC P2P 點對點直連架構**：採用 Chrome MV3 官方推薦之 `chrome.offscreen` Document 承載 PeerJS 與原生 `RTCPeerConnection` / `RTCDataChannel`，以統一 6 碼邀請碼 (`P2P:<RoomID>`) 搭配房主入房審核佇列實現星狀拓撲加密直連。
+> 2. **18 大正式開放平台與預授權解耦架構**：現行版本已正式實裝上述 18 大平台專屬播放器選擇器與選集連播同步，並透過 `platforms.ts` 中央登錄表實現「Manifest 權限預授權」與「實際開放支援名單」完全解耦（詳見第 5.4 節）。
 
 ---
 
@@ -64,45 +64,44 @@
 
 ## 3. 連線方式核心模式規格 (Connection Modes)
 
-系統提供兩種開箱即用與自架掌控之連線選項：
+系統提供三種兼顧零伺服器直連、官方開箱即用與私有自架掌控之彈性連線選項：
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Syncine 核心連線選項                            │
-├───────────────────────────────────┬────────────────────────────────────┤
-│ 1. 預設連線模式 (Default Relay)   │ 2. 自行輸入 IP (Self-Hosted IP)    │
-├───────────────────────────────────┼────────────────────────────────────┤
-│ 官方託管 / 本機開發伺服器         │ 自建私有主機 / VPS / NAS / LAN     │
-│ 開箱即用免設定                    │ 複合分享碼無感對接                 │
-└───────────────────────────────────┴────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                      Syncine 三模彈性連線選項                                     │
+├─────────────────────────────────┬─────────────────────────────────┬───────────────────────────────┤
+│ 1. ⚡ WebRTC P2P 端對端直連      │ 2. 🏢 預設中繼模式 (Official)   │ 3. 🌐 自行輸入 IP (Self-Host) │
+├─────────────────────────────────┼─────────────────────────────────┼───────────────────────────────┤
+│ 統一 6 碼邀請碼 + 房主審核佇列  │ 官方託管雲端中繼 (Fly.io)       │ 自建私有主機 / VPS / NAS / LAN│
+│ 星狀拓撲 DataChannel 加密直連   │ 穿透嚴格防火牆、開箱即用免設定  │ 複合分享碼無感自動對接        │
+└─────────────────────────────────┴─────────────────────────────────┴───────────────────────────────┘
 ```
 
 ### 3.1 選項一：預設連線模式 (Default Relay Mode)
-* **定位**：適合一般大眾使用者，開箱即用、零配置。
-* **連線端點**：套件預設透過環境變數 `VITE_DEFAULT_SERVER_URL` 連線至伺服器（本地開發端為 `http://localhost:3000`，生產環境預設為官方託管端點 `https://syncine.fly.dev`）。
+* **定位**：適合一般大眾使用者與受嚴格企業防火牆限制之網路環境，開箱即用、零配置。
+* **連線端點**：套件預設透過設定連線至中繼伺服器（生產環境預設為官方託管端點 `https://syncine.fly.dev`，本地開發可切換為 `http://localhost:3000`）。控制面板僅在使用者切換至本模式時才探測 `/health` 狀態，避免非必要背景請求。
 * **傳輸機制**：WebSocket (Socket.IO) 集中式房間中繼轉發。
-* **房間代碼**：標準 6 碼代碼（如 `X7A9B2`）或含前綴之 `DEF:X7A9B2`。
-* **優點**：無需任何額外配置，即使處於嚴格 NAT 或行動網路皆可順暢連線。
+* **房間代碼**：標準前綴複合碼 `DEF:<RoomID>|<Base64(ServerURL)>`（向下相容純 6 碼代碼如 `X7A9B2`）。
+* **優點**：無需任何額外配置，即使處於對稱型 NAT 或嚴格防火牆皆可穩定同步。
 
 ### 3.2 選項二：自行輸入 IP 模式 (Custom IP / Self-Hosted Mode)
 * **定位**：適合自架愛好者、內部區域網路（LAN）、私有雲 VPS 或 NAS 使用者。
 * **連線端點**：房主在建立房間時，控制面板 UI 提供「自訂伺服器網址/IP」輸入欄位（例如：`http://192.168.1.100:3000` 或 `https://syncine.myhome.net:8443`）。
 * **複合型分享碼無感對接機制**：
   1. 房主在自訂伺服器建房成功後，套件將「6 碼 Room ID」與「Base64 編碼後的自訂伺服器網址」透過管道符號 `|` 組裝成最終分享碼：
-     - *格式*：`IP:RoomID|Base64(ServerURL)` 或相容格式 `RoomID|Base64(ServerURL)`
+     - *格式*：`IP:RoomID|Base64(ServerURL)`（向下相容舊版 `RoomID|Base64(ServerURL)`）
      - *範例*：`IP:X7A9B2|aHR0cDovLzE5Mi4xNjguMS4xMDA6MzAwMA==`
-  2. 觀眾在套件中貼入該分享碼時，Background Script 自動解析拆解該字串。
-  3. 觀眾端套件自動將 WebSocket 連線位置動態切換至解碼後的自訂 IP，並直接發送加入房間請求，觀眾**完全不需要手動輸入 IP**。
-* **優點**：資料不經第三方主機、區域網路內極低延遲、不受官方伺服器頻寬與維護限制。
+  2. 觀眾在套件中貼入該分享碼時，前端與 Background 自動解析拆解該字串。
+  3. 觀眾端套件自動將 WebSocket 連線位置動態切換至解碼後的自訂 IP 並發送加房請求，觀眾**完全不需要手動輸入 IP**。
+* **優點**：資料完全自主掌控、區域網路內極低延遲、不受外部伺服器維護限制。
 
-### 3.3 選項三：WebRTC 純端對端直連模式 (Serverless P2P Copy-Paste Mode)
-* **定位**：100% 零伺服器依賴、極致低延遲、最高隱私。
-* **NAT 穿透**：配置 Google 4 組公共 STUN 伺服器 (`stun:stun.l.google.com:19302`)，免除自建伺服器。
-* **信令交換機制 (方案 C - 兩階段剪貼簿握手)**：
-  1. **步驟 1 (房主)**：房主點擊「建立 Serverless P2P 房間」，Offscreen 收集完整 ICE 候選項後，使用瀏覽器原生 `CompressionStream('gzip')` 壓縮 SDP 生成 `P2P-OFFER:base64...` 邀請碼，由房主複製傳送給好友。
-  2. **步驟 2 (觀眾)**：觀眾貼入邀請碼，Offscreen 解壓後產生對應之 `P2P-ANSWER:base64...` 回執碼，觀眾複製傳回房主。
-  3. **步驟 3 (房主確認)**：房主貼入回執碼，雙方 RTCDataChannel 通道立即開啟 (`open`)。
-* **優點**：完全不需在本機開啟 Node.js 伺服器（不依賴 `localhost:3000`），高頻同步事件完全端對端直連傳輸。
+### 3.3 選項三：WebRTC 純端對端直連模式 (Unified Invite Code P2P Mode - 預設模式)
+* **定位**：免自建伺服器、極致低延遲、多人星狀拓撲加密直連。
+* **NAT 穿透與信令發現**：配置 Google (`stun:stun.l.google.com:19302`) 與 Cloudflare (`stun:stun.cloudflare.com:3478`) 多節點公共 STUN 伺服器，並透過 PeerJS 公用信令代理 (`0.peerjs.com`) 完成初始房間代碼尋址（命名空間 `syncine-room-<6碼>`）。
+* **統一邀請碼與房主審核握手流程**：
+  1. **步驟 1 (房主建房)**：房主點擊建立 P2P 房間，Offscreen Document 生成密碼學安全隨機 6 碼房號並註冊 Host Peer，產出統一分享碼 `P2P:<RoomID>`（同一組代碼可同時分享給多位好友，不設硬性人數上限）。
+  2. **步驟 2 (觀眾申請)**：觀眾貼入邀請碼後自動建立 DataChannel 連線並送出 `JOIN_REQUEST`（進入等待房主審核狀態；待審佇列設有容量上限與 30 秒逾時自動清理防洪保護）。
+  3. **步驟 3 (房主一鍵審核)**：房主面板即時彈出審核通知，點擊「允許」後回傳 `JOIN_APPROVED` 與房間初始狀態，雙方立即啟動低延遲同步，並由房主每 30 秒廣播 `MEMBER_COUNT_SYNC` 動態校準全房在線人數；點擊「拒絕」則回傳 `JOIN_REJECTED` 並斷開該訪客連線。
 
 ### 3.4 複合分享碼協定標準化與全版本向下相容矩陣 (Share Code Schema & Backward Compatibility)
 
@@ -125,14 +124,14 @@
 
 ### 3.5 三種連線選項特性對比表
 
-| 比較項目 | 1. 預設連線模式 | 2. 自行輸入 IP (自架) | 3. ⚡ Serverless P2P 直連 (方案 C) |
+| 比較項目 | 1. ⚡ WebRTC P2P 直連 (預設) | 2. 🏢 預設中繼模式 (Official) | 3. 🌐 自行輸入 IP (自架) |
 | :--- | :--- | :--- | :--- |
-| **主機依賴** | 依賴官方/本地伺服器 | 依賴使用者自建伺服器 | **100% 零主機依賴 (免開伺服器)** |
-| **信令通道** | WebSocket 伺服器 | WebSocket 伺服器 | 通訊軟體一次性貼上交換 (GZIP) |
-| **NAT 穿透** | 伺服器中繼 | 伺服器中繼 / LAN | **Google 公共 STUN 伺服器** |
-| **同步延遲** | 良好 (~50-150ms) | 極佳 (內網 ~5-20ms) | **極致 (~10-40ms 網際網路直連)** |
-| **伺服器頻寬消耗**| 承擔全量同步指令 | 由自架者全量承擔 | **0 頻寬消耗** |
-| **隱私安全性** | 伺服器可知房間狀態 | 完全私有控制 | **端對端直連，最高隱私** |
+| **自建主機需求** | **免自架主機** | 免自架（使用官方雲端中繼） | 需使用者自建 Node.js 伺服器 |
+| **信令與穿透** | PeerJS 6 碼信令 + Google/Cloudflare STUN | WebSocket (Socket.IO) 中繼 | WebSocket (Socket.IO) / LAN |
+| **同步傳輸通道** | **加密星狀拓撲 `RTCDataChannel` 直連** | 雲端伺服器中繼廣播 | 自架伺服器中繼廣播 |
+| **入房安全機制** | **房主即時審核佇列 (允許 / 拒絕)** | 6 碼房間代碼配對 | 複合分享碼配對 |
+| **同步延遲** | **極佳 (~10-40ms 端對端直連)** | 良好 (~50-150ms) | 極佳 (內網 ~5-20ms) |
+| **防火牆穿透力** | 適用於一般家用與行動網路 | **最高（支援對稱型 NAT / 企業網路）** | 依自架主機網路配置而定 |
 
 ---
 
@@ -209,11 +208,12 @@ function verifyAndRedirect(targetUrl) {
 ```
 
 #### 5.1.1 跨平台純淨標準網址轉換 (getCanonicalVideoUrl)
-在建房 (CREATE_ROOM)、加入 (JOIN_ROOM)、綁定目標分頁與強制跳轉 (REDIRECT_ROOM) 前，全系統強制調用 getCanonicalVideoUrl(rawUrl)，徹底剔除各串流平台夾帶之冗餘追蹤標籤與上下文參數：
-* **Netflix**：剔除 trackId 與包含 Base64 推薦狀態之長字串 tctx，收斂至標準 https://www.netflix.com/watch/<id>。
-* **YouTube**：剔除推薦來源、播放清單與頻道參數 (ab_channel, list, index 等)，youtu.be 與 /embed/ 統一收斂至標準 https://www.youtube.com/watch?v=<id>。
-* **Bilibili**：剔除來源追蹤碼 (spm_id_from 等)，保留純淨 /video/BV...（若為分 P 則保留 ?p=，p=1 略過）或 /bangumi/play/ep...。
-* **Niconico**：剔除 ref 檢索參數，僅保留 /watch/<id>。
+在建房 (`CREATE_ROOM`)、加入 (`JOIN_ROOM`)、綁定目標分頁與強制跳轉 (`REDIRECT_ROOM`) 前，全系統強制調用 `getCanonicalVideoUrl(rawUrl)`，徹底剔除各串流平台夾帶之冗餘追蹤標籤與上下文參數：
+* **Netflix**：剔除 `trackId` 與包含 Base64 推薦狀態之長字串 `tctx`，收斂至標準 `https://www.netflix.com/watch/<id>`。
+* **YouTube**：剔除推薦來源、播放清單與頻道參數 (`ab_channel`, `list`, `index`, `si`, `pp` 等)，支援標準 `/watch?v=`、`/shorts/`、`/live/` 與 `youtu.be` 短網址標準化。
+* **Bilibili**：剔除來源追蹤碼 (`spm_id_from` 等)，保留純淨 `/video/BV...`（若為分 P 則保留 `?p=`，`p=1` 略過）或 `/bangumi/play/ep...`。
+* **Niconico / Disney+ 等**：Niconico 剔除 `ref` 檢索參數僅保留 `/watch/<id>`；Disney+ 支援 `/video/`、`/play/` 與 `/series/` 路徑正規化。
+* **通用與候選平台參數保護 (`buildCleanGenericUrl`)**：針對依賴查詢參數定位劇集之平台（如 `?id=`、`?ep=`），精準剝離常見廣告追蹤參數（`utm_*`, `fbclid`, `gclid`, `spm*`, `from*`, `track*`, `tctx`, `ref`, `share*`），同時完整保留非追蹤之必要業務參數。
 * **效益**：杜絕龐大追蹤標籤造成 URL 解析異常、降低網路通訊負擔、防止個人推薦 Token 洩漏，並保證跳轉白名單比對 100% 精準。
 
 ### 5.2 房主權限控制與雙重攔截機制
@@ -305,21 +305,20 @@ if (isAlreadyOnVideo) {
 - **`enabled: true` (現行活躍支援平台，共 18 個)**：YouTube、Bilibili、Niconico、Anime1.me、Netflix、Vimeo、巴哈姆特動畫瘋、Twitch、Disney+、Prime Video、MyVideo、LINE TV、KKTV、Crunchyroll、遠傳 friDay 影音、Max、愛奇藝、Apple TV+。
 - **`enabled: false` (候選預宣告平台，共 9 個)**：已在 Manifest 註冊授權，但尚未實裝專屬選擇器或商業就緒，處於 Stage 停用狀態。
 
-#### 5.4.3 執行期零負載提早返回 (Zero-Overhead Early Bailout)
-Content Script 注入目標網頁頂層時：
+#### 5.4.3 執行期零負載提早返回與 SPA 首頁導航相容 (Zero-Overhead Early Bailout)
+Content Script 注入目標網頁頂層時，以網域級啟用守衛 `isPlatformDomainActive` 搭配路徑級守衛 `isPlatformActive` 控制生命週期：
 ```typescript
-const isSiteActive = isPlatformActive(location.href);
+const isSiteActive = isPlatformDomainActive(location.href, unlocked) || isPlatformActive(location.href, unlocked);
 if (isTopFrame && isSiteActive) {
-  setupKeepAlivePort();
-  initObserver();
-  initPlaylistClickListeners();
+  activateContentScript(); // 啟動 Port 保活、SPA 導航與 Video 觀察器
 }
-// 若 isSiteActive === false，完全不註冊任何 DOM 監聽、Port 或事件
+// 若為未啟用之候選網域 (isSiteActive === false)，100% 靜默退出，零 DOM 監聽、零 Port、零 Console 輸出
 ```
+此設計同時確保使用者從已開放平台首頁（如 `/browse`、`/`）透過 SPA 路由點進播放頁時能無縫掛載播放器，且未解鎖之候選平台保持絕對靜默。
 
-#### 5.4.4 前後端雙重安全白名單過濾
-- **Background SW (`isUrlAllowed`)**：所有發起跳轉或廣播之 URL，必須經由 `isPlatformActive(targetUrl)` 檢驗，未啟用平台無法進行同步與自動導航。
-- **後端伺服器 (`isServerUrlAllowed`)**：後端比對 `REDIRECT_ROOM` 與跳轉請求時，亦強制調用 `isPlatformActive` 驗證，杜絕未開放網域指令透過 WebSocket 繞過。
+#### 5.4.4 前後端雙重安全白名單分責過濾
+- **客戶端 Background SW (`isUrlAllowed`)**：所有發起跳轉或廣播之 URL 強制要求 `https:` 協定，並經由 `isPlatformActive(targetUrl, candidatesUnlocked)` 檢驗；未啟用且未解鎖之平台無法觸發自動導航。
+- **後端伺服器 (`isServerUrlAllowed`)**：中繼伺服器在 `CREATE_ROOM` 與 `REDIRECT_ROOM` 採用 `isPlatformPermitted(targetUrl)` 強制校驗 `https:` 協定與中央註冊表合法網域（涵蓋 18 大正式平台與 9 大預授權候選平台），既嚴格阻斷任意外部釣魚網址，又支援解鎖測試端透過官方或自架中繼伺服器進行同步。
 
 #### 5.4.5 控制面板 (Popup UI) 嚴格二元狀態原則
 為維持 UI 乾淨直觀，針對已在 Manifest 宣告但 `enabled: false` 之候選網站：
@@ -538,32 +537,19 @@ export interface TogglePermissionMsg {
    - 伺服器端實施「主動退房立即銷毀」與「非預期突發斷線 60 秒保留寬限期 (Grace Period)」，在寬限期內原房成員重新連線即自動取消消滅計時器，實現平滑無感「回魂」。
 2. **Log 資訊注入攻擊防護 (Log Injection Defense)**：
    - 前後端全面配置日誌清毒輔助函式（`sanitizeLog`），對使用者傳入之 `userId`, `roomId`, `targetUrl`, `reason` 等欄位徹底過濾 CRLF 換行符（`\r\n`）與不可見控制字元，防止偽造日誌行（Log Forging / CRLF Injection）與終端機轉義攻擊，並設定最大截斷長度防止日誌爆破。
-3. **客戶端伺服器與 P2P 通道連線狀態確認 (Connectivity Healthcheck)**：
-   - 控制面板實施真實非同步健康探測（對官方伺服器 `/health` 端點及 P2P STUN 狀態做可達性校驗），在面板頂部與選單即時回饋「線上就緒」或「連線異常」狀態，杜絕假性在線。
-4. **客戶端連線模式動態顯示與容錯引導**：
-   - 移除「多人群組推薦 P2P」標籤，避免對使用者造成模式誤導。
-   - 於面板右下角將原固定文字改為動態顯示當前連線模式（`連線模式：WebRTC P2P 直連` / `連線模式：官方中繼伺服器` / `連線模式：自架主機`）。
-   - 於模式說明卡片明確標記：「💡 若因嚴格防火牆或網路限制導致 P2P 連線失敗，可改用『預設中繼伺服器』模式」。
-5. **單分頁觀影防護提示 (Single Active Tab Advisory)**：
-   - 於控制面板顯著標記：「💡 建議同時僅開啟一個支援的影片分頁，以確保最佳同步效果，避免多重視窗干擾」。
-6. **控制面板多語系文字自適應與懸停提示 (UI Text Truncation & Hover Tooltip)**：
-   - 針對 380px 面板寬度，精簡英文 (`en-US`) 與日文 (`ja-JP`) 之分頁提示文案（如 `notSupported` 與 `singleTabHint`），避免在固定寬度下因字串過長被截斷為 `...`。
-   - 於提示條容器加上 HTML `title` 屬性，當滑鼠懸停於上方時即時顯示完整說明文字，兼顧緊湊排版與無障礙可讀性。
+3. **客戶端中繼伺服器按需連線狀態確認 (On-Demand Connectivity Healthcheck)**：
+   - 僅當使用者於控制面板切換至「預設中繼伺服器 (`DEFAULT`)」模式時，才發送非同步 `/health` 健康探測，即時回饋「線上就緒」或「連線異常」狀態；在預設 P2P 與自架主機模式下絕不發送非必要背景 HTTP 請求。
+4. **客戶端連線模式動態顯示與精簡房內操作**：
+   - 於面板右下角動態顯示當前連線模式（`WebRTC P2P` / `官方中繼` / `自架主機`）。
+   - 於 P2P 模式說明卡片提供防火牆受阻時改用預設中繼伺服器之清晰指引；房內介面精簡為單一明確之「離開房間」按鈕，移除冗餘技術提示與重複按鈕。
+5. **控制面板多語系文字自適應與懸停提示 (UI Text Truncation & Hover Tooltip)**：
+   - 針對 380px 面板寬度精簡各語系分頁提示文案，避免固定寬度下字串截斷，並搭配 HTML `title` 懸停提示呈現完整說明。
+6. **網站支援燈號狀態指示與商店導流系統 (Site Support Traffic Light & Store Feedback)**：
+   - **單一真理來源燈號標記**：全面以 `platforms.ts` 中央註冊表判定支援狀態，當目前分頁為 18 大正式支援平台（或彩蛋解鎖之通用模式平台）之有效播放頁時顯示高亮綠燈與 `[支援]` 徽章；其餘頁面一律顯示紅燈與 `[不支援]` 徽章，杜絕燈號與文案不一致。
+   - **官方商店導流**：點擊面板底部引擎支援標籤（`Syncine • YouTube / Netflix / Bilibili 與更多`），導向官方純淨 Chrome 線上應用程式商店頁面（不含任何個人帳號或語系尾綴參數）。
+   - **左下角空間極簡化問題回報按鈕**：面板左下角配置低侵入性「`問題回報`」按鈕，一鍵發起 GitHub Issue 並自動整合本機脫敏診斷報告。
 
-
-7. **網站支援燈號狀態指示與商店導流系統 (Site Support Traffic Light & Store Feedback)**：
-   - **燈號標記機制**：
-     - **綠燈支援 (🟢 Green Light)**：當目前分頁為 YouTube、Bilibili、Niconico 或 Anime1.me 之有效影片播放頁面時，顯示高亮綠燈動態光暈（`bg-emerald-400` + `shadow` + `animate-pulse`），並標記 `[支援]` 徽章與各平台連線狀態。
-     - **紅燈不支援 (🔴 Red Light)**：當目前分頁非支援目標或非播放頁時，顯示鮮明紅燈（`bg-rose-500` + `shadow`），提示條轉為玫瑰紅基調並標記 `[不支援]` 徽章。
-   - **自適應支援清單與懸停提示 (Truncated Label & Hover Tooltip)**：
-     - 紅燈時主文案精簡顯示：「`支援網站：YouTube / Bilibili / Niconico 與更多`」（適配多語系面板寬度）。
-     - 滑鼠懸停（Hover）時彈出詳細說明，列舉當前具體支援的播放器範疇（YouTube 標準影片、Bilibili 標準影片/番劇、Niconico 動畫頻道/標準影片、Anime1.me 動畫播放/分類頁等）。
-   - **官方商店完整支援清單導流 (Chrome Web Store Official Directory)**：
-     - 點擊紅燈提示條或底部引擎標籤，將導向官方 Chrome 線上應用程式商店說明頁面，供使用者查閱最新完整支援網站清單。
-   - **左下角空間極簡化問題回報按鈕 (Bottom-Left Compact Feedback Button)**：
-     - 面板左下角配置低侵入性小按鈕：「`💬 問題回報`」，使用者可一鍵發起 GitHub Issue 或反饋網站支援建議，自動整合本機脫敏診斷報告。
-
-8. **bfcache 頁面快取生命週期適配與沙盒 iframe 注入防護 (bfcache & Sandbox iframe Isolation)**：
+7. **bfcache 頁面快取生命週期適配與沙盒 iframe 注入防護 (bfcache & Sandbox iframe Isolation)**：
    - **停用 `all_frames` 與 `match_about_blank`**：Content Script 僅注入頂層視窗（`window.top`），避免動態模組 Loader 注入至 YouTube/Bilibili 之廣告、追蹤或沙盒 iframe 觸發 `Unsafe attempt to load URL` 安全限制。
    - **Page Lifecycle API (bfcache)**：監聽 `pagehide` 與 `pageshow` 事件。在分頁進入快退快進快取（bfcache）時主動中斷長連接 Port，喚醒時自動重連並恢復房間最新狀態。
    - **主動捕捉 `chrome.runtime.lastError`**：於 `port.onDisconnect` 與後端訊息回呼中顯式存取 `lastError`，消除瀏覽器未捕捉異常警示。
@@ -574,9 +560,9 @@ export interface TogglePermissionMsg {
 
 以下項目列為系統長期演進之主要功能路線圖：
 
-### 10.1 支援更多主流影音串流平台 (Streaming Platforms Integration)
-* **目標平台**：已正式實裝 **Netflix**；後續逐步擴展支援 **Vimeo**、**巴哈姆特動畫瘋** 等主流國內外線上影音平台。
-* **技術要點**：針對各平台相異的播放器 DOM 結構、SPA 換集路由機制與自適應串流防禦（防跳幀、防廣告干擾）實裝專屬 Content Script 解析適配器。
+### 10.1 預授權候選串流平台專屬適配器逐步開放與架構模組化 (Staged Platform Adapters & Shared Workspace)
+* **目標方向**：現行版本已正式實裝 YouTube、Netflix、Bilibili、Disney+、Prime Video、巴哈姆特動畫瘋、Vimeo、Twitch 等 18 大平台；後續將針對已完成 Manifest 權限預授權之候選串流平台逐步驗證並實裝客製化播放器適配器（`VideoPlatformAdapter`），同時規劃抽離前後端共用型別模組（`shared/` Workspace）以根除雙端協定重複維護成本。
+* **技術要點**：針對各平台相異的播放器 DOM 結構、SPA 換集路由機制與自適應串流防禦（防跳幀、防廣告干擾）實裝獨立插件化 Content Script 解析適配器。
 
 ### 10.2 本地影片 P2P 串流播放 (Local Video P2P Streaming)
 * **需求定位**：允許房主選取本機硬碟中的私有影片檔案（`.mp4`, `.mkv`），免上傳第三方雲端，直接端對端串流給好友同步觀看。

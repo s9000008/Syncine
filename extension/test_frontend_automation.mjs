@@ -611,7 +611,7 @@ assert(huluState.lightColor === 'RED', '未正式開放支援網站 (Hulu) 嚴�
 assert(huluState.badgeKey === 'unsupportedBadge', '未正式開放支援網站顯示不支援徽章');
 
 const CHROME_STORE_URL =
-  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip?authuser=0&hl=zh-TW';
+  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip';
 assert(CHROME_STORE_URL.startsWith('https://chromewebstore.google.com/detail/syncine-'), 'Chrome 商店官方發布網址正確無誤');
 
 // ----------------------------------------------------
@@ -638,6 +638,8 @@ const popupSrc = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'u
 assert(popupSrc.includes('handleVersionTripleClick'), 'Popup.tsx 實裝版本號點擊 3 次隱藏彩蛋觸發器 (handleVersionTripleClick)');
 assert(popupSrc.includes('syncine_unlock_candidates'), 'Popup.tsx 透過 syncine_unlock_candidates 儲存解鎖狀態');
 assert(popupSrc.includes('isPlatformActive(activeTabUrl, candidatesUnlocked)'), 'Popup.tsx 根據彩蛋解鎖狀態計算目標支援判定');
+assert(popupSrc.includes("useState<'create' | 'join'>('join')"), 'Popup.tsx 預設開窗視圖為加入房間 (join)');
+assert(popupSrc.includes("setActiveTab('join')"), 'Popup.tsx 離開房間時重置預設視圖為加入房間 (join)');
 
 const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
 assert(bgSrc.includes('isPlatformActive'), 'background/index.ts 實裝 isPlatformActive 廣播與白名單過濾守衛');
@@ -849,6 +851,191 @@ assert(bgSrc.includes('不強制刷新畫面'), 'Background 具備當前分頁�
 assert(!bgSrc.includes('目標分頁尚未注入 Content Script，刷新分頁以注入'), 'Background 徹底移除錯誤強制刷新邏輯');
 assert(contentSrc.includes('isSameVideoOrWebsite(currentHref, roomState.currentUrl)'), 'Content Script 在目標網站相同時不觸發跳轉廣播');
 assert(contentSrc.includes('sendResponse?.({ received: true })'), 'Content Script 訊息通道提供正常響應');
+
+// ----------------------------------------------------
+// 測試套件 11: Code Review 關鍵修復與非必要顯示資訊清理迴歸測試 (D-01~D-09, U-01~U-07)
+// ----------------------------------------------------
+console.log('\n--- 測試套件 11: Code Review 關鍵修復與非必要顯示資訊清理驗證 ---');
+
+// D-01: BG_REDIRECT_ROOM payload 對齊與向下相容
+assert(
+  contentSrc.includes("type: 'BG_REDIRECT_ROOM'") && contentSrc.includes('payload: { targetUrl: cleanTarget }'),
+  'D-01: Content Script 連播換集廣播使用標準 payload: { targetUrl } 結構'
+);
+assert(
+  bgSrc.includes('payload?.targetUrl ?? (request as any).targetUrl'),
+  'D-01: Background BG_REDIRECT_ROOM 支援 payload.targetUrl 與舊版頂層雙相容讀取'
+);
+
+// D-03 & U-01: SPA 首頁導航啟用守衛與生產包靜默無洩漏
+assert(
+  contentSrc.includes('isPlatformDomainActive'),
+  'D-03: Content Script 採用 isPlatformDomainActive 支援從已開放平台首頁 SPA 進入播放頁'
+);
+assert(
+  !contentSrc.includes('console.log(`🎬 [Syncine Content] 腳本載入'),
+  'U-01: Content Script 移除頂層無條件啟動 console.log 洩漏'
+);
+const buildContentMjs = fs.readFileSync(path.join(__dirname, 'build_content.mjs'), 'utf-8');
+assert(
+  buildContentMjs.includes("pure: ['console.log', 'console.debug']"),
+  'U-01: build_content.mjs 配置 esbuild pure 標記自動剝離生產環境 console.log/debug'
+);
+
+// D-04 & D-09: 通用播放器接線、0:00 回滾修復與關閉彩蛋即時卸載
+assert(!contentSrc.includes('google.com'), 'D-04: Content Script 移除殘留 google.com 死碼分支');
+assert(contentSrc.includes('lastSyncedTime >= 0'), 'D-09: 無權限觀眾於 0:00 拖曳進度條時亦可正確回滾');
+assert(contentSrc.includes('deactivateContentScript()'), 'D-09: 關閉候選彩蛋時即時卸載 Content Script 觀察器與 Port');
+
+// D-07: getCanonicalVideoUrl 保留候選/通用平台業務參數並剝離追蹤碼
+assert(
+  getCanonicalVideoUrl('https://www.catchplay.com/watch/abc?ep=3&utm_source=fb&fbclid=12345') ===
+    'https://www.catchplay.com/watch/abc?ep=3',
+  'D-07: getCanonicalVideoUrl 保留非追蹤業務參數 (?ep=3) 並剝離 utm_source / fbclid'
+);
+assert(
+  getCanonicalVideoUrl('https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share') ===
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  'D-07: getCanonicalVideoUrl 支援 YouTube Shorts 標準化為標準 /watch?v= 網址'
+);
+assert(
+  getCanonicalVideoUrl('https://www.disneyplus.com/zh-hant/series/shogun/12345abc?tctx=xyz') ===
+    'https://www.disneyplus.com/series/shogun/12345abc',
+  'D-07: getCanonicalVideoUrl 支援 Disney+ /series/ 標準化並剔除語系前綴與追蹤參數'
+);
+
+// D-08: P2P 多人計數、重複監聽防護與單一校準計時器
+const offscreenSrc = fs.readFileSync(path.join(__dirname, 'src/offscreen/index.ts'), 'utf-8');
+assert(offscreenSrc.includes('guestKnownMemberCount'), 'D-08: Offscreen 保留房主廣播之真實多人房成員數');
+assert(offscreenSrc.includes('dataListenerBoundIds'), 'D-08: Offscreen 防護重複綁定 conn.on(data) 事件');
+assert(bgSrc.includes('memberCountSyncTimer'), 'D-08: Background 追蹤並清理單一 memberCountSyncTimer 防止計時器累積');
+
+// U-02 ~ U-07: Popup UI 單一真理來源與非必要資訊清理
+assert(!popupSrc.includes('const isYouTube ='), 'U-02: Popup.tsx 移除 18 組脆弱字串局部變數，消除紅燈顯示已連線矛盾');
+assert(popupSrc.includes("if (connectionMode !== 'DEFAULT') return;"), 'U-04: Popup.tsx 僅於 DEFAULT 模式探測 /health');
+assert(!popupSrc.includes('authuser=0'), 'U-05: CHROME_STORE_URL 移除個人 authuser 與語系尾綴');
+assert(popupSrc.includes('{unlockToast &&'), 'U-03: Popup.tsx 實際渲染彩蛋切換視覺回饋 Toast');
+assert(!popupSrc.includes('t.roomUi.newRoom'), 'U-06: Popup.tsx 移除房內重複之「建立新房間」按鈕');
+assert(!popupSrc.includes('t.tabStatus.singleTabHint'), 'U-07: Popup.tsx 移除過時之「建議僅開啟單一分頁」橫幅');
+assert(!popupSrc.includes('t.roomUi.autoCalibrateHint'), 'U-07: Popup.tsx 移除「(每30秒自動校準)」內部技術文字');
+
+// ----------------------------------------------------
+// 測試套件 12: 18 大正式開放平台端到端同步檢核矩陣 (Active 18 Platforms Full E2E Audit)
+// ----------------------------------------------------
+console.log('\n--- 測試套件 12: 18 大正式開放平台端到端同步檢核矩陣測試 ---');
+
+const serverTypesModulePath = path.join(__dirname, 'dist_test/server_types.mjs');
+execSync(
+  `npx esbuild "${path.join(__dirname, '../server/src/types.ts')}" --bundle --format=esm --outfile="${serverTypesModulePath}"`,
+  { stdio: 'pipe' }
+);
+const {
+  isServerUrlAllowed,
+  getVideoIdentifier: getServerVideoIdentifier,
+  getCanonicalVideoUrl: getServerCanonicalVideoUrl,
+  isSameVideoOrWebsite: isServerSameVideo
+} = await import(`file://${serverTypesModulePath.replace(/\\/g, '/')}`);
+
+// 1. 18 大正式開放平台端到端全鏈路檢核矩陣 (涵蓋前後端一致、Manifest 授權、Popup 燈號與正規化)
+const ACTIVE_18_MATRIX = [
+  { id: 'youtube', name: 'YouTube', raw: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&ab_channel=Rick', expectedCanon: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+  { id: 'bilibili', name: 'Bilibili', raw: 'https://www.bilibili.com/list/watchlater?bvid=BV1xx411c7mD&p=2&spm_id_from=333', expectedCanon: 'https://www.bilibili.com/video/BV1xx411c7mD?p=2' },
+  { id: 'niconico', name: 'Niconico', raw: 'https://sp.nicovideo.jp/watch/sm9?ref=top', expectedCanon: 'https://www.nicovideo.jp/watch/sm9' },
+  { id: 'anime1', name: 'Anime1.me', raw: 'https://anime1.me/?cat=1542', expectedCanon: 'https://anime1.me/?cat=1542' },
+  { id: 'netflix', name: 'Netflix', raw: 'https://www.netflix.com/watch/80057281?trackId=13752289&tctx=0%2C0', expectedCanon: 'https://www.netflix.com/watch/80057281' },
+  { id: 'vimeo', name: 'Vimeo', raw: 'https://vimeo.com/showcase/9999999/video/76979871', expectedCanon: 'https://vimeo.com/76979871' },
+  { id: 'gamer', name: '巴哈姆特動畫瘋', raw: 'https://ani.gamer.com.tw/animeVideo.php?sn=38210&ad=1', expectedCanon: 'https://ani.gamer.com.tw/animeVideo.php?sn=38210' },
+  { id: 'twitch', name: 'Twitch', raw: 'https://www.twitch.tv/shroud/', expectedCanon: 'https://www.twitch.tv/shroud' },
+  { id: 'disney', name: 'Disney+', raw: 'https://www.disneyplus.com/zh-Hant/play/4b045e77-5060?tctx=abc', expectedCanon: 'https://www.disneyplus.com/play/4b045e77-5060' },
+  { id: 'prime', name: 'Prime Video', raw: 'https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F/ref=atv_dp_season_select_s1', expectedCanon: 'https://www.primevideo.com/detail/0STG2N4YOGQJNVUG5VOS0O8R4F' },
+  { id: 'myvideo', name: 'MyVideo', raw: 'https://www.myvideo.net.tw/details/3/24680?utm_source=line', expectedCanon: 'https://www.myvideo.net.tw/details/3/24680' },
+  { id: 'linetv', name: 'LINE TV', raw: 'https://www.linetv.tw/en/drama/12345/eps/3?utm_medium=share', expectedCanon: 'https://www.linetv.tw/drama/12345/eps/3' },
+  { id: 'kktv', name: 'KKTV', raw: 'https://www.kktv.me/play/01000187010001?from=app', expectedCanon: 'https://www.kktv.me/play/01000187010001' },
+  { id: 'crunchyroll', name: 'Crunchyroll', raw: 'https://www.crunchyroll.com/zh-tw/watch/GRDQ09WPY/the-day-it-began', expectedCanon: 'https://www.crunchyroll.com/watch/GRDQ09WPY' },
+  { id: 'friday', name: '遠傳 friDay 影音', raw: 'https://video.friday.tw/anime/detail/54321?episode=4&utm_source=share', expectedCanon: 'https://video.friday.tw/anime/detail/54321?episode=4' },
+  { id: 'max', name: 'Max (HBO)', raw: 'https://play.max.com/sport/watch/UUID-SPORT-99?utm_source=web', expectedCanon: 'https://play.max.com/sport/watch/UUID-SPORT-99' },
+  { id: 'iqiyi', name: '愛奇藝 iQIYI', raw: 'https://www.iq.com/zh-tw/play/frieren-ep1-19rrhl79k8?lang=zh_tw', expectedCanon: 'https://www.iq.com/play/frieren-ep1-19rrhl79k8' },
+  { id: 'appletv', name: 'Apple TV+', raw: 'https://tv.apple.com/tw/movie/coda/umc.cmc.3eh9r5iz322241vw307x41x8e?ctx_brand=tvs.sbd.4000', expectedCanon: 'https://tv.apple.com/tw/movie/coda/umc.cmc.3eh9r5iz322241vw307x41x8e' }
+];
+
+assert(ACTIVE_18_MATRIX.length === 18, '檢核矩陣完整涵蓋全部 18 個正式開放平台');
+for (const item of ACTIVE_18_MATRIX) {
+  const detected = getPlatformByUrl(item.raw);
+  assert(detected?.id === item.id && isPlatformActive(item.raw) === true, `[${item.name}] Client 平台識別與 Active 綠燈狀態正確 (${item.id})`);
+  assert(isServerUrlAllowed(item.raw) === true, `[${item.name}] Server 安全白名單放行正確`);
+  const clientCanon = getCanonicalVideoUrl(item.raw);
+  const serverCanon = getServerCanonicalVideoUrl(item.raw);
+  assert(
+    clientCanon === item.expectedCanon && serverCanon === item.expectedCanon,
+    `[${item.name}] 前後端 Canonical URL 標準化一致且精確 (${clientCanon})`,
+    `client=${clientCanon}, server=${serverCanon}, expected=${item.expectedCanon}`
+  );
+  const clientId = getVideoIdentifier(item.raw);
+  const serverId = getServerVideoIdentifier(item.raw);
+  assert(Boolean(clientId) && clientId === serverId, `[${item.name}] 前後端 getVideoIdentifier 完全一致 (${clientId})`);
+  assert(
+    isSameVideoOrWebsite(item.raw, item.expectedCanon) && isServerSameVideo(item.raw, item.expectedCanon),
+    `[${item.name}] 前後端 isSameVideoOrWebsite 防重整比對一致通過`
+  );
+  assert(popupSrc.includes(`${item.id}:`), `[${item.name}] Popup PLATFORM_TAB_STATUS_KEY_MAP 具備對應狀態鍵 (${item.id})`);
+}
+
+// 2. 跨平台特殊邊界案例迴歸驗證
+assert(
+  getVideoIdentifier('https://www.bilibili.com/video/av170001') === 'bili:av170001' &&
+    getCanonicalVideoUrl('https://www.bilibili.com/video/av170001?spm_id=1') === 'https://www.bilibili.com/video/av170001',
+  'Bilibili 傳統 av 號網址識別與標準化正確'
+);
+assert(
+  getCanonicalVideoUrl('https://vimeo.com/76979871/a1b2c3d4?share=copy') === 'https://vimeo.com/76979871/a1b2c3d4',
+  'Vimeo 未公開 (Unlisted) 影片保留隱私 Hash 路徑段避免 404'
+);
+assert(
+  isSameVideoOrWebsite('https://www.disneyplus.com/play/4b045e77', 'https://www.disneyplus.com/video/4b045e77'),
+  'Disney+ /play/<id> 與 /video/<id> 識別為同一部影片不重複刷新'
+);
+assert(
+  isSameVideoOrWebsite(
+    'https://tv.apple.com/tw/movie/coda/umc.cmc.3eh9r5iz322241vw307x41x8e',
+    'https://tv.apple.com/us/movie/coda/umc.cmc.3eh9r5iz322241vw307x41x8e'
+  ),
+  'Apple TV+ 跨語系同部電影 (umc.cmc.*) 識別為相同影片且保留 /movie/ 路徑不 404'
+);
+assert(
+  getVideoIdentifier('https://www.primevideo.com/watch?gti=amzn1.dv.gti.12345678-abcd') === 'prime:amzn1.dv.gti.12345678-abcd',
+  'Prime Video /watch?gti= 播放參數精準識別'
+);
+
+// 3. Shadow DOM、Crunchyroll 子框架、Netflix Session、IMA 廣告防護與觀眾初始同步檢核
+assert(contentSrc.includes('queryAllVideosDeep') && contentSrc.includes('.shadowRoot'), 'Content Script 支援穿透 Open ShadowRoot 鎖定 Apple TV+ / Disney+ / Max 播放器');
+assert(
+  manifestObj.host_permissions.includes('https://static.crunchyroll.com/*') &&
+    manifestObj.content_scripts.some((cs) => cs.all_frames === true && cs.matches.includes('https://static.crunchyroll.com/*')) &&
+    contentSrc.includes('isAllowedPlayerFrame') &&
+    contentSrc.includes('video#player0'),
+  'Crunchyroll Vilos 跨網域播放器子框架 (static.crunchyroll.com) 完整注入與綁定支援'
+);
+assert(
+  bridgeSrc.includes("startsWith('watch')") && bridgeSrc.includes('syncineNfHandled'),
+  'Netflix Bridge 優先鎖定活躍 watch* 工作階段並標記 syncineNfHandled 避免雙重觸發衝突'
+);
+assert(
+  contentSrc.includes('isAdVideoElement') && contentSrc.includes('vjs-ad-playing'),
+  '動畫瘋與 OTT Google IMA 前置廣告容器過濾與暫緩同步防護已實裝'
+);
+assert(
+  contentSrc.includes("host.includes('nicovideo.jp')") &&
+    contentSrc.includes("host.includes('anime1.me')") &&
+    contentSrc.includes('Niconico Next/Series Click') &&
+    contentSrc.includes('Anime1 Prev/Next Episode Click'),
+  'Niconico 與 Anime1.me 納入上下集/系列連播自動跳轉支援 (18 平台 100% 覆蓋)'
+);
+assert(
+  bgSrc.includes('BG_REQUEST_INIT_SYNC') &&
+    offscreenSrc.includes('REQUEST_INIT_SYNC') &&
+    contentSrc.includes('requestInitialSyncIfNeeded'),
+  '觀眾端入房/跳轉載入完成後主動拉取初始時間軸機制 (P2P + Relay 雙模式) 已實裝'
+);
 
 // ----------------------------------------------------
 // 總結報告

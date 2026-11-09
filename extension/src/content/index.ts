@@ -1,13 +1,22 @@
 import { SyncData, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformPermitted } from '../platforms';
+import { isPlatformActive, isPlatformDomainActive, isPlatformDomainPermitted, isPlatformPermitted } from '../platforms';
 import { getStandaloneText } from '../locales/standalone';
 
-console.log('[Syncine ContentScript] 腳本已載入 (Frame:', window.self === window.top ? 'Main Window' : 'Iframe', ')');
-
-// 頂層視窗防禦守衛 (防止注入廣告/沙盒 iframe)
+// 頂層視窗防禦守衛 (防止注入廣告/沙盒 iframe；僅特例放行 Crunchyroll 官方 Vilos 播放器專用子框架)
 const isTopFrame = window.self === window.top;
-// 局部開放守衛 (若處於授權清單但尚未正式開放支援，完全靜默休眠退出)
-let isSiteActive = isPlatformActive(window.location.href);
+const isAllowedPlayerFrame = window.location.hostname === 'static.crunchyroll.com';
+const isEligibleFrame = isTopFrame || isAllowedPlayerFrame;
+let parentTabUrl = isAllowedPlayerFrame ? document.referrer || '' : '';
+
+function getEffectivePageUrl(): string {
+  return isAllowedPlayerFrame && parentTabUrl ? parentTabUrl : window.location.href;
+}
+
+// 局部開放守衛：依據已開放網域判定 (支援從平台首頁透過 SPA 導航進入播放頁；未解鎖候選網站維持 100% 靜默休眠)
+let isSiteActive =
+  isAllowedPlayerFrame ||
+  isPlatformDomainActive(window.location.href) ||
+  isPlatformActive(window.location.href);
 
 // ----------------------------------------------------
 // 1. MV3 長連接 Port 保活與 bfcache 生命週期管理
@@ -47,17 +56,12 @@ window.addEventListener('pagehide', (event) => {
 });
 
 window.addEventListener('pageshow', (event) => {
-  // 當分頁從 bfcache 被喚醒時，重新建立 Port 連線並恢復房間狀態
-  if (event.persisted) {
-    setupKeepAlivePort();
+  // 當分頁從 bfcache 被喚醒時，僅在已啟用平台重新建立 Port 連線並恢復房間狀態
+  if (event.persisted && isEligibleFrame && isSiteActive) {
+    if (isTopFrame) setupKeepAlivePort();
     queryInitialRoomState();
   }
 });
-
-// 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才啟動保活 Port
-if (isTopFrame && isSiteActive) {
-  setupKeepAlivePort();
-}
 
 // ----------------------------------------------------
 // 2. 全域狀態變數
@@ -83,6 +87,8 @@ let isUserSeeking = false;
 let wasPlayingBeforeSeek = false;
 let lastSyncedTime = 0;
 let roomPlaybackState: 'PLAYING' | 'PAUSED' | 'IDLE' = 'IDLE';
+let lastInitSyncKey = '';
+let syncWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 function markProgrammatic(durationMs = 800) {
   programmaticUntilTimestamp = Date.now() + durationMs;
@@ -101,7 +107,31 @@ function isCurrentActiveVideoTab(): boolean {
   // 若房間未指定 currentUrl，暫不限制
   if (!roomState.currentUrl) return true;
 
-  return isSameVideoOrWebsite(window.location.href, roomState.currentUrl);
+  return isSameVideoOrWebsite(getEffectivePageUrl(), roomState.currentUrl);
+}
+
+/**
+ * 觀眾端主動初始拉取同步：當觀眾分頁載入完成且綁定 <video> 後，向房主請求一次最新時間軸與播放狀態
+ * 解決觀眾跳轉載入期間錯過首次同步廣播，或房主處於暫停狀態時無後續事件之問題
+ */
+function requestInitialSyncIfNeeded() {
+  if (!roomState.isInRoom || roomState.isHost || !targetVideo) return;
+  if (!isCurrentActiveVideoTab()) return;
+
+  const effectiveUrl = getEffectivePageUrl();
+  const key = `${roomState.currentUrl || ''}::${getVideoIdentifier(effectiveUrl) || effectiveUrl}`;
+  if (!key || key === lastInitSyncKey) return;
+  lastInitSyncKey = key;
+
+  const sendInitReq = () => {
+    if (!roomState.isInRoom || roomState.isHost) return;
+    chrome.runtime.sendMessage({ type: 'BG_REQUEST_INIT_SYNC' }).catch(() => {});
+  };
+
+  sendInitReq();
+  if (targetVideo.readyState < 1) {
+    targetVideo.addEventListener('loadedmetadata', () => sendInitReq(), { once: true });
+  }
 }
 
 // ----------------------------------------------------
@@ -171,7 +201,7 @@ function findAnime1Video(): HTMLVideoElement | null {
   // 2. 若已綁定之 targetVideo 仍在 DOM 中且已載入串流來源，維持鎖定
   if (
     targetVideo &&
-    document.contains(targetVideo) &&
+    targetVideo.isConnected &&
     (Boolean(targetVideo.currentSrc || targetVideo.getAttribute('src')) || targetVideo.readyState > 0)
   ) {
     return targetVideo;
@@ -188,18 +218,64 @@ function findAnime1Video(): HTMLVideoElement | null {
 }
 
 /**
- * 標準影片的通用方案 (Generic HTML5 Video Fallback)
- * 針對尚未正式支援或未配置專屬選擇器的影音網站，
- * 智能探測頁面中的標準 HTML5 <video> 元素（按可見面積、是否具備真實時長/來源過濾微縮背景與廣告視窗）
+ * 判斷是否為串流平台前置/插播廣告之 <video> 元素 (如 Google IMA / Niconico / YouTube Ad)
  */
-function findGenericVideoElement(): HTMLVideoElement | null {
-  const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
-  if (videos.length === 0) return null;
-  if (videos.length === 1) return videos[0];
+function isAdVideoElement(v: HTMLVideoElement): boolean {
+  try {
+    return Boolean(
+      v.closest(
+        '.ima-ad-container, [id*="ad-container" i], [class*="ad-container" i], [class*="VideoAd"], #nv_watch_VideoAdContainer, .ytp-ad-player-overlay'
+      )
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * 支援穿透開放式 Shadow DOM (Open ShadowRoot) 之深度 <video> 搜尋器
+ * 解決 Apple TV+ (<amp-video-player>)、Disney+ (<disney-web-player>/<btm-media-player>) 與 Max 等採用 Web Components 封裝播放器之問題
+ */
+function queryAllVideosDeep(
+  root: Document | ShadowRoot | Element = document,
+  depth = 0
+): HTMLVideoElement[] {
+  const results: HTMLVideoElement[] = [];
+  try {
+    const direct = root.querySelectorAll('video');
+    for (let i = 0; i < direct.length; i++) {
+      results.push(direct[i] as HTMLVideoElement);
+    }
+    if (depth >= 6) return results;
+
+    const allEls = root.querySelectorAll('*');
+    for (let i = 0; i < allEls.length; i++) {
+      const sr = (allEls[i] as HTMLElement).shadowRoot;
+      if (sr) {
+        const nested = queryAllVideosDeep(sr, depth + 1);
+        for (let j = 0; j < nested.length; j++) {
+          results.push(nested[j]);
+        }
+      }
+    }
+  } catch (_) {}
+  return results;
+}
+
+function pickBestNonAdVideo(candidates: HTMLVideoElement[]): HTMLVideoElement | null {
+  const clean = candidates.filter((v) => v && !isAdVideoElement(v));
+  if (clean.length === 0) return null;
+  if (clean.length === 1) return clean[0];
+
+  // 優先挑選可視且已載入/面積最大之主播放器 video
+  const playingVisible = clean.find(
+    (v) => !v.paused && v.offsetWidth > 0 && v.offsetHeight > 0
+  );
+  if (playingVisible) return playingVisible;
 
   let bestVideo: HTMLVideoElement | null = null;
   let maxArea = 0;
-  for (const v of videos) {
+  for (const v of clean) {
     try {
       const rect = v.getBoundingClientRect();
       const style = window.getComputedStyle(v);
@@ -211,16 +287,33 @@ function findGenericVideoElement(): HTMLVideoElement | null {
       }
     } catch (_) {}
   }
-  return bestVideo || videos[0];
+  return bestVideo || clean[0];
+}
+
+/**
+ * 標準影片的通用方案 (Generic HTML5 Video Fallback)
+ * 針對尚未正式支援或採用 Shadow DOM 動態封裝的影音網站，
+ * 智能探測頁面及開放式 ShadowRoot 中的標準 HTML5 <video> 元素（過濾廣告容器與微縮預覽視窗）
+ */
+function findGenericVideoElement(): HTMLVideoElement | null {
+  const videos = queryAllVideosDeep(document);
+  if (videos.length === 0) return null;
+  return pickBestNonAdVideo(videos);
 }
 
 function findVideoElement(): HTMLVideoElement | null {
   const host = window.location.hostname;
 
   if (host.includes('youtube.com')) {
-    return document.querySelector('video.html5-main-video') as HTMLVideoElement;
+    const ytVideos = Array.from(document.querySelectorAll('video.html5-main-video')) as HTMLVideoElement[];
+    const visibleYt = ytVideos.find((v) => v.offsetWidth > 0 && v.offsetHeight > 0);
+    return visibleYt || (document.querySelector('video.html5-main-video') as HTMLVideoElement) || findGenericVideoElement();
   } else if (host.includes('bilibili.com')) {
-    return document.querySelector('.bpx-player-video-wrap video') || document.querySelector('video') as HTMLVideoElement;
+    return (
+      (document.querySelector('.bpx-player-video-wrap video') as HTMLVideoElement) ||
+      (document.querySelector('.bilibili-player-video video') as HTMLVideoElement) ||
+      findGenericVideoElement()
+    );
   } else if (host.includes('nicovideo.jp')) {
     return findNiconicoVideo();
   } else if (host.includes('anime1.me')) {
@@ -228,35 +321,93 @@ function findVideoElement(): HTMLVideoElement | null {
   } else if (host.includes('netflix.com')) {
     return findNetflixVideo();
   } else if (host.includes('vimeo.com')) {
-    return document.querySelector('.vp-video-wrapper video, .player-container video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('.vp-video-wrapper video, .vp-video video, .player-container video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('gamer.com.tw')) {
-    return document.querySelector('#ani_video_html5_api, video.vjs-tech, #ani_video video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('#ani_video_html5_api, #ani_video video.vjs-tech, video.vjs-tech')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('twitch.tv')) {
-    return document.querySelector('div[data-a-target="video-player"] video, .video-player__container video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('div[data-a-target="video-player"] video, .video-player__container video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('disneyplus.com')) {
-    return document.querySelector('video.btm-media-client, #video-player video, .hive-media-client-video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(
+          document.querySelectorAll(
+            'video.btm-media-client, #video-player video, .hive-media-client-video, btm-media-player video, disney-web-player video'
+          )
+        ) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('primevideo.com') || host.includes('amazon.com')) {
-    return document.querySelector('.webPlayerElement video, .rendererContainer video, [data-testid="web-player"] video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(
+          document.querySelectorAll(
+            '#dv-web-player video, .atvwebplayersdk-video-surface video, .webPlayerSDKContainer video, .webPlayerElement video, .rendererContainer video, [data-testid="web-player"] video'
+          )
+        ) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('myvideo.net.tw')) {
-    return document.querySelector('#video_player_html5_api, #playerContainer video, .vjs-tech, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('#video_player_html5_api, #playerContainer video, video.vjs-tech')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('linetv.tw')) {
-    return document.querySelector('#line-player video, .player-container video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('#line-player video, .player-container video, video.vjs-tech')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('kktv.me')) {
-    return document.querySelector('.kktv-player video, #player video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('.kktv-player video, .bitmovinplayer-container video, #player video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('crunchyroll.com')) {
-    return document.querySelector('#player0 video, .video-player video, #vilos video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('video#player0, #player0 video, .video-player video, #vilos video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('friday.tw')) {
-    return document.querySelector('.player-container video, #player video, .vjs-tech, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('.player-container video, #player video, video.vjs-tech')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('max.com') || host.includes('hbomax.com')) {
-    return document.querySelector('video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('[data-testid="playerContainer"] video, [class*="VideoElement"] video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('iq.com') || host.includes('iqiyi.com')) {
-    return document.querySelector('#iqpvid video, .iqp-player video, iq-player video, video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('#iqpvid video, video[id*="iqp"], .iqp-player video, iq-player video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   } else if (host.includes('tv.apple.com')) {
-    return document.querySelector('video') as HTMLVideoElement;
-  } else if (host.includes('google.com')) {
-    return document.querySelector('video.video-stream') || document.querySelector('video') as HTMLVideoElement;
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('amp-video-player video, apple-tv-plus-player video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   }
-  return document.querySelector('video') as HTMLVideoElement;
+  return findGenericVideoElement();
 }
 
 /**
@@ -312,7 +463,7 @@ function ensureAnime1SourceReady(
   return false;
 }
 
-// YouTube 與 Niconico 廣告偵測
+// YouTube、Niconico 與 Google IMA (動畫瘋/OTT) 前置廣告偵測
 function isYouTubeAdPlaying(): boolean {
   const host = window.location.hostname;
   if (host.includes('nicovideo.jp')) {
@@ -322,6 +473,13 @@ function isYouTubeAdPlaying(): boolean {
     if (!adContainer || (adContainer as HTMLElement).offsetWidth === 0) return false;
     const adVideo = adContainer.querySelector('video') as HTMLVideoElement | null;
     return Boolean(adVideo && !adVideo.paused && (adVideo.currentSrc || adVideo.getAttribute('src')));
+  }
+  if (host.includes('gamer.com.tw')) {
+    const aniRoot = document.getElementById('ani_video');
+    if (aniRoot && aniRoot.classList.contains('vjs-ad-playing')) return true;
+    const imaAdVideo = document.querySelector('.ima-ad-container video') as HTMLVideoElement | null;
+    if (imaAdVideo && !imaAdVideo.paused && imaAdVideo.offsetWidth > 0) return true;
+    return false;
   }
   if (!host.includes('youtube.com')) return false;
 
@@ -374,6 +532,7 @@ function startHeartbeat() {
       data: {
         action: 'HEARTBEAT',
         currentTime: targetVideo.currentTime,
+        playbackRate: targetVideo.playbackRate,
         paused: targetVideo.paused || hostStallActive,
         timestamp: Date.now()
       }
@@ -432,22 +591,36 @@ function applySeek(video: HTMLVideoElement, targetTime: number) {
 
 function applyPlay(video: HTMLVideoElement) {
   if (window.location.hostname.includes('netflix.com')) {
+    document.documentElement.dataset.syncineNfHandled = '0';
     window.dispatchEvent(
       new CustomEvent('SYNCINE_NETFLIX_CMD', {
         detail: { action: 'PLAY' }
       })
     );
+    if (document.documentElement.dataset.syncineNfHandled === '1') {
+      // 若瀏覽器 Autoplay 政策阻擋了 Cadmium player.play()，於短暫延遲後降級為靜音自動播放
+      setTimeout(() => {
+        if (video.paused && roomState.isInRoom && roomPlaybackState === 'PLAYING') {
+          safePlayVideo(video);
+        }
+      }, 250);
+      return;
+    }
   }
   safePlayVideo(video);
 }
 
 function applyPause(video: HTMLVideoElement) {
   if (window.location.hostname.includes('netflix.com')) {
+    document.documentElement.dataset.syncineNfHandled = '0';
     window.dispatchEvent(
       new CustomEvent('SYNCINE_NETFLIX_CMD', {
         detail: { action: 'PAUSE' }
       })
     );
+    if (document.documentElement.dataset.syncineNfHandled === '1') {
+      return;
+    }
   }
   video.pause();
 }
@@ -499,6 +672,17 @@ function applySyncState(data: SyncData) {
 
   // 標記接下來的 1000ms 為腳本同步操作，防止事件回彈與循環觸發
   markProgrammatic(1000);
+
+  if (
+    typeof data.playbackRate === 'number' &&
+    data.playbackRate >= 0.25 &&
+    data.playbackRate <= 4 &&
+    Math.abs(targetVideo.playbackRate - data.playbackRate) > 0.01
+  ) {
+    try {
+      targetVideo.playbackRate = data.playbackRate;
+    } catch (_) {}
+  }
 
   if (action === 'PLAY') {
     roomPlaybackState = 'PLAYING';
@@ -563,6 +747,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     targetVideo = video;
     lastSyncedTime = video.currentTime || 0;
   }
+  requestInitialSyncIfNeeded();
   if ((video as any).__syncine_attached || (video as any).__coview_attached) return;
   (video as any).__syncine_attached = true;
 
@@ -606,6 +791,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       data: {
         action: 'PLAY',
         currentTime: video.currentTime,
+        playbackRate: video.playbackRate,
         paused: false,
         timestamp: Date.now()
       }
@@ -639,6 +825,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       data: {
         action: 'PAUSE',
         currentTime: video.currentTime,
+        playbackRate: video.playbackRate,
         paused: true,
         timestamp: Date.now()
       }
@@ -659,6 +846,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       data: {
         action: 'SEEK',
         currentTime: targetVideo.currentTime,
+        playbackRate: targetVideo.playbackRate,
         paused: isPaused,
         timestamp: Date.now()
       }
@@ -671,7 +859,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
     if (!roomState.isHost && !roomState.allowGuestControl) {
-      if (lastSyncedTime > 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
+      if (lastSyncedTime >= 0 && Math.abs(video.currentTime - lastSyncedTime) > 1.5) {
         console.warn(`[Syncine Intercept] 觀眾無權限拖曳進度條，強制回滾至同步時間: ${lastSyncedTime.toFixed(2)}s`);
         markProgrammatic(400);
         if (window.location.hostname.includes('netflix.com')) {
@@ -772,6 +960,24 @@ function attachVideoListeners(video: HTMLVideoElement) {
       clearTimeout(bufferingTimer);
       bufferingTimer = null;
     }
+  });
+
+  // 監聽倍速變更 (支援 0.5x ~ 2x 倍速同步)
+  video.addEventListener('ratechange', () => {
+    if (!roomState.isInRoom || !isCurrentActiveVideoTab()) return;
+    if (isProgrammatic() || isYouTubeAdPlaying()) return;
+    if (!roomState.isHost && !roomState.allowGuestControl) return;
+
+    chrome.runtime.sendMessage({
+      type: 'BG_SYNC_STATE',
+      data: {
+        action: video.paused ? 'PAUSE' : 'PLAY',
+        currentTime: video.currentTime,
+        playbackRate: video.playbackRate,
+        paused: video.paused,
+        timestamp: Date.now()
+      }
+    });
   });
 
   // 監聽影片播放結束 (支援自動連播下一集/換集)
@@ -899,8 +1105,9 @@ export function isPlaylistOrEpisodeSupported(): boolean {
       return false;
     }
 
-    // 12. Crunchyroll 動畫選集與下一集支援
+    // 12. Crunchyroll 動畫選集與下一集支援 (含 Vilos 子框架觸發換集)
     if (host.includes('crunchyroll.com')) {
+      if (path.includes('/watch/')) return true;
       if (document.querySelector('[data-t="next-episode-btn"], .playable-card, [data-t="episode-card"], .next-episode-btn')) {
         return true;
       }
@@ -918,6 +1125,7 @@ export function isPlaylistOrEpisodeSupported(): boolean {
 
     // 14. Max (HBO Max) 影集與下一集支援
     if (host.includes('max.com') || host.includes('hbomax.com')) {
+      if (path.includes('/video/watch/') || path.includes('/player/')) return true;
       if (document.querySelector('[data-testid*="next-episode"], [data-testid*="up-next"], [aria-label*="Next Episode"], [aria-label*="下一集"]')) {
         return true;
       }
@@ -932,9 +1140,28 @@ export function isPlaylistOrEpisodeSupported(): boolean {
       return false;
     }
 
-    // 16. Apple TV+ 影集選集與下一集支援
+    // 16. Apple TV+ 影集選集與下一集支援 (含 Shadow DOM 內連播切換)
     if (host.includes('tv.apple.com')) {
+      if (path.includes('/episode/') || path.includes('umc.cmc.')) return true;
       if (document.querySelector('[data-testid*="next-episode"], .upstream-next-item, [aria-label*="Next Episode"], [aria-label*="下一集"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 17. Niconico 系列連播與下一部支援
+    if (host.includes('nicovideo.jp')) {
+      if (search.includes('playlist=')) return true;
+      if (document.querySelector('[data-anchor-area="next_video"], [aria-label*="次の動画"], [aria-label*="Next"], [class*="Series"] a, [class*="Playlist"] a')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 18. Anime1.me 上下集與分類合集導覽支援
+    if (host.includes('anime1.me')) {
+      if (search.includes('cat=')) return true;
+      if (document.querySelector('.nav-previous a, .nav-next a, a[rel="prev"], a[rel="next"], .cat-links a')) {
         return true;
       }
       return false;
@@ -957,11 +1184,14 @@ export function markPlaylistActionTriggered(source: string) {
 /**
  * 監聽畫面上的上下集按鈕與清單項目點擊
  */
+let playlistClickListenerBound = false;
 function initPlaylistClickListeners() {
+  if (playlistClickListenerBound) return;
+  playlistClickListenerBound = true;
   document.addEventListener(
     'click',
     (e) => {
-      if (!roomState.isInRoom || !roomState.isHost) return;
+      if (!isSiteActive || !roomState.isInRoom || !roomState.isHost) return;
 
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -1125,6 +1355,26 @@ function initPlaylistClickListeners() {
         markPlaylistActionTriggered('Apple TV+ Next Episode Click');
         return;
       }
+
+      // Niconico: 下一部 / 系列選集點擊
+      if (
+        target.closest(
+          '[data-anchor-area="next_video"], [data-anchor-area="prev_video"], [aria-label*="次の動画"], [class*="Series"] a, [class*="Playlist"] a'
+        )
+      ) {
+        markPlaylistActionTriggered('Niconico Next/Series Click');
+        return;
+      }
+
+      // Anime1.me: 上一集 / 下一集 / 全集連結點擊
+      if (
+        target.closest(
+          '.nav-previous a, .nav-next a, a[rel="prev"], a[rel="next"], .cat-links a'
+        )
+      ) {
+        markPlaylistActionTriggered('Anime1 Prev/Next Episode Click');
+        return;
+      }
     },
     true
   );
@@ -1137,6 +1387,9 @@ export function checkAndBroadcastPlaylistNavigation(source: string) {
   if (!roomState.isInRoom || !roomState.isHost) return;
 
   const currentHref = window.location.href;
+  // 確保目標頁面必須為合法影音播放路徑（排除使用者退回首頁或 /browse 瀏覽頁，杜絕誤發非播放頁跳轉）
+  if (!isPlatformPermitted(currentHref)) return;
+
   const currentVideoId = getVideoIdentifier(currentHref);
   const roomVideoId = getVideoIdentifier(roomState.currentUrl);
 
@@ -1165,7 +1418,7 @@ export function checkAndBroadcastPlaylistNavigation(source: string) {
   chrome.runtime
     .sendMessage({
       type: 'BG_REDIRECT_ROOM',
-      targetUrl: cleanTarget
+      payload: { targetUrl: cleanTarget }
     })
     .then((res) => {
       if (res?.success) {
@@ -1189,19 +1442,17 @@ function handleUrlOrVideoChange(triggerSource: string) {
 
 // 監聽 YouTube SPA 導航與標準歷史記錄變更事件
 window.addEventListener('yt-navigate-finish', () => {
+  if (!isSiteActive) return;
   handleUrlOrVideoChange('YouTube yt-navigate-finish');
 });
 window.addEventListener('popstate', () => {
+  if (!isSiteActive) return;
   handleUrlOrVideoChange('popstate');
 });
 window.addEventListener('hashchange', () => {
+  if (!isSiteActive) return;
   handleUrlOrVideoChange('hashchange');
 });
-
-// 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才掛載換集監聽
-if (isTopFrame && isSiteActive) {
-  initPlaylistClickListeners();
-}
 
 // ----------------------------------------------------
 // 7. MutationObserver 與初始化
@@ -1217,26 +1468,25 @@ function initObserver() {
 
   if (!domObserver && document.body) {
     domObserver = new MutationObserver(() => {
+      if (!isSiteActive) return;
       // 跨平台 SPA 網址變更偵測與上下集清單跳轉處理
       if (window.location.href !== lastObservedUrl) {
         lastObservedUrl = window.location.href;
         handleUrlOrVideoChange('MutationObserver URL Change');
 
-        const h = window.location.hostname;
-        if (h.includes('nicovideo.jp') || h.includes('netflix.com') || h.includes('bilibili.com') || h.includes('youtube.com') || h.includes('vimeo.com') || h.includes('gamer.com.tw') || h.includes('twitch.tv') || h.includes('disneyplus.com') || h.includes('primevideo.com') || h.includes('amazon.com') || h.includes('myvideo.net.tw') || h.includes('linetv.tw') || h.includes('kktv.me') || h.includes('crunchyroll.com') || h.includes('friday.tw') || h.includes('max.com') || h.includes('hbomax.com') || h.includes('iq.com') || h.includes('iqiyi.com') || h.includes('tv.apple.com')) {
-          console.log('[Syncine] 偵測到 SPA 網頁導航切換');
-          setTimeout(() => {
-            const nextVideo = findVideoElement();
-            if (nextVideo) attachVideoListeners(nextVideo);
-            if (roomState.isInRoom && roomState.isHost) {
-              if (isCurrentActiveVideoTab()) {
-                startHeartbeat();
-              } else {
-                stopHeartbeat();
-              }
+        console.log('[Syncine] 偵測到 SPA 網頁導航切換');
+        setTimeout(() => {
+          if (!isSiteActive) return;
+          const nextVideo = findVideoElement();
+          if (nextVideo) attachVideoListeners(nextVideo);
+          if (roomState.isInRoom && roomState.isHost) {
+            if (isCurrentActiveVideoTab()) {
+              startHeartbeat();
+            } else {
+              stopHeartbeat();
             }
-          }, 800);
-        }
+          }
+        }, 800);
       }
 
       const video = findVideoElement();
@@ -1284,12 +1534,11 @@ if (
 
 // YouTube SPA 切換影片事件
 window.addEventListener('yt-navigate-finish', () => {
+  if (!isTopFrame || !isSiteActive) return;
   console.log('[Syncine] 偵測到 YouTube SPA 網頁導航切換');
   setTimeout(() => {
-    // 局部開放防禦：僅在頂層視窗且為正式開放支援之平台才啟動 Observer
-if (isTopFrame && isSiteActive) {
-  initObserver();
-}
+    if (!isTopFrame || !isSiteActive) return;
+    initObserver();
     if (roomState.isInRoom && roomState.isHost) {
       if (isCurrentActiveVideoTab()) {
         startHeartbeat();
@@ -1301,14 +1550,17 @@ if (isTopFrame && isSiteActive) {
 });
 
 // ----------------------------------------------------
-// 7. 房間狀態向後台同步與查詢
+// 8. 房間狀態向後台同步與查詢
 // ----------------------------------------------------
 function queryInitialRoomState() {
-  if (window.self !== window.top) return;
+  if ((window.self !== window.top && !isAllowedPlayerFrame) || !isSiteActive) return;
   chrome.runtime.sendMessage({ type: 'GET_ROOM_STATE' }, (res) => {
     if (chrome.runtime.lastError) {
       console.warn('[Syncine ContentScript] queryInitialRoomState 異常:', chrome.runtime.lastError.message);
       return;
+    }
+    if (isAllowedPlayerFrame && res?.tabUrl) {
+      parentTabUrl = res.tabUrl;
     }
     console.log('[Syncine ContentScript] queryInitialRoomState 回傳房間狀態:', res?.roomState);
     if (res?.roomState) {
@@ -1322,20 +1574,27 @@ function queryInitialRoomState() {
         startHeartbeat();
       } else {
         stopHeartbeat();
+        requestInitialSyncIfNeeded();
       }
     } else {
       roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
+      lastInitSyncKey = '';
       stopHeartbeat();
     }
   });
 }
 
-// 首次啟動向 Background 獲取最新狀態
-queryInitialRoomState();
-
 // 監聽來自 Background 的動態訊息
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  const { type, payload } = request;
+  const { type, payload } = request || {};
+  if (isAllowedPlayerFrame && typeof request?.parentTabUrl === 'string' && request.parentTabUrl) {
+    parentTabUrl = request.parentTabUrl;
+  }
+
+  // 未啟用支援之候選網站僅允許資安攔截警告，其餘指令完全靜默忽略
+  if (!isSiteActive && type !== 'SHOW_SECURITY_ALERT') {
+    return false;
+  }
 
   if (type === 'CS_SYNC_RECEIVED') {
     console.log('[Syncine ContentScript] 收到遠端同步指令 (CS_SYNC_RECEIVED):', payload?.data);
@@ -1353,11 +1612,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         startHeartbeat();
       } else {
         stopHeartbeat();
+        requestInitialSyncIfNeeded();
       }
     } else {
       roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
       roomPlaybackState = 'IDLE';
       lastSyncedTime = 0;
+      lastInitSyncKey = '';
       hostStallActive = false;
       if (bufferingTimer) {
         clearTimeout(bufferingTimer);
@@ -1368,14 +1629,19 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     }
   } else if (type === 'CS_REQUEST_CURRENT_STATE') {
     // 規格 4.1 Host 被要求回報狀態給新進人員 (僅當前影片分頁允許回報)
+    if (!targetVideo || !targetVideo.isConnected) {
+      const v = findVideoElement();
+      if (v) attachVideoListeners(v);
+    }
     if (targetVideo && roomState.isHost && isCurrentActiveVideoTab()) {
-      console.log('[Syncine Host] 回報最新影片狀態給新進成員 Socket:', payload.targetGuestSocketId);
+      console.log('[Syncine Host] 回報最新影片狀態給新進成員 Socket:', payload?.targetGuestSocketId);
       chrome.runtime.sendMessage({
         type: 'BG_SYNC_STATE',
-        targetGuestSocketId: payload.targetGuestSocketId,
+        targetGuestSocketId: payload?.targetGuestSocketId,
         data: {
           action: targetVideo.paused ? 'PAUSE' : 'PLAY',
           currentTime: targetVideo.currentTime,
+          playbackRate: targetVideo.playbackRate,
           paused: targetVideo.paused,
           timestamp: Date.now()
         }
@@ -1385,6 +1651,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     roomState.allowGuestControl = payload.allowGuestControl;
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
+    if (!isTopFrame) return false;
     const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
     const ver = payload?.version ? ` [Syncine v${payload.version}]` : '';
     alert(`${alertMsg}${ver}\n(${payload?.url || ''})`);
@@ -1395,25 +1662,79 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   return true;
 });
 
+function startSyncWatchdog() {
+  if (syncWatchdogTimer) clearInterval(syncWatchdogTimer);
+  syncWatchdogTimer = setInterval(() => {
+    if (!isSiteActive) return;
+
+    // 1. 偵測純 history.pushState 驅動且未觸發外層 DOM 變動之 SPA 路由切換
+    if (isTopFrame && window.location.href !== lastObservedUrl) {
+      lastObservedUrl = window.location.href;
+      handleUrlOrVideoChange('Watchdog URL Change');
+    }
+
+    // 2. 偵測 Shadow DOM 內部延遲掛載 (Apple TV+ / Disney+ / Max) 或換集後舊 <video> 被銷毀替換
+    if (!targetVideo || !targetVideo.isConnected) {
+      const v = findVideoElement();
+      if (v) {
+        attachVideoListeners(v);
+        if (roomState.isInRoom && roomState.isHost && isCurrentActiveVideoTab() && !heartbeatTimer) {
+          startHeartbeat();
+        }
+      }
+    }
+  }, 1000);
+}
 
 let isInitialized = false;
 function activateContentScript() {
-  if (isInitialized || !isTopFrame) return;
+  if (isInitialized || !isEligibleFrame) return;
   isInitialized = true;
-  setupKeepAlivePort();
+  console.log('[Syncine ContentScript] 啟動同步服務');
+  if (isTopFrame) {
+    setupKeepAlivePort();
+    initPlaylistClickListeners();
+  }
   initObserver();
-  initPlaylistClickListeners();
+  startSyncWatchdog();
   queryInitialRoomState();
 }
 
-// 啟動守衛：正式開放平台立即同步啟動；候選網站監聽彩蛋解鎖狀態
-if (isTopFrame) {
+function deactivateContentScript() {
+  isSiteActive = false;
+  isInitialized = false;
+  lastInitSyncKey = '';
+  stopHeartbeat();
+  if (syncWatchdogTimer) {
+    clearInterval(syncWatchdogTimer);
+    syncWatchdogTimer = null;
+  }
+  if (bufferingTimer) {
+    clearTimeout(bufferingTimer);
+    bufferingTimer = null;
+  }
+  if (domObserver) {
+    domObserver.disconnect();
+    domObserver = null;
+  }
+  if (keepAlivePort) {
+    try { keepAlivePort.disconnect(); } catch (_) {}
+    keepAlivePort = null;
+  }
+  roomState = { isInRoom: false, isHost: false, allowGuestControl: false };
+}
+
+// 啟動守衛：正式開放平台(及專屬播放器子框架)立即同步啟動；候選網站預設 100% 靜默，僅在彩蛋解鎖時啟動
+if (isEligibleFrame) {
   if (isSiteActive) {
     activateContentScript();
-  } else {
+  } else if (isTopFrame) {
     if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
       chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
-        if (res?.syncine_unlock_candidates && isPlatformPermitted(window.location.href)) {
+        if (
+          res?.syncine_unlock_candidates &&
+          (isPlatformDomainPermitted(window.location.href) || isPlatformPermitted(window.location.href))
+        ) {
           isSiteActive = true;
           activateContentScript();
         }
@@ -1421,12 +1742,15 @@ if (isTopFrame) {
     }
   }
 
-  if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+  if (isTopFrame && typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.syncine_unlock_candidates) {
-        if (changes.syncine_unlock_candidates.newValue && isPlatformPermitted(window.location.href)) {
+        const unlocked = Boolean(changes.syncine_unlock_candidates.newValue);
+        if (unlocked && (isPlatformDomainPermitted(window.location.href) || isPlatformPermitted(window.location.href))) {
           isSiteActive = true;
           activateContentScript();
+        } else if (!unlocked && !isPlatformDomainActive(window.location.href, false)) {
+          deactivateContentScript();
         }
       }
     });

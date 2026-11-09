@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformPermitted } from '../platforms';
+import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
@@ -10,32 +10,35 @@ import { parseConnectionCode, formatShareCode } from '../utils/connectionParser'
 const HOST_WHITELIST = [
   /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
   /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
-  /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
-  /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
-  /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/(www\.|m\.)?youtube\.com\/(watch\?.*v=|shorts\/|live\/|embed\/)[a-zA-Z0-9_-]+/,
+  /^https:\/\/youtu\.be\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?bilibili\.com\/(video\/[a-zA-Z0-9]+|list\/.+\?.*bvid=BV[a-zA-Z0-9]+)/,
+  /^https:\/\/(www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
+  /^https:\/\/(www\.|sp\.)?nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
   /^https:\/\/anime1\.me\/.+/,
   /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
   /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
   /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
-  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+)?)/,
+  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+|\/)?)/,
   /^https:\/\/clips\.twitch\.tv\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?disneyplus\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?primevideo\.com\/([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?disneyplus\.com\/([a-zA-Z]{2}(-[a-zA-Z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_\/-]+/,
+  /^https:\/\/(www\.)?primevideo\.com\/(([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9._-]+|watch\?.*gti=[a-zA-Z0-9._-]+)/,
+  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9._-]+/,
   /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/,
-  /^https:\/\/(www\.)?linetv\.tw\/drama\/[0-9]+(\/eps\/[0-9]+)?/,
-  /^https:\/\/(www\.)?kktv\.me\/play\/[a-zA-Z0-9]+/,
-  /^https:\/\/(www\.)?crunchyroll\.com\/([a-z]{2}(-[a-z]{2,4})?\/)?watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/video\.friday\.tw\/(drama|movie|anime|show|detail)\/(detail\/)?[0-9]+/,
-  /^https:\/\/(www\.|play\.)?max\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/play\.hbomax\.com\/(video\/watch|player)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?iq\.com\/play\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?linetv\.tw\/([a-zA-Z-]+\/)?drama\/[0-9]+(\/eps\/[0-9]+)?/,
+  /^https:\/\/(www\.)?kktv\.me\/([a-zA-Z-]+\/)?play\/[a-zA-Z0-9]+/,
+  /^https:\/\/(www\.)?crunchyroll\.com\/([a-zA-Z]{2}(-[a-zA-Z]{2,4})?\/)?watch\/[a-zA-Z0-9]+/,
+  /^https:\/\/video\.friday\.tw\/((drama|movie|anime|show|detail|sn)\/(detail\/)?[0-9]+|player)/,
+  /^https:\/\/(www\.|play\.)?max\.com\/.*(video\/watch|player|watch)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.|play\.)?hbomax\.com\/.*(video\/watch|player|watch)\/[a-zA-Z0-9_-]+/,
+  /^https:\/\/(www\.)?iq\.com\/([a-zA-Z_-]+\/)?play\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?iqiyi\.com\/[va]_[a-zA-Z0-9]+\.html/,
   /^https:\/\/tv\.apple\.com\/.+/
 ];
 
 let socket: Socket | null = null;
 let currentRoomState: RoomStateInfo | null = null;
+let memberCountSyncTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * 密碼學安全隨機 User ID 產生器 (杜絕偽造與預測)
@@ -208,23 +211,28 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
 
     // YouTube
     if (
-      (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') &&
-      parsed.pathname === '/watch' &&
-      parsed.searchParams.has('v')
+      ((host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') &&
+        ((parsed.pathname === '/watch' && parsed.searchParams.has('v')) ||
+          parsed.pathname.startsWith('/shorts/') ||
+          parsed.pathname.startsWith('/live/') ||
+          parsed.pathname.startsWith('/embed/'))) ||
+      (host === 'youtu.be' && parsed.pathname.length > 1)
     ) {
       return true;
     }
     // Bilibili
     if (
-      (host === 'www.bilibili.com' || host === 'bilibili.com') &&
-      (parsed.pathname.startsWith('/video/') || parsed.pathname.startsWith('/bangumi/play/'))
+      (host === 'www.bilibili.com' || host === 'bilibili.com' || host.endsWith('.bilibili.com')) &&
+      (parsed.pathname.includes('/video/') ||
+        parsed.pathname.includes('/bangumi/play/') ||
+        (parsed.pathname.toLowerCase().startsWith('/list/') && parsed.searchParams.has('bvid')))
     ) {
       return true;
     }
     // Niconico
     if (
-      (host === 'www.nicovideo.jp' || host === 'nicovideo.jp') &&
-      parsed.pathname.startsWith('/watch/')
+      (host === 'www.nicovideo.jp' || host === 'nicovideo.jp' || host.endsWith('.nicovideo.jp')) &&
+      parsed.pathname.includes('/watch/')
     ) {
       return true;
     }
@@ -235,12 +243,12 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
     // Netflix
     if (
       (host === 'www.netflix.com' || host === 'netflix.com') &&
-      parsed.pathname.startsWith('/watch/')
+      parsed.pathname.includes('/watch/')
     ) {
       return true;
     }
     // Vimeo
-    if (host === 'vimeo.com' || host === 'www.vimeo.com' || host === 'player.vimeo.com') {
+    if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) {
       return true;
     }
     // 巴哈姆特動畫瘋
@@ -256,19 +264,22 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
       return true;
     }
     // Prime Video / Amazon
-    if ((host === 'www.primevideo.com' || host === 'primevideo.com' || host === 'www.amazon.com') && (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/gp/video/'))) {
+    if (
+      (host === 'www.primevideo.com' || host === 'primevideo.com' || host === 'www.amazon.com' || host === 'amazon.com') &&
+      (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/gp/video/') || (parsed.pathname.includes('/watch') && parsed.searchParams.has('gti')))
+    ) {
       return true;
     }
     // MyVideo
-    if ((host === 'www.myvideo.net.tw' || host === 'myvideo.net.tw') && (parsed.pathname.startsWith('/details/') || parsed.pathname.startsWith('/player/'))) {
+    if ((host === 'www.myvideo.net.tw' || host === 'myvideo.net.tw') && (parsed.pathname.includes('/details/') || parsed.pathname.includes('/player/'))) {
       return true;
     }
     // LINE TV
-    if ((host === 'www.linetv.tw' || host === 'linetv.tw') && parsed.pathname.startsWith('/drama/')) {
+    if ((host === 'www.linetv.tw' || host === 'linetv.tw') && parsed.pathname.includes('/drama/')) {
       return true;
     }
     // KKTV
-    if ((host === 'www.kktv.me' || host === 'kktv.me') && parsed.pathname.startsWith('/play/')) {
+    if ((host === 'www.kktv.me' || host === 'kktv.me') && parsed.pathname.includes('/play/')) {
       return true;
     }
     // Crunchyroll
@@ -276,22 +287,28 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
       return true;
     }
     // friDay
-    if (host === 'video.friday.tw' && (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/drama/') || parsed.pathname.includes('/movie/'))) {
+    if (host === 'video.friday.tw' && (/\/(detail|drama|movie|anime|show|sn)\//.test(parsed.pathname) || parsed.pathname.includes('/player'))) {
       return true;
     }
     // Max / HBO Max
-    if ((host === 'www.max.com' || host === 'max.com' || host === 'play.max.com' || host === 'play.hbomax.com') && (parsed.pathname.includes('/video/watch') || parsed.pathname.includes('/player/'))) {
+    if (
+      (host === 'www.max.com' || host === 'max.com' || host === 'play.max.com' || host === 'www.hbomax.com' || host === 'hbomax.com' || host === 'play.hbomax.com') &&
+      (parsed.pathname.includes('/video/watch') || parsed.pathname.includes('/player/') || parsed.pathname.includes('/watch/'))
+    ) {
       return true;
     }
     // iQIYI
-    if ((host === 'www.iq.com' || host === 'iq.com') && parsed.pathname.startsWith('/play/')) {
+    if ((host === 'www.iq.com' || host === 'iq.com') && parsed.pathname.includes('/play/')) {
       return true;
     }
-    if ((host === 'www.iqiyi.com' || host === 'iqiyi.com') && (parsed.pathname.startsWith('/v_') || parsed.pathname.startsWith('/a_'))) {
+    if ((host === 'www.iqiyi.com' || host === 'iqiyi.com') && (parsed.pathname.includes('/v_') || parsed.pathname.includes('/a_'))) {
       return true;
     }
     // Apple TV+
-    if (host === 'tv.apple.com' && (parsed.pathname.includes('/episode/') || parsed.pathname.includes('/movie/') || parsed.pathname.includes('/show/') || parsed.pathname.includes('umc.cmc.'))) {
+    if (
+      host === 'tv.apple.com' &&
+      (parsed.pathname.includes('/episode/') || parsed.pathname.includes('/movie/') || parsed.pathname.includes('/show/') || parsed.pathname.includes('/sport/') || parsed.pathname.includes('umc.cmc.'))
+    ) {
       return true;
     }
   } catch (e) {
@@ -527,8 +544,12 @@ function initSocketConnection(serverUrl: string): Promise<Socket> {
       }
     });
 
-    // 啟動 30 秒中繼模式定期校準
-    setInterval(() => {
+    // 啟動 30 秒中繼模式定期校準 (清除舊計時器，防止重連累積洩漏)
+    if (memberCountSyncTimer) {
+      clearInterval(memberCountSyncTimer);
+      memberCountSyncTimer = null;
+    }
+    memberCountSyncTimer = setInterval(() => {
       if (socket && socket.connected && currentRoomState && currentRoomState.mode !== 'P2P') {
         socket.emit('GET_ROOM_MEMBER_COUNT', { roomId: currentRoomState.roomId });
       }
@@ -696,10 +717,11 @@ function broadcastToVideoTabs(msg: any) {
       if (
         tab.id &&
         targetUrl &&
-        (isPlatformActive(targetUrl, candidatesUnlocked) ||
+        (isPlatformDomainActive(targetUrl, candidatesUnlocked) ||
+          isPlatformActive(targetUrl, candidatesUnlocked) ||
           (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))))
       ) {
-        chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+        chrome.tabs.sendMessage(tab.id, { ...msg, parentTabUrl: targetUrl }).catch(() => {});
         sentCount++;
       }
     });
@@ -792,12 +814,24 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             }
           });
 
+          let createSettled = false;
+          const cleanupCreateListeners = () => {
+            s.off('CREATE_ROOM_SUCCESS', onCreateSuccess);
+            s.off('ERROR', onCreateError);
+          };
+
           const createTimer = setTimeout(() => {
+            if (createSettled) return;
+            createSettled = true;
+            cleanupCreateListeners();
             sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
           }, 6000);
 
-          s.once('CREATE_ROOM_SUCCESS', async (res: any) => {
+          const onCreateSuccess = async (res: any) => {
+            if (createSettled) return;
+            createSettled = true;
             clearTimeout(createTimer);
+            cleanupCreateListeners();
             const compositeCode = formatShareCode(mode, res.roomId, serverUrl);
 
             currentRoomState = {
@@ -821,7 +855,19 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             });
 
             sendResponse({ success: true, compositeCode, roomId: res.roomId, roomState: currentRoomState });
-          });
+          };
+
+          const onCreateError = (err: any) => {
+            if (createSettled) return;
+            createSettled = true;
+            clearTimeout(createTimer);
+            cleanupCreateListeners();
+            const code = err?.code || 'ERR_UNKNOWN';
+            sendResponse({ success: false, error: code, code });
+          };
+
+          s.once('CREATE_ROOM_SUCCESS', onCreateSuccess);
+          s.once('ERROR', onCreateError);
         })
         .catch((err) => {
           console.error('[Background] BG_CREATE_ROOM 失敗:', err);
@@ -899,12 +945,24 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             }
           });
 
+          let joinSettled = false;
+          const cleanupJoinListeners = () => {
+            s.off('JOIN_ROOM_SUCCESS', onJoinSuccess);
+            s.off('ERROR', onJoinError);
+          };
+
           const joinTimer = setTimeout(() => {
+            if (joinSettled) return;
+            joinSettled = true;
+            cleanupJoinListeners();
             sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
           }, 6000);
 
-          s.once('JOIN_ROOM_SUCCESS', async (res: any) => {
+          const onJoinSuccess = async (res: any) => {
+            if (joinSettled) return;
+            joinSettled = true;
             clearTimeout(joinTimer);
+            cleanupJoinListeners();
             const actualMode: ConnectionMode = res.data?.mode || mode;
 
             currentRoomState = {
@@ -921,6 +979,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               resumeToken: res.data?.resumeToken
             };
             persistRoomSession(currentRoomState);
+
+            if (!currentRoomState.isHost && currentRoomState.currentUrl) {
+              verifyAndRedirect(currentRoomState.currentUrl);
+            }
 
             if (actualMode === 'P2P') {
               await ensureOffscreenDocument();
@@ -942,17 +1004,23 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
             });
 
             sendResponse({ success: true, roomId: res.roomId, roomState: currentRoomState });
-          });
+          };
 
-          s.once('ERROR', (err: any) => {
+          const onJoinError = (err: any) => {
+            if (joinSettled) return;
+            joinSettled = true;
             clearTimeout(joinTimer);
-            const code = err.code || 'ERR_ROOM_NOT_FOUND';
+            cleanupJoinListeners();
+            const code = err?.code || 'ERR_ROOM_NOT_FOUND';
             sendResponse({
               success: false,
               error: code,
               code
             });
-          });
+          };
+
+          s.once('JOIN_ROOM_SUCCESS', onJoinSuccess);
+          s.once('ERROR', onJoinError);
         })
         .catch((err) => {
           sendResponse({ success: false, error: err.message, code: 'ERR_SERVER_UNREACHABLE' });
@@ -1021,9 +1089,20 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
 
     case 'BG_REDIRECT_ROOM': {
+      const rawTargetUrl = payload?.targetUrl ?? (request as any).targetUrl;
+      if (!rawTargetUrl || typeof rawTargetUrl !== 'string') {
+        sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
+        return true;
+      }
       if (currentRoomState && currentRoomState.isHost) {
-        const cleanTarget = getCanonicalVideoUrl(payload.targetUrl);
+        const cleanTarget = getCanonicalVideoUrl(rawTargetUrl);
+        if (!isUrlAllowed(cleanTarget)) {
+          verifyAndRedirect(cleanTarget);
+          sendResponse({ success: false, error: 'ERR_UNAUTHORIZED_URL', code: 'ERR_UNAUTHORIZED_URL' });
+          return true;
+        }
         currentRoomState.currentUrl = cleanTarget;
+        persistRoomSession(currentRoomState);
         verifyAndRedirect(cleanTarget);
 
         broadcastToVideoTabs({
@@ -1094,6 +1173,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
 
     case 'BG_LEAVE_ROOM': {
       chrome.action.setBadgeText({ text: '' });
+      if (memberCountSyncTimer) {
+        clearInterval(memberCountSyncTimer);
+        memberCountSyncTimer = null;
+      }
       chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLOSE_P2P' } as ExtensionMessage).catch(() => {});
       if (socket) {
         socket.emit('LEAVE_ROOM');
@@ -1141,6 +1224,15 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               payload: currentRoomState
             }).catch(() => {});
           }
+          // 房主核准觀眾後，延遲主動推播一次當前影片時間與播放狀態，加速已就緒觀眾對齊
+          setTimeout(() => {
+            if (currentRoomState?.isHost) {
+              broadcastToVideoTabs({
+                type: 'CS_REQUEST_CURRENT_STATE',
+                payload: {}
+              });
+            }
+          }, 600);
           sendResponse({ success: true });
         }
       );
@@ -1176,6 +1268,24 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
       return true;
     }
 
+    case 'BG_REQUEST_INIT_SYNC': {
+      if (currentRoomState && !currentRoomState.isHost) {
+        if (currentRoomState.mode === 'P2P') {
+          chrome.runtime.sendMessage({
+            type: 'OFFSCREEN_SEND_DATA',
+            payload: { type: 'REQUEST_INIT_SYNC' }
+          } as ExtensionMessage).catch(() => {});
+        } else if (socket && socket.connected) {
+          socket.emit('REQUEST_INIT_SYNC', {
+            event: 'REQUEST_INIT_SYNC',
+            roomId: currentRoomState.roomId
+          });
+        }
+      }
+      sendResponse({ success: true });
+      break;
+    }
+
     case 'CS_JOIN_REQUESTS_UPDATED': {
       if (currentRoomState) {
         const requests = payload.pendingRequests || [];
@@ -1196,15 +1306,16 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
 
     case 'GET_ROOM_STATE': {
+      const tabUrl = sender.tab?.url;
       if (currentRoomState) {
-        sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+        sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode, tabUrl });
       } else {
         chrome.storage?.local?.get([SESSION_STORAGE_KEY, 'syncine_user_id'], (result) => {
           if (result?.[SESSION_STORAGE_KEY]) {
             currentRoomState = result[SESSION_STORAGE_KEY];
             console.log('[Background] GET_ROOM_STATE 從本機 storage 成功還原房間狀態:', currentRoomState?.roomId);
           }
-          sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode });
+          sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode, tabUrl });
         });
         return true;
       }
@@ -1273,6 +1384,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
         currentRoomState.connectedPeerCount = payload?.memberCount || 2;
         if (payload?.hostCurrentUrl) {
           currentRoomState.currentUrl = getCanonicalVideoUrl(payload.hostCurrentUrl);
+        }
+        persistRoomSession(currentRoomState);
+        if (!currentRoomState.isHost && currentRoomState.currentUrl) {
+          verifyAndRedirect(currentRoomState.currentUrl);
         }
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
@@ -1391,6 +1506,13 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           type: 'CS_PERMISSION_UPDATED',
           payload: { allowGuestControl: syncData.allowGuestControl }
         });
+      } else if (syncData.type === 'REQUEST_INIT_SYNC') {
+        if (currentRoomState?.isHost) {
+          broadcastToVideoTabs({
+            type: 'CS_REQUEST_CURRENT_STATE',
+            payload: {}
+          });
+        }
       }
       break;
     }

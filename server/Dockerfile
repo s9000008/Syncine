@@ -39,7 +39,7 @@ ENV NODE_ENV=production \
 
 # 複製依賴檔案並僅安裝生產所需套件
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # 從編譯階段複製產出的編譯後 JS 檔案
 COPY --from=builder /app/dist ./dist

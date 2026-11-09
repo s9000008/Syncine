@@ -4,7 +4,7 @@
     "description": "应用程序名称"
   },
   "appDesc": {
-    "message": "实时视频同映扩展，支持 YouTube、哔哩哔哩，好友远程一键同步播放。",
+    "message": "实时远程视频同映扩展 (Watch Party)，支持 YouTube、Netflix、哔哩哔哩、Disney+、动画疯、Prime Video 等多平台，好友一键同步观影。",
     "description": "应用程序说明"
   },
   "actionTitle": {

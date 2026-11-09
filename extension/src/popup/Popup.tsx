@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Tv,
   Users,
@@ -21,22 +21,62 @@ import {
   Sparkles
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
-import { isPlatformActive, isPlatformPermitted, getPlatformByUrl } from '../platforms';
+import { isPlatformActive, getPlatformByUrl } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
-
 const CHROME_STORE_URL =
-  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip?authuser=0&hl=zh-TW';
+  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip';
+
+type PlatformStatusKey =
+  | 'youtubeConnected'
+  | 'bilibiliConnected'
+  | 'niconicoConnected'
+  | 'anime1Connected'
+  | 'netflixConnected'
+  | 'vimeoConnected'
+  | 'gamerConnected'
+  | 'twitchConnected'
+  | 'disneyConnected'
+  | 'primeConnected'
+  | 'myVideoConnected'
+  | 'lineTvConnected'
+  | 'kktvConnected'
+  | 'crunchyrollConnected'
+  | 'fridayConnected'
+  | 'maxConnected'
+  | 'iqiyiConnected'
+  | 'appleTvConnected';
+
+const PLATFORM_TAB_STATUS_KEY_MAP: Record<string, PlatformStatusKey> = {
+  youtube: 'youtubeConnected',
+  bilibili: 'bilibiliConnected',
+  niconico: 'niconicoConnected',
+  anime1: 'anime1Connected',
+  netflix: 'netflixConnected',
+  vimeo: 'vimeoConnected',
+  gamer: 'gamerConnected',
+  twitch: 'twitchConnected',
+  disney: 'disneyConnected',
+  prime: 'primeConnected',
+  myvideo: 'myVideoConnected',
+  linetv: 'lineTvConnected',
+  kktv: 'kktvConnected',
+  crunchyroll: 'crunchyrollConnected',
+  friday: 'fridayConnected',
+  max: 'maxConnected',
+  iqiyi: 'iqiyiConnected',
+  appletv: 'appleTvConnected',
+};
 
 export default function Popup() {
   const { t, translateReturnCode, language } = useTranslation();
 
-  const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'join'>('join');
   const [roomState, setRoomState] = useState<RoomStateInfo | null>(null);
-  const [userId, setUserId] = useState<string>('');
+  const [, setUserId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -55,8 +95,11 @@ export default function Popup() {
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
   const [serverHealth, setServerHealth] = useState<'CHECKING' | 'ONLINE' | 'OFFLINE'>('CHECKING');
   const [candidatesUnlocked, setCandidatesUnlocked] = useState<boolean>(false);
-  const [versionClicks, setVersionClicks] = useState<number>(0);
+  const [, setVersionClicks] = useState<number>(0);
   const [unlockToast, setUnlockToast] = useState<string | null>(null);
+
+  const versionClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unlockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
@@ -77,7 +120,19 @@ export default function Popup() {
     }
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (versionClickTimerRef.current) clearTimeout(versionClickTimerRef.current);
+      if (unlockToastTimerRef.current) clearTimeout(unlockToastTimerRef.current);
+    };
+  }, []);
+
   const handleVersionTripleClick = () => {
+    if (versionClickTimerRef.current) {
+      clearTimeout(versionClickTimerRef.current);
+      versionClickTimerRef.current = null;
+    }
+
     setVersionClicks((prev) => {
       const next = prev + 1;
       if (next >= 3) {
@@ -86,15 +141,22 @@ export default function Popup() {
         if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
           chrome.storage.local.set({ syncine_unlock_candidates: newUnlocked });
         }
-        setUnlockToast(newUnlocked ? '🔓 全開目前預計支援名單 (通用模式已啟用)' : '🔒 已關閉預計支援名單');
-        setTimeout(() => setUnlockToast(null), 2500);
+        setUnlockToast(newUnlocked ? t.tabStatus.unlockToastOn : t.tabStatus.unlockToastOff);
+        if (unlockToastTimerRef.current) clearTimeout(unlockToastTimerRef.current);
+        unlockToastTimerRef.current = setTimeout(() => {
+          setUnlockToast(null);
+          unlockToastTimerRef.current = null;
+        }, 2500);
         return 0;
       }
-      setTimeout(() => setVersionClicks(0), 1500);
+
+      versionClickTimerRef.current = setTimeout(() => {
+        setVersionClicks(0);
+        versionClickTimerRef.current = null;
+      }, 1500);
       return next;
     });
   };
-
 
   const getVersion = (): string => {
     if (typeof chrome !== 'undefined' && chrome?.runtime?.getManifest) {
@@ -104,17 +166,34 @@ export default function Popup() {
     return t.app.defaultVersion;
   };
 
+  // 僅在使用者選擇「預設中繼伺服器 (DEFAULT)」時才探測官方伺服器健康狀態，杜絕非必要背景連線
   useEffect(() => {
-    // 探測官方中繼伺服器 /health 連線健康狀態
-    fetch(`${DEFAULT_SERVER_URL}/health`, { signal: AbortSignal.timeout(4000) })
+    if (connectionMode !== 'DEFAULT') return;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    setServerHealth('CHECKING');
+
+    fetch(`${DEFAULT_SERVER_URL}/health`, { signal: controller.signal })
       .then((res) => {
-        if (res.ok) setServerHealth('ONLINE');
-        else setServerHealth('OFFLINE');
+        setServerHealth(res.ok ? 'ONLINE' : 'OFFLINE');
       })
       .catch(() => {
-        setServerHealth('OFFLINE');
+        if (!controller.signal.aborted) {
+          setServerHealth('OFFLINE');
+        }
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
       });
 
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [connectionMode]);
+
+  useEffect(() => {
     // 獲取當前分頁網址
     chrome.tabs?.query?.({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.url) {
@@ -157,30 +236,22 @@ export default function Popup() {
     return () => {
       chrome.runtime?.onMessage?.removeListener(handleMessage);
     };
-  }, []);
+  }, [translateReturnCode]);
 
-  const isYouTube = activeTabUrl.includes('youtube.com/watch');
-  const isBilibili = activeTabUrl.includes('bilibili.com/video') || activeTabUrl.includes('bilibili.com/bangumi');
-  const isNiconico = activeTabUrl.includes('nicovideo.jp/watch/');
-  const isAnime1 = /^https?:\/\/([a-z0-9-]+\.)?anime1\.me\/.+/.test(activeTabUrl);
-  const isNetflix = activeTabUrl.includes('netflix.com/watch/');
-  const isVimeo = /^https?:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/|groups\/|showcase\/)/.test(activeTabUrl);
-  const isGamer = activeTabUrl.includes('ani.gamer.com.tw/animeVideo.php');
-  const isTwitch = activeTabUrl.includes('twitch.tv/videos/') || activeTabUrl.includes('clips.twitch.tv/') || /^https?:\/\/(www\.)?twitch\.tv\/[a-zA-Z0-9_]{3,25}$/.test(activeTabUrl);
-  const isDisney = activeTabUrl.includes('disneyplus.com/video/') || activeTabUrl.includes('disneyplus.com/play/') || activeTabUrl.includes('disneyplus.com/series/');
-  const isPrime = activeTabUrl.includes('primevideo.com/detail/') || activeTabUrl.includes('amazon.com/gp/video/detail/');
-  const isMyVideo = activeTabUrl.includes('myvideo.net.tw/details/') || activeTabUrl.includes('myvideo.net.tw/player/');
-  const isLineTV = activeTabUrl.includes('linetv.tw/drama/');
-  const isKKTV = activeTabUrl.includes('kktv.me/play/');
-  const isCrunchyroll = activeTabUrl.includes('crunchyroll.com/watch/') || (activeTabUrl.includes('crunchyroll.com/') && activeTabUrl.includes('/watch/'));
-  const isFriday = activeTabUrl.includes('video.friday.tw/');
-  const isMax = activeTabUrl.includes('max.com/video/watch') || activeTabUrl.includes('max.com/player/') || activeTabUrl.includes('hbomax.com/');
-  const isIQIYI = activeTabUrl.includes('iq.com/play/') || activeTabUrl.includes('iqiyi.com/v_') || activeTabUrl.includes('iqiyi.com/a_');
-  const isAppleTV = activeTabUrl.includes('tv.apple.com/');
-  // 依據中央平台註冊表判定是否為「已正式開放啟用支援 (Active)」之影音分頁
-  // 未開放支援的網站（即使在 Manifest 權限名單內）均顯示為不支援 (紅燈)，不作特殊提示
+  // 依據中央平台註冊表單一真理來源判定是否為「已正式開放啟用支援 (Active)」之影音分頁
+  // 未開放支援的網站（即使在 Manifest 權限名單內）均嚴格顯示紅燈不支援，不作特殊提示
   const currentPlatform = getPlatformByUrl(activeTabUrl);
   const isTargetSite = isPlatformActive(activeTabUrl, candidatesUnlocked);
+  const activeStatusKey =
+    isTargetSite && currentPlatform ? PLATFORM_TAB_STATUS_KEY_MAP[currentPlatform.id] : undefined;
+  const tabStatusLabel =
+    isTargetSite && currentPlatform
+      ? activeStatusKey
+        ? t.tabStatus[activeStatusKey]
+        : t.tabStatus.genericModeConnected(currentPlatform.name)
+      : t.tabStatus.notSupported;
+  const tabStatusTooltip =
+    isTargetSite && currentPlatform ? tabStatusLabel : t.tabStatus.supportedTooltip;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -191,7 +262,6 @@ export default function Popup() {
         if (callback) callback({ success: false, error: 'ERR_SEND_MESSAGE_FAILED' });
       }
     } else {
-      console.log('[Popup Dev/Preview] 模擬 sendMessage 回應:', message);
       if (callback) callback({ success: true, roomState: null });
     }
   };
@@ -341,7 +411,7 @@ export default function Popup() {
       setRoomState(null);
       setCompositeCode('');
       setShareCodeInput('');
-      setActiveTab('create');
+      setActiveTab('join');
     });
   };
 
@@ -384,18 +454,20 @@ export default function Popup() {
           callback(res.data);
         } else {
           // 本機脫敏診斷備援 (Fallback)
+          const fallbackCode = lastErrorCode || 'ERR_UNKNOWN';
+          const fallbackDetail = errorMessage || translateReturnCode(fallbackCode);
           const fallbackReport = [
-            '### 🛠️ Syncine 連線診斷報告 (Diagnostic Report)',
-            `- **擴充套件版本**: Syncine ${getVersion()} (Chrome MV3)`,
-            `- **連線模式**: ${connectionMode}`,
-            `- **錯誤代碼**: ${lastErrorCode || 'ERR_UNKNOWN'}`,
-            `- **時間戳**: ${new Date().toISOString()}`,
+            t.roomUi.diagnosticFallbackTitle,
+            `- **${t.roomUi.diagnosticVersionLabel}**: Syncine ${getVersion()} (Chrome MV3)`,
+            `- **${t.roomUi.diagnosticModeLabel}**: ${connectionMode}`,
+            `- **${t.roomUi.diagnosticErrorCodeLabel}**: ${fallbackCode}`,
+            `- **${t.roomUi.diagnosticTimestampLabel}**: ${new Date().toISOString()}`,
             '',
-            `> 💡 錯誤詳情: ${errorMessage || '連線逾時或中斷'}`
+            `> 💡 ${t.roomUi.diagnosticDetailPrefix}: ${fallbackDetail}`
           ].join('\n');
           const repoBase = 'https://github.com/s9000008/Syncine/issues/new';
           const query = new URLSearchParams({
-            title: `[Connection Issue] ${lastErrorCode || 'ERR_UNKNOWN'}`,
+            title: `[Connection Issue] ${fallbackCode}`,
             labels: 'bug,p2p',
             body: fallbackReport
           });
@@ -434,7 +506,7 @@ export default function Popup() {
   const currentMemberCount = roomState?.connectedPeerCount || 1;
 
   return (
-    <div className="w-[380px] bg-slate-900 text-slate-100 p-4 font-sans border border-slate-800 rounded-xl shadow-2xl flex flex-col justify-between min-h-[480px]">
+    <div className="w-[380px] bg-slate-900 text-slate-100 p-4 font-sans border border-slate-800 rounded-xl shadow-2xl flex flex-col justify-between min-h-[460px]">
       {/* 頂部 Header */}
       <div>
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 gap-2">
@@ -454,7 +526,7 @@ export default function Popup() {
                       ? 'text-amber-300 border-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
                       : 'text-slate-300 border-slate-700 hover:border-slate-600'
                   }`}
-                  title={candidatesUnlocked ? '🔓 全開預計支援名單 (點擊3下關閉)' : getVersion()}
+                  title={candidatesUnlocked ? t.tabStatus.unlockBadgeTooltip : getVersion()}
                 >
                   {getVersion()}
                 </span>
@@ -505,6 +577,14 @@ export default function Popup() {
           </div>
         </div>
 
+        {/* 隱藏候選名單彩蛋切換短暫提示 Toast */}
+        {unlockToast && (
+          <div className="mb-2.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 border bg-amber-950/50 text-amber-200 border-amber-500/40 shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span className="truncate">{unlockToast}</span>
+          </div>
+        )}
+
         {/* 斷線與自動重連回魂中醒目橫幅 */}
         {roomState && roomState.connectionStatus && roomState.connectionStatus !== 'CONNECTED' && (
           <div
@@ -529,58 +609,14 @@ export default function Popup() {
 
         {/* 當前分頁狀態提示條（燈號標記：綠燈支援 / 紅燈不支援） */}
         <div
-          className={`mb-2 p-2 rounded-lg text-[11px] flex items-center justify-between border transition ${
+          className={`mb-3 p-2 rounded-lg text-[11px] flex items-center justify-between border transition cursor-help ${
             isTargetSite
-              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50 cursor-help'
-              : 'bg-rose-950/25 text-rose-300 border-rose-900/40 hover:border-rose-700/50 cursor-pointer'
+              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
+              : 'bg-rose-950/25 text-rose-300 border-rose-900/40'
           }`}
-          title={
-            isYouTube
-              ? t.tabStatus.youtubeConnected
-              : isBilibili
-              ? t.tabStatus.bilibiliConnected
-              : isNiconico
-              ? t.tabStatus.niconicoConnected
-              : isAnime1
-              ? t.tabStatus.anime1Connected
-              : isNetflix
-              ? t.tabStatus.netflixConnected
-              : isVimeo
-              ? t.tabStatus.vimeoConnected
-              : isGamer
-              ? t.tabStatus.gamerConnected
-              : isTwitch
-              ? t.tabStatus.twitchConnected
-              : isDisney
-              ? t.tabStatus.disneyConnected
-              : isPrime
-              ? t.tabStatus.primeConnected
-              : isMyVideo
-              ? t.tabStatus.myVideoConnected
-              : isLineTV
-              ? t.tabStatus.lineTvConnected
-              : isKKTV
-              ? t.tabStatus.kktvConnected
-              : isCrunchyroll
-              ? t.tabStatus.crunchyrollConnected
-              : isFriday
-              ? t.tabStatus.fridayConnected
-              : isMax
-              ? t.tabStatus.maxConnected
-              : isIQIYI
-              ? t.tabStatus.iqiyiConnected
-              : isAppleTV
-              ? t.tabStatus.appleTvConnected
-              : t.tabStatus.supportedTooltip
-          }
-          onClick={() => {
-            if (!isTargetSite) {
-              chrome.tabs?.create?.({ url: CHROME_STORE_URL });
-            }
-          }}
+          title={tabStatusTooltip}
         >
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            {/* 燈號指示：綠燈支援 / 紅燈不支援 */}
             <span
               className={`w-2 h-2 rounded-full flex-shrink-0 ${
                 isTargetSite
@@ -589,49 +625,8 @@ export default function Popup() {
               }`}
             />
             <Video className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">
-              {isYouTube
-                ? t.tabStatus.youtubeConnected
-                : isBilibili
-                ? t.tabStatus.bilibiliConnected
-                : isNiconico
-                ? t.tabStatus.niconicoConnected
-                : isAnime1
-                ? t.tabStatus.anime1Connected
-                : isNetflix
-                ? t.tabStatus.netflixConnected
-                : isVimeo
-                ? t.tabStatus.vimeoConnected
-                : isGamer
-                ? t.tabStatus.gamerConnected
-                : isTwitch
-                ? t.tabStatus.twitchConnected
-                : isDisney
-                ? t.tabStatus.disneyConnected
-                : isPrime
-                ? t.tabStatus.primeConnected
-                : isMyVideo
-                ? t.tabStatus.myVideoConnected
-                : isLineTV
-                ? t.tabStatus.lineTvConnected
-                : isKKTV
-                ? t.tabStatus.kktvConnected
-                : isCrunchyroll
-                ? t.tabStatus.crunchyrollConnected
-                : isFriday
-                ? t.tabStatus.fridayConnected
-                : isMax
-                ? t.tabStatus.maxConnected
-                : isIQIYI
-                ? t.tabStatus.iqiyiConnected
-                : isAppleTV
-                ? t.tabStatus.appleTvConnected
-                : isTargetSite && currentPlatform
-                ? `${currentPlatform.name} (通用模式)`
-                : t.tabStatus.notSupported}
-            </span>
+            <span className="truncate">{tabStatusLabel}</span>
           </div>
-          {/* 燈號狀態徽章：綠燈支援 / 紅燈不支援 */}
           <span
             className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ml-2 ${
               isTargetSite
@@ -641,15 +636,6 @@ export default function Popup() {
           >
             {isTargetSite ? t.tabStatus.supportBadge : t.tabStatus.unsupportedBadge}
           </span>
-        </div>
-
-        {/* 建議僅開啟單一分頁防護提示 */}
-        <div
-          className="mb-3 px-2.5 py-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-center gap-1.5 cursor-help"
-          title={t.tabStatus.singleTabHint}
-        >
-          <span className="text-amber-400 font-bold flex-shrink-0">{t.tabStatus.hintPrefix}</span>
-          <span className="truncate">{t.tabStatus.singleTabHint}</span>
         </div>
 
         {/* 錯誤提示與 GitHub Issue 回報 */}
@@ -734,22 +720,6 @@ export default function Popup() {
             <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl border border-slate-800 mb-3.5">
               <button
                 onClick={() => {
-                  setActiveTab('create');
-                  setErrorMessage(null);
-                  setLastErrorCode(null);
-                }}
-                className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  activeTab === 'create'
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {t.roomUi.createTab}
-              </button>
-
-              <button
-                onClick={() => {
                   setActiveTab('join');
                   setErrorMessage(null);
                   setLastErrorCode(null);
@@ -763,129 +733,25 @@ export default function Popup() {
                 <Users className="w-3.5 h-3.5" />
                 {t.roomUi.joinTab}
               </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('create');
+                  setErrorMessage(null);
+                  setLastErrorCode(null);
+                }}
+                className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  activeTab === 'create'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {t.roomUi.createTab}
+              </button>
             </div>
 
-            {/* TAB 1: 建立房間面板 */}
-            {activeTab === 'create' && (
-              <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Server className="w-3.5 h-3.5 text-emerald-400" />
-                      {t.connectionModes.modeLabel}
-                    </span>
-                  </label>
-
-                  <div className="relative">
-                    <select
-                      value={connectionMode}
-                      onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 transition appearance-none cursor-pointer pr-8"
-                    >
-                      <option value="P2P">{t.connectionModes.p2p.selectOptionCreate}</option>
-                      <option value="DEFAULT">{t.connectionModes.default.selectOption}</option>
-                      <option value="CUSTOM_IP">{t.connectionModes.customIp.selectOption}</option>
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
-                  </div>
-                </div>
-
-                {/* 模式說明卡片 */}
-                {connectionMode === 'P2P' && (
-                  <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/50 rounded-lg space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <Zap className="w-3.5 h-3.5" /> {t.connectionModes.p2p.cardTitle}
-                      </span>
-                      <span className="text-[10px] text-emerald-300 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
-                        {t.connectionModes.p2p.cardBadge}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 leading-relaxed">
-                      {t.connectionModes.p2p.description}
-                    </p>
-                    <div className="text-[10px] text-amber-300/90 bg-amber-950/40 p-1.5 rounded border border-amber-800/40 mt-1 flex items-start gap-1">
-                      <span className="flex-shrink-0">💡</span>
-                      <span>{t.connectionModes.p2p.fallbackHint}</span>
-                    </div>
-                  </div>
-                )}
-
-                {connectionMode === 'DEFAULT' && (
-                  <div className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400">{t.connectionModes.default.serverStatusLabel}</span>
-                      <span
-                        className={`text-[10px] font-semibold flex items-center gap-1 ${
-                          serverHealth === 'ONLINE'
-                            ? 'text-emerald-400'
-                            : serverHealth === 'OFFLINE'
-                            ? 'text-rose-400'
-                            : 'text-amber-400'
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            serverHealth === 'ONLINE'
-                              ? 'bg-emerald-400 animate-pulse'
-                              : serverHealth === 'OFFLINE'
-                              ? 'bg-rose-500'
-                              : 'bg-amber-400 animate-ping'
-                          }`}
-                        ></span>
-                        {serverHealth === 'ONLINE'
-                          ? t.connectionModes.default.serverOnline
-                          : serverHealth === 'OFFLINE'
-                          ? t.connectionModes.default.serverOffline
-                          : t.connectionModes.default.serverProbing}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400">
-                      {t.connectionModes.default.description}
-                    </p>
-                  </div>
-                )}
-
-                {connectionMode === 'CUSTOM_IP' && (
-                  <div className="p-2.5 bg-slate-950/70 border border-blue-900/40 rounded-lg space-y-1.5">
-                    <label className="text-[11px] text-slate-300 block font-medium">
-                      {t.connectionModes.customIp.inputLabel}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={t.connectionModes.customIp.inputPlaceholder}
-                      value={customServerUrl}
-                      onChange={(e) => setCustomServerUrl(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
-                    />
-                  </div>
-                )}
-
-                {/* 建立按鈕 */}
-                <button
-                  id="btn-create-room"
-                  onClick={handleCreateRoom}
-                  disabled={loading}
-                  className="w-full mt-2 py-2.5 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 border border-emerald-400/30 cursor-pointer disabled:opacity-50"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>{t.roomUi.creatingRoom}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-4 h-4" />
-                      <span className="text-sm">
-                        {connectionMode === 'P2P' ? t.connectionModes.p2p.btnCreate : t.connectionModes.default.btnCreate}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-
-            {/* TAB 2: 加入房間面板 */}
+            {/* TAB 1: 加入房間面板 (預設) */}
             {activeTab === 'join' && (
               <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
                 {/* 當前連線方式狀態指示與即時切換區 */}
@@ -1034,10 +900,130 @@ export default function Popup() {
                 </div>
               </div>
             )}
+
+            {/* TAB 2: 建立房間面板 */}
+            {activeTab === 'create' && (
+              <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Server className="w-3.5 h-3.5 text-emerald-400" />
+                      {t.connectionModes.modeLabel}
+                    </span>
+                  </label>
+
+                  <div className="relative">
+                    <select
+                      value={connectionMode}
+                      onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 transition appearance-none cursor-pointer pr-8"
+                    >
+                      <option value="P2P">{t.connectionModes.p2p.selectOptionCreate}</option>
+                      <option value="DEFAULT">{t.connectionModes.default.selectOption}</option>
+                      <option value="CUSTOM_IP">{t.connectionModes.customIp.selectOption}</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+                  </div>
+                </div>
+
+                {/* 模式說明卡片 */}
+                {connectionMode === 'P2P' && (
+                  <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/50 rounded-lg space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <Zap className="w-3.5 h-3.5" /> {t.connectionModes.p2p.cardTitle}
+                      </span>
+                      <span className="text-[10px] text-emerald-300 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
+                        {t.connectionModes.p2p.cardBadge}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-relaxed">
+                      {t.connectionModes.p2p.description}
+                    </p>
+                    <div className="text-[10px] text-amber-300/90 bg-amber-950/40 p-1.5 rounded border border-amber-800/40 mt-1 flex items-start gap-1">
+                      <span className="flex-shrink-0">💡</span>
+                      <span>{t.connectionModes.p2p.fallbackHint}</span>
+                    </div>
+                  </div>
+                )}
+
+                {connectionMode === 'DEFAULT' && (
+                  <div className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">{t.connectionModes.default.serverStatusLabel}</span>
+                      <span
+                        className={`text-[10px] font-semibold flex items-center gap-1 ${
+                          serverHealth === 'ONLINE'
+                            ? 'text-emerald-400'
+                            : serverHealth === 'OFFLINE'
+                            ? 'text-rose-400'
+                            : 'text-amber-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            serverHealth === 'ONLINE'
+                              ? 'bg-emerald-400 animate-pulse'
+                              : serverHealth === 'OFFLINE'
+                              ? 'bg-rose-500'
+                              : 'bg-amber-400 animate-ping'
+                          }`}
+                        ></span>
+                        {serverHealth === 'ONLINE'
+                          ? t.connectionModes.default.serverOnline
+                          : serverHealth === 'OFFLINE'
+                          ? t.connectionModes.default.serverOffline
+                          : t.connectionModes.default.serverProbing}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      {t.connectionModes.default.description}
+                    </p>
+                  </div>
+                )}
+
+                {connectionMode === 'CUSTOM_IP' && (
+                  <div className="p-2.5 bg-slate-950/70 border border-blue-900/40 rounded-lg space-y-1.5">
+                    <label className="text-[11px] text-slate-300 block font-medium">
+                      {t.connectionModes.customIp.inputLabel}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={t.connectionModes.customIp.inputPlaceholder}
+                      value={customServerUrl}
+                      onChange={(e) => setCustomServerUrl(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+                )}
+
+                {/* 建立按鈕 */}
+                <button
+                  id="btn-create-room"
+                  onClick={handleCreateRoom}
+                  disabled={loading}
+                  className="w-full mt-2 py-2.5 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 border border-emerald-400/30 cursor-pointer disabled:opacity-50"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{t.roomUi.creatingRoom}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      <span className="text-sm">
+                        {connectionMode === 'P2P' ? t.connectionModes.p2p.btnCreate : t.connectionModes.default.btnCreate}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           /* ---------------------------------------------------- */
-          /* 情境 C: 統一觀影操作模組 (全模式通用，每30秒動態校準) */
+          /* 情境 C: 統一觀影操作模組 (全模式通用)                */
           /* ---------------------------------------------------- */
           <div className="space-y-3">
             {/* 1. 統一頂部房間資訊卡片 */}
@@ -1073,12 +1059,12 @@ export default function Popup() {
                 </button>
               </div>
 
-              {/* 核心要求：全模式統一的人數顯示與 30 秒自動校準標示 */}
+              {/* 全模式統一的人數顯示 */}
               <div className="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
                 <span className="flex items-center gap-1 font-medium text-slate-300">
                   <Users className="w-3.5 h-3.5 text-emerald-400" />
-                  {t.roomUi.membersPrefix} <strong className="text-emerald-400 text-xs">{t.roomUi.membersCount(currentMemberCount)}</strong>
-                  <span className="text-[9px] text-slate-500 ml-1">{t.roomUi.autoCalibrateHint}</span>
+                  {t.roomUi.membersPrefix}{' '}
+                  <strong className="text-emerald-400 text-xs">{t.roomUi.membersCount(currentMemberCount)}</strong>
                 </span>
                 <span className="text-emerald-400 font-semibold flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -1115,8 +1101,6 @@ export default function Popup() {
                         <span className="text-xs font-medium text-slate-200 block truncate">
                           {req.guestShortId
                             ? t.roomUi.defaultGuestName(req.guestShortId)
-                            : req.guestName && !req.guestName.startsWith('訪客')
-                            ? req.guestName
                             : t.roomUi.defaultGuestName(req.requestId.slice(-4))}
                         </span>
                         <span className="text-[9px] text-slate-500">
@@ -1180,19 +1164,11 @@ export default function Popup() {
               </div>
             )}
 
-            {/* 4. 統一房內操作按鈕 */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            {/* 4. 統一房內離開按鈕 */}
+            <div className="pt-1">
               <button
                 onClick={handleLeaveRoom}
-                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 text-emerald-400" />
-                {t.roomUi.newRoom}
-              </button>
-
-              <button
-                onClick={handleLeaveRoom}
-                className="py-2 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium cursor-pointer"
+                className="w-full py-2.5 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 {t.roomUi.leaveRoom}

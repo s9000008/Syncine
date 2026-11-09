@@ -175,5 +175,29 @@ import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
     console.log('🎉 P1-6 RateLimiter 頻率限制防護全部測試通過！');
     console.log('====================================================');
   });
+
+  // (6) Code Review D-02, D-05, D-07 伺服器迴歸驗證
+  import('./dist/types.js').then(({ isServerUrlAllowed, getCanonicalVideoUrl }) => {
+    console.log('\n6. 測試 D-02 & D-07 伺服器候選平台放行、HTTPS 強制與 URL 清洗...');
+    assert.strictEqual(isServerUrlAllowed('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), true);
+    assert.strictEqual(isServerUrlAllowed('https://www.catchplay.com/watch/abc123'), true, 'D-02: 伺服器放行預授權候選平台');
+    assert.strictEqual(isServerUrlAllowed('http://www.catchplay.com/watch/abc123'), false, 'D-02: 嚴格阻斷非 HTTPS 協定');
+    assert.strictEqual(isServerUrlAllowed('https://evil-phishing.example.com/watch/123'), false, 'D-02: 阻斷非授權外部釣魚網站');
+    assert.strictEqual(
+      getCanonicalVideoUrl('https://www.litv.tv/vod/drama/content.do?id=12345&utm_medium=cpc&gclid=abc'),
+      'https://www.litv.tv/vod/drama/content.do?id=12345',
+      'D-07: 保留候選平台查詢參數並剔除廣告追蹤碼'
+    );
+
+    // D-05: 同一 Socket 未 LEAVE_ROOM 直接建新房時，自動清理舊房間幽靈成員
+    const ghostTestManager = new RoomManager();
+    const oldRoom = ghostTestManager.createRoom('sock-switch-1', 'user-switch', 'https://www.youtube.com/watch?v=aaaaaaaaaaa');
+    const oldRoomId = oldRoom.roomId;
+    const newRoom = ghostTestManager.createRoom('sock-switch-1', 'user-switch', 'https://www.youtube.com/watch?v=bbbbbbbbbbb');
+    assert.notStrictEqual(oldRoomId, newRoom.roomId);
+    assert.strictEqual(ghostTestManager.getRoom(oldRoomId), undefined, 'D-05: 單人舊房間在房主切換建新房後立即銷毀無洩漏');
+    assert.strictEqual(newRoom.members.has('sock-switch-1'), true);
+    console.log('  ✅ [PASS] D-02 / D-05 / D-07 伺服器白名單、防幽靈房間與參數保護全部驗證通過！');
+  });
 });
 
