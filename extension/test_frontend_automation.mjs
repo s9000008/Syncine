@@ -67,6 +67,13 @@ assert(isPlatformActive('https://www.google.com') === false, 'Google 非活躍�
 assert(isPlatformPermitted('https://www.google.com') === false, 'Google 不在授權名單中');
 assert(getActivePlatforms().length === 18, '目前正式局部開放支援之平台總數為 18');
 
+// 高風險與第三方影視網站 (activeTab 通用模式支援驗證)
+assert(isPlatformActive('https://gimy.ai/watch/123', false) === false, '預設鎖定狀態下高風險網站 Gimy 處於不支援狀態 (Active: false)');
+assert(isPlatformActive('https://gimy.ai/watch/123', true) === true, '彩蛋解鎖狀態下高風險網站 Gimy 獲 activeTab 通用模式放行支援 (Active: true)');
+assert(isPlatformActive('https://8maple.tv/show/456', false) === false, '預設鎖定狀態下高風險網站 楓林網 處於不支援狀態 (Active: false)');
+assert(isPlatformActive('https://8maple.tv/show/456', true) === true, '彩蛋解鎖狀態下高風險網站 楓林網 獲 activeTab 通用模式放行支援 (Active: true)');
+assert(isPlatformPermitted('https://gimy.ai/watch/123') === false, '高風險網站不在 Manifest 靜態授權名單中 (零商店審查風險)');
+
 // YouTube
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ') === 'yt:dQw4w9WgXcQ', 'YouTube 標準網址識別 (yt:dQw4w9WgXcQ)');
 assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&index=1') === 'yt:dQw4w9WgXcQ', 'YouTube 帶播放清單參數仍精準識別 (yt:dQw4w9WgXcQ)');
@@ -640,6 +647,9 @@ assert(popupSrc.includes('syncine_unlock_candidates'), 'Popup.tsx 透過 syncine
 assert(popupSrc.includes('isPlatformActive(activeTabUrl, candidatesUnlocked)'), 'Popup.tsx 根據彩蛋解鎖狀態計算目標支援判定');
 assert(popupSrc.includes("useState<'create' | 'join'>('join')"), 'Popup.tsx 預設開窗視圖為加入房間 (join)');
 assert(popupSrc.includes("setActiveTab('join')"), 'Popup.tsx 離開房間時重置預設視圖為加入房間 (join)');
+assert(manifestObj.permissions.includes('activeTab'), 'Manifest 宣告 activeTab 權限');
+assert(manifestObj.permissions.includes('scripting'), 'Manifest 宣告 scripting 權限以支援動態注入');
+assert(contentSrc.includes('CS_PING') && contentSrc.includes('CS_ACTIVATE_UNIVERSAL'), 'content/index.ts 支援 activeTab 通用激活與 Ping 響應');
 
 const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
 assert(bgSrc.includes('isPlatformActive'), 'background/index.ts 實裝 isPlatformActive 廣播與白名單過濾守衛');

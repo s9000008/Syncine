@@ -9,6 +9,7 @@
     "tabs",
     "alarms",
     "activeTab",
+    "scripting",
     "offscreen"
   ],
   "host_permissions": [

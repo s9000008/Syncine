@@ -48,7 +48,7 @@ export const enUS: TranslationSchema = {
     unsupportedBadge: 'Not Supported',
     singleTabHint: 'Use a single video tab to avoid sync conflicts.',
     hintPrefix: '💡 Tip',
-    unlockToastOn: '🔓 Candidate platforms unlocked (Generic Mode)',
+    unlockToastOn: '🔓 Enabled activeTab Universal Mode & candidate platforms',
     unlockToastOff: '🔒 Candidate platforms locked',
     unlockBadgeTooltip: '🔓 Candidates unlocked (Triple-click to lock)',
   },

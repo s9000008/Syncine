@@ -21,7 +21,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
-import { isPlatformActive, getPlatformByUrl } from '../platforms';
+import { isPlatformActive, getPlatformByUrl, getHighRiskPlatform } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -194,10 +194,34 @@ export default function Popup() {
   }, [connectionMode]);
 
   useEffect(() => {
-    // 獲取當前分頁網址
+    // 獲取當前分頁網址，若處於 activeTab 通用模式且為外部網頁，自動檢查並注入 content.js
     chrome.tabs?.query?.({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.url) {
-        setActiveTabUrl(tabs[0].url);
+      const curTab = tabs[0];
+      if (curTab?.url) {
+        setActiveTabUrl(curTab.url);
+        if (curTab.id && (curTab.url.startsWith('http://') || curTab.url.startsWith('https://'))) {
+          chrome.storage?.local?.get(['syncine_unlock_candidates'], (res) => {
+            if (res?.syncine_unlock_candidates && curTab.id) {
+              chrome.tabs.sendMessage(curTab.id, { type: 'CS_PING' }, (pingRes) => {
+                if (chrome.runtime.lastError || !pingRes) {
+                  if ((chrome as any)?.scripting?.executeScript) {
+                    (chrome as any).scripting
+                      .executeScript({
+                        target: { tabId: curTab.id },
+                        files: ['content.js']
+                      })
+                      .then(() => {
+                        setTimeout(() => {
+                          chrome.tabs.sendMessage(curTab.id!, { type: 'CS_ACTIVATE_UNIVERSAL' }).catch(() => {});
+                        }, 120);
+                      })
+                      .catch(() => {});
+                  }
+                }
+              });
+            }
+          });
+        }
       }
     });
 
@@ -244,14 +268,29 @@ export default function Popup() {
   const isTargetSite = isPlatformActive(activeTabUrl, candidatesUnlocked);
   const activeStatusKey =
     isTargetSite && currentPlatform ? PLATFORM_TAB_STATUS_KEY_MAP[currentPlatform.id] : undefined;
+  let displaySiteName = currentPlatform ? currentPlatform.name : '';
+  if (!displaySiteName && activeTabUrl) {
+    const highRisk = getHighRiskPlatform(activeTabUrl);
+    if (highRisk) {
+      displaySiteName = highRisk.name;
+    } else {
+      try {
+        const parsed = new URL(activeTabUrl);
+        displaySiteName = parsed.hostname.replace(/^www\./, '');
+      } catch (_) {
+        displaySiteName = 'Universal';
+      }
+    }
+  }
+
   const tabStatusLabel =
-    isTargetSite && currentPlatform
+    isTargetSite
       ? activeStatusKey
         ? t.tabStatus[activeStatusKey]
-        : t.tabStatus.genericModeConnected(currentPlatform.name)
+        : t.tabStatus.genericModeConnected(displaySiteName)
       : t.tabStatus.notSupported;
   const tabStatusTooltip =
-    isTargetSite && currentPlatform ? tabStatusLabel : t.tabStatus.supportedTooltip;
+    isTargetSite ? tabStatusLabel : t.tabStatus.supportedTooltip;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -297,7 +336,8 @@ export default function Popup() {
           currentUrl: getCanonicalVideoUrl(activeTabUrl),
           mode: connectionMode,
           customServerUrl: connectionMode === 'CUSTOM_IP' ? targetServerUrl : undefined,
-          language
+          language,
+          allowUniversal: candidatesUnlocked
         }
       },
       (res) => {
@@ -433,7 +473,10 @@ export default function Popup() {
     if (!activeTabUrl) return;
     safeSendMessage({
       type: 'BG_REDIRECT_ROOM',
-      payload: { targetUrl: getCanonicalVideoUrl(activeTabUrl) }
+      payload: {
+        targetUrl: getCanonicalVideoUrl(activeTabUrl),
+        allowUniversal: candidatesUnlocked
+      }
     });
   };
 

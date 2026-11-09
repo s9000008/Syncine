@@ -1,5 +1,5 @@
 import { SyncData, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformDomainActive, isPlatformDomainPermitted, isPlatformPermitted } from '../platforms';
+import { isPlatformActive, isPlatformDomainActive, isPlatformDomainPermitted, isPlatformPermitted, isUniversalSupportedUrl } from '../platforms';
 import { getStandaloneText } from '../locales/standalone';
 
 // 頂層視窗防禦守衛 (防止注入廣告/沙盒 iframe；僅特例放行 Crunchyroll 官方 Vilos 播放器專用子框架)
@@ -1584,11 +1584,23 @@ function queryInitialRoomState() {
   });
 }
 
-// 監聽來自 Background 的動態訊息
+// 監聽來自 Background / Popup 的動態訊息
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   const { type, payload } = request || {};
   if (isAllowedPlayerFrame && typeof request?.parentTabUrl === 'string' && request.parentTabUrl) {
     parentTabUrl = request.parentTabUrl;
+  }
+
+  // 1. activeTab 通用探測與狀態喚醒指令 (即使尚未 active 亦可回應)
+  if (type === 'CS_PING') {
+    sendResponse({ success: true, isSiteActive, url: window.location.href });
+    return true;
+  }
+  if (type === 'CS_ACTIVATE_UNIVERSAL') {
+    isSiteActive = true;
+    activateContentScript();
+    sendResponse({ success: true, isSiteActive: true });
+    return true;
   }
 
   // 未啟用支援之候選網站僅允許資安攔截警告，其餘指令完全靜默忽略
@@ -1733,7 +1745,9 @@ if (isEligibleFrame) {
       chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
         if (
           res?.syncine_unlock_candidates &&
-          (isPlatformDomainPermitted(window.location.href) || isPlatformPermitted(window.location.href))
+          (isPlatformDomainPermitted(window.location.href) ||
+            isPlatformPermitted(window.location.href) ||
+            isUniversalSupportedUrl(window.location.href))
         ) {
           isSiteActive = true;
           activateContentScript();
@@ -1746,7 +1760,12 @@ if (isEligibleFrame) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.syncine_unlock_candidates) {
         const unlocked = Boolean(changes.syncine_unlock_candidates.newValue);
-        if (unlocked && (isPlatformDomainPermitted(window.location.href) || isPlatformPermitted(window.location.href))) {
+        if (
+          unlocked &&
+          (isPlatformDomainPermitted(window.location.href) ||
+            isPlatformPermitted(window.location.href) ||
+            isUniversalSupportedUrl(window.location.href))
+        ) {
           isSiteActive = true;
           activateContentScript();
         } else if (!unlocked && !isPlatformDomainActive(window.location.href, false)) {

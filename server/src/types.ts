@@ -199,18 +199,38 @@ export interface RoomState {
 }
 
 
-export function isServerUrlAllowed(rawUrl: string): boolean {
+export function isServerUrlAllowed(rawUrl: string, allowUniversal = false): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   const targetUrl = rawUrl.trim();
   try {
     const parsed = new URL(targetUrl);
     if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    // 基礎 SSRF 防護：嚴格阻斷本機與內部私有 IP
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      host.startsWith('172.16.')
+    ) {
+      return false;
+    }
+
+    // 1. 白名單守衛：開放所有在權限名單中之目標平台 (涵蓋現行 18 個活躍平台與 9 個候選預授權平台)
+    if (isPlatformPermitted(targetUrl)) {
+      return true;
+    }
+
+    // 2. 若由客戶端攜帶 allowUniversal (例如解鎖 activeTab 通用模式)，放行合法外部 HTTPS 網址
+    if (allowUniversal) {
+      return true;
+    }
+
+    return false;
   } catch (e) {
     return false;
   }
-
-  // 伺服器端白名單守衛：開放所有在權限名單中之目標平台 (涵蓋現行 18 個活躍平台與 9 個候選預授權平台)
-  return isPlatformPermitted(targetUrl);
 }
 
 const GENERIC_TRACKING_PARAM_REGEX =

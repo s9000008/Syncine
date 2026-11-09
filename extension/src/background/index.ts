@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted } from '../platforms';
+import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted, isUniversalSupportedUrl } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
@@ -193,8 +193,8 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
     return false;
   }
 
-  // 1. 若處於解鎖模式且為合規候選平台，直接放行 (其網域已在 PLATFORM_REGISTRY 嚴格比對通過)
-  if (allowCandidates && isPlatformPermitted(targetUrl)) {
+  // 1. 若處於解鎖模式且為合規候選平台或通用 activeTab 網頁，直接放行
+  if (allowCandidates && (isPlatformPermitted(targetUrl) || isUniversalSupportedUrl(targetUrl))) {
     return true;
   }
 
@@ -810,7 +810,8 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
               isSelfHosted: mode === 'CUSTOM_IP' || !!payload.customServerUrl,
               mode,
               customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined,
-              language: payload.language
+              language: payload.language,
+              allowUniversal: candidatesUnlocked
             }
           });
 
@@ -1124,7 +1125,10 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
           socket.emit('REDIRECT_ROOM', {
             event: 'REDIRECT_ROOM',
             roomId: currentRoomState.roomId,
-            data: { targetUrl: cleanTarget }
+            data: {
+              targetUrl: cleanTarget,
+              allowUniversal: candidatesUnlocked
+            }
           });
         }
         sendResponse({ success: true });
@@ -1639,3 +1643,26 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     }
   }
 });
+
+// 監聽分頁載入完成：若處於 activeTab 通用模式且為外部網頁，自動注入 content.js
+if (typeof chrome !== 'undefined' && chrome.tabs?.onUpdated) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab?.url) {
+      if (candidatesUnlocked && isUniversalSupportedUrl(tab.url) && !isPlatformPermitted(tab.url)) {
+        if (typeof (chrome as any).scripting !== 'undefined' && (chrome as any).scripting.executeScript) {
+          (chrome as any).scripting
+            .executeScript({
+              target: { tabId },
+              files: ['content.js']
+            })
+            .then(() => {
+              setTimeout(() => {
+                chrome.tabs.sendMessage(tabId, { type: 'CS_ACTIVATE_UNIVERSAL' }).catch(() => {});
+              }, 120);
+            })
+            .catch(() => {});
+        }
+      }
+    }
+  });
+}

@@ -305,12 +305,80 @@ export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
 }
 
 /**
- * 檢查當前網址是否為「已正式開放啟用支援 (Active)」之影音播放頁
+ * 高風險第三方影視與動漫綜合網站清單 (未授權/經常跳轉網域，零 Manifest 宣告，僅在版本號彩蛋解鎖後以 activeTab 模式動態支援)
+ */
+export const HIGH_RISK_STREAMING_CATALOG: { name: string; pattern: RegExp }[] = [
+  { name: 'Gimy 劇迷', pattern: /(?:^|\.)gimy\.[a-z0-9_-]+/i },
+  { name: '楓林網 (8maple)', pattern: /(?:^|\.)8maple\.[a-z0-9_-]+|maplestage\./i },
+  { name: '小鴨影音 / 123KUBO', pattern: /kubo|kobo/i },
+  { name: 'MoMoVOD', pattern: /(?:^|\.)momovod\.[a-z0-9_-]+/i },
+  { name: '伊莉影音', pattern: /eyny\.com/i },
+  { name: '歐樂影院 (OleVod)', pattern: /olevod/i },
+  { name: 'AGE動漫', pattern: /(?:^|\.)(agemys|agefans)\.[a-z0-9_-]+/i },
+  { name: '櫻花動漫', pattern: /(?:^|\.)(yhdm|yinghuacd|yhdmp)\.[a-z0-9_-]+/i },
+  { name: 'Myself 動漫', pattern: /myself-bbs\.com/i },
+  { name: 'Girigiri愛動漫', pattern: /girigirilove/i },
+  { name: 'Animeflix / Zoro (HiAnime)', pattern: /animeflix|zoro\.to|hianime\.to/i }
+];
+
+export function getHighRiskPlatform(rawUrl?: string): { name: string; isHighRisk: boolean } | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const url = new URL(rawUrl.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const host = url.hostname.toLowerCase();
+    for (const item of HIGH_RISK_STREAMING_CATALOG) {
+      if (item.pattern.test(host)) {
+        return { name: item.name, isHighRisk: true };
+      }
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * 檢查當前網址是否為可透過 activeTab 通用模式支援之高風險或第三方串流網頁 (過濾內部與本機網址)
+ */
+export function isUniversalSupportedUrl(rawUrl?: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  try {
+    const url = new URL(rawUrl.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      host.startsWith('172.16.')
+    ) {
+      return false;
+    }
+    // 若命中已知高風險/第三方影視平台特徵，放行通用模式
+    if (getHighRiskPlatform(rawUrl)) {
+      return true;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * 檢查當前網址是否為「已正式開放啟用支援 (Active)」之影音播放頁 (或彩蛋解鎖之通用 activeTab 網頁)
  */
 export function isPlatformActive(rawUrl?: string, allowCandidates = false): boolean {
   const p = getPlatformByUrl(rawUrl);
-  if (!p) return false;
-  return allowCandidates ? true : Boolean(p.enabled);
+  if (p) {
+    return allowCandidates ? true : Boolean(p.enabled);
+  }
+  // 若已解鎖彩蛋且為合規之外部 Web 網址，以 activeTab 通用模式放行
+  if (allowCandidates && isUniversalSupportedUrl(rawUrl)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -319,8 +387,13 @@ export function isPlatformActive(rawUrl?: string, allowCandidates = false): bool
  */
 export function isPlatformDomainActive(rawUrl?: string, allowCandidates = false): boolean {
   const p = getPlatformByDomain(rawUrl);
-  if (!p) return false;
-  return allowCandidates ? true : Boolean(p.enabled);
+  if (p) {
+    return allowCandidates ? true : Boolean(p.enabled);
+  }
+  if (allowCandidates && isUniversalSupportedUrl(rawUrl)) {
+    return true;
+  }
+  return false;
 }
 
 /**

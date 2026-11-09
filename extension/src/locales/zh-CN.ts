@@ -48,7 +48,7 @@ export const zhCN: TranslationSchema = {
     unsupportedBadge: '不支持',
     singleTabHint: '建议同时仅打开一个支持的视频标签页，避免同步干扰。',
     hintPrefix: '💡 提示',
-    unlockToastOn: '🔓 已启用隐藏候选支持名单 (通用模式)',
+    unlockToastOn: '🔓 已启用 activeTab 通用模式与候选支持名单',
     unlockToastOff: '🔒 已关闭隐藏候选支持名单',
     unlockBadgeTooltip: '🔓 候选名单已启用 (连点 3 下关闭)',
   },

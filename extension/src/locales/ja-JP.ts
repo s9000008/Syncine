@@ -48,7 +48,7 @@ export const jaJP: TranslationSchema = {
     unsupportedBadge: '非対応',
     singleTabHint: '同期ズレ防止のため動画タブは1つのみ推奨',
     hintPrefix: '💡 ヒント',
-    unlockToastOn: '🔓 候補サイト対応を有効化しました (汎用モード)',
+    unlockToastOn: '🔓 activeTab 汎用モードと候補リストを有効化しました',
     unlockToastOff: '🔒 候補サイト対応を無効化しました',
     unlockBadgeTooltip: '🔓 候補サイト有効中 (3回クリックで無効化)',
   },

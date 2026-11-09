@@ -47,7 +47,7 @@ export const zhTW = {
     unsupportedBadge: '不支援',
     singleTabHint: '建議同時僅開啟一個支援的影片分頁，避免同步干擾。',
     hintPrefix: '💡 提示',
-    unlockToastOn: '🔓 已啟用隱藏候選支援名單 (通用模式)',
+    unlockToastOn: '🔓 已啟用 activeTab 通用模式與候選支援名單',
     unlockToastOff: '🔒 已關閉隱藏候選支援名單',
     unlockBadgeTooltip: '🔓 候選名單已啟用 (連點 3 下關閉)',
   },

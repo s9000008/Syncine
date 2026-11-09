@@ -186,7 +186,7 @@ io.on('connection', (socket: Socket) => {
   registerSafeHandler<CreateRoomReq>(socket, 'CREATE_ROOM', (payload) => {
     const { userId, currentUrl, isSelfHosted, mode, language } = payload?.data || {};
     const candidateUrl = typeof currentUrl === 'string' && currentUrl.trim() ? getCanonicalVideoUrl(currentUrl) : '';
-    const cleanUrl = candidateUrl && isServerUrlAllowed(candidateUrl) ? candidateUrl : '';
+    const cleanUrl = candidateUrl && isServerUrlAllowed(candidateUrl, Boolean((payload?.data as any)?.allowUniversal)) ? candidateUrl : '';
     cleanupPreviousSocketRoom();
 
     // 資安防護：驗證語系格式 (BCP 47 標籤格式，限制 10 字元內，避免惡意注入)
@@ -372,7 +372,7 @@ io.on('connection', (socket: Socket) => {
 
     const targetUrl = getCanonicalVideoUrl(payload.data.targetUrl);
     payload.data.targetUrl = targetUrl;
-    const isSafe = isServerUrlAllowed(targetUrl);
+    const isSafe = isServerUrlAllowed(targetUrl, Boolean((payload?.data as any)?.allowUniversal));
     if (!isSafe) {
       console.warn(`[Security Alert] 攔截非白名單/惡意跳轉網址: ${sanitizeLog(targetUrl)} (Socket: ${sanitizeLog(socket.id)})`);
       socket.emit('ERROR', { code: 'ERR_UNAUTHORIZED_URL', message: 'ERR_UNAUTHORIZED_URL' });
