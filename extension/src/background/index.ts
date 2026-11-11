@@ -318,6 +318,9 @@ export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean):
   return false;
 }
 
+let lastSecurityAlertUrl = '';
+let lastSecurityAlertTime = 0;
+
 export function verifyAndRedirect(targetUrl: string) {
   const cleanUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
   const isSafe = isUrlAllowed(cleanUrl);
@@ -365,6 +368,15 @@ export function verifyAndRedirect(targetUrl: string) {
     });
   } else {
     console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${cleanUrl}`);
+    const now = Date.now();
+    // 核心防轟炸冷卻機制：若 15 秒內已針對同一非安全網址發出過警告，則抑制重複發送
+    if (cleanUrl === lastSecurityAlertUrl && now - lastSecurityAlertTime < 15000) {
+      console.warn(`[Syncine Background] 15秒內已針對此網址發出資安警告，抑制重複派發: ${cleanUrl}`);
+      return;
+    }
+    lastSecurityAlertUrl = cleanUrl;
+    lastSecurityAlertTime = now;
+
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, {
@@ -751,7 +763,16 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
     case 'BG_CREATE_ROOM': {
       const mode: ConnectionMode = payload?.mode || 'DEFAULT';
       const serverUrl = payload?.customServerUrl || DEFAULT_SERVER_URL;
-      const cleanUrl = getCanonicalVideoUrl(payload?.currentUrl);
+      const rawUrl = payload?.currentUrl;
+      // 排除瀏覽器系統內部網址 (如 chrome://newtab/、about:blank、edge:// 等)，避免無效網址作為房間初始同步目標
+      const isBrowserInternalUrl =
+        typeof rawUrl === 'string' &&
+        (rawUrl.startsWith('chrome://') ||
+          rawUrl.startsWith('about:') ||
+          rawUrl.startsWith('edge://') ||
+          rawUrl.startsWith('chrome-extension://') ||
+          rawUrl.startsWith('moz-extension://'));
+      const cleanUrl = isBrowserInternalUrl ? '' : getCanonicalVideoUrl(rawUrl);
 
       if (mode === 'P2P') {
         ensureOffscreenDocument()
@@ -1386,12 +1407,16 @@ chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendRes
         currentRoomState.p2pStatus = 'CONNECTED';
         currentRoomState.guestAwaitingApproval = false;
         currentRoomState.connectedPeerCount = payload?.memberCount || 2;
+        const prevUrl = currentRoomState.currentUrl;
         if (payload?.hostCurrentUrl) {
           currentRoomState.currentUrl = getCanonicalVideoUrl(payload.hostCurrentUrl);
         }
         persistRoomSession(currentRoomState);
+        // 核心防轟炸：若網址未變更且已在 JOIN_ROOM_SUCCESS 階段校驗過，切勿重複執行 verifyAndRedirect 避免二次警報
         if (!currentRoomState.isHost && currentRoomState.currentUrl) {
-          verifyAndRedirect(currentRoomState.currentUrl);
+          if (!prevUrl || prevUrl !== currentRoomState.currentUrl) {
+            verifyAndRedirect(currentRoomState.currentUrl);
+          }
         }
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',

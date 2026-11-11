@@ -332,6 +332,49 @@ assert(
 );
 
 // ----------------------------------------------------
+// 測試套件 11: 資安警告防轟炸、冷卻去重與內部網址防呆保護驗證
+// ----------------------------------------------------
+console.log('\n--- 測試套件 11: 資安警告防轟炸、冷卻去重與內部網址防呆保護驗證 ---');
+
+// 1. Background verifyAndRedirect 必須包含 15 秒同網址警告冷卻防護
+assert(
+  bgSource.includes('cleanUrl === lastSecurityAlertUrl && now - lastSecurityAlertTime < 15000'),
+  'background/index.ts verifyAndRedirect 實裝 15 秒同網址資安警告冷卻抑制'
+);
+
+// 2. Background BG_P2P_GUEST_APPROVED 必須防重：網址未變時不得二度調用 verifyAndRedirect
+assert(
+  bgSource.includes('if (!prevUrl || prevUrl !== currentRoomState.currentUrl)') &&
+    bgSource.includes('verifyAndRedirect(currentRoomState.currentUrl)'),
+  'background/index.ts BG_P2P_GUEST_APPROVED 實裝網址防重守衛 (避免入房成功後二次報警)'
+);
+
+// 3. Background BG_CREATE_ROOM 必須過濾 chrome:// 等瀏覽器內部網址
+assert(
+  bgSource.includes("rawUrl.startsWith('chrome://')") &&
+    bgSource.includes("isBrowserInternalUrl ? '' : getCanonicalVideoUrl(rawUrl)"),
+  'background/index.ts BG_CREATE_ROOM 自動過濾 chrome://newtab/ 等內部網址為空值'
+);
+
+// 4. Popup.tsx 必須防呆過濾非 HTTP(S) 網址建立房間與同步分頁
+assert(
+  popupSource.includes("activeTabUrl.startsWith('http://') || activeTabUrl.startsWith('https://')"),
+  'Popup.tsx 在新分頁建立房間或同步時嚴格校驗合法 HTTP(S) 協定'
+);
+
+// 5. Content Script 必須具備 isShowingSecurityAlert 阻塞旗標與版本號防重疊 (vv2.x.x -> v2.x.x)
+const contentSource = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+assert(
+  contentSource.includes('isShowingSecurityAlert') &&
+    contentSource.includes('lastAlertedSecurityUrl && now - lastAlertedSecurityTime < 15000'),
+  'content/index.ts 實裝 isShowingSecurityAlert 與 15 秒冷卻守衛 (杜絕連鎖阻塞彈窗)'
+);
+assert(
+  contentSource.includes("payload.version.replace(/^v+/, '')"),
+  'content/index.ts 資安警告視窗動態版本號格式化正確，杜絕 [Syncine vv2.10.0] 重複 v 前綴'
+);
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

@@ -89,6 +89,9 @@ let lastSyncedTime = 0;
 let roomPlaybackState: 'PLAYING' | 'PAUSED' | 'IDLE' = 'IDLE';
 let lastInitSyncKey = '';
 let syncWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+let isShowingSecurityAlert = false;
+let lastAlertedSecurityUrl = '';
+let lastAlertedSecurityTime = 0;
 
 function markProgrammatic(durationMs = 800) {
   programmaticUntilTimestamp = Date.now() + durationMs;
@@ -1664,9 +1667,30 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log('[Syncine] 觀眾權限狀態更新:', roomState.allowGuestControl);
   } else if (type === 'SHOW_SECURITY_ALERT') {
     if (!isTopFrame) return false;
-    const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
-    const ver = payload?.version ? ` [Syncine v${payload.version}]` : '';
-    alert(`${alertMsg}${ver}\n(${payload?.url || ''})`);
+    const targetUrl = payload?.url || '';
+    const now = Date.now();
+    // 核心防轟炸防線：若當前已有警告視窗正在顯示，或 15 秒內已針對同一網址警告過，直接攔截過濾
+    if (isShowingSecurityAlert || (targetUrl === lastAlertedSecurityUrl && now - lastAlertedSecurityTime < 15000)) {
+      console.warn('[Syncine ContentScript] 抑制重複彈出之資安警告視窗:', targetUrl);
+      sendResponse?.({ received: true, suppressed: true });
+      return true;
+    }
+
+    isShowingSecurityAlert = true;
+    lastAlertedSecurityUrl = targetUrl;
+    lastAlertedSecurityTime = now;
+
+    try {
+      const alertMsg = getStandaloneText('ERR_UNAUTHORIZED_URL');
+      const rawVer = typeof payload?.version === 'string' ? payload.version.replace(/^v+/, '') : '';
+      const ver = rawVer ? ` [Syncine v${rawVer}]` : '';
+      alert(`${alertMsg}${ver}\n(${targetUrl})`);
+    } finally {
+      // 確保即使 alert 關閉後，在短時間內排隊進來的微任務也不會再次觸發
+      setTimeout(() => {
+        isShowingSecurityAlert = false;
+      }, 500);
+    }
   }
 
   // 保持訊息通道暢通並確認已接收，避免 Background catch 到未捕獲之連線異常

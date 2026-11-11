@@ -329,11 +329,12 @@ export default function Popup() {
       targetServerUrl = input;
     }
 
+    const isValidWebUrl = activeTabUrl && (activeTabUrl.startsWith('http://') || activeTabUrl.startsWith('https://'));
     safeSendMessage(
       {
         type: 'BG_CREATE_ROOM',
         payload: {
-          currentUrl: getCanonicalVideoUrl(activeTabUrl),
+          currentUrl: isValidWebUrl ? getCanonicalVideoUrl(activeTabUrl) : '',
           mode: connectionMode,
           customServerUrl: connectionMode === 'CUSTOM_IP' ? targetServerUrl : undefined,
           language,
@@ -470,7 +471,7 @@ export default function Popup() {
   };
 
   const handleSyncCurrentTab = () => {
-    if (!activeTabUrl) return;
+    if (!activeTabUrl || (!activeTabUrl.startsWith('http://') && !activeTabUrl.startsWith('https://'))) return;
     safeSendMessage({
       type: 'BG_REDIRECT_ROOM',
       payload: {
