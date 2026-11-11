@@ -50,10 +50,10 @@ assert(isPlatformPermitted('https://www.linetv.tw/drama/12345/eps/1') === true, 
 assert(isPlatformActive('https://tv.apple.com/episode/umc.cmc.123') === true, 'Apple TV+ 處於正式啟用支援名單 (Active)');
 assert(isPlatformPermitted('https://tv.apple.com/episode/umc.cmc.123') === true, 'Apple TV+ 處於授權名單中 (Permitted)');
 
-// 預授權候選網站 (enabled: false)
-assert(isPlatformActive('https://www.catchplay.com/watch/123') === false, 'CatchPlay 預留權限但尚未開放支援 (Active: false)');
-assert(isPlatformPermitted('https://www.catchplay.com/watch/123') === true, 'CatchPlay 處於 Manifest 預授權名單中 (Permitted: true)');
+assert(isPlatformActive('https://www.catchplay.com/watch/123') === true, 'CATCHPLAY+ 已轉正為正式啟用正版平台 (Active: true)');
+assert(isPlatformPermitted('https://www.catchplay.com/watch/123') === true, 'CATCHPLAY+ 處於 Manifest 授權名單中 (Permitted: true)');
 
+// 預授權候選網站 (enabled: false)
 assert(isPlatformActive('https://www.hulu.com/watch/123') === false, 'Hulu 預留權限但尚未開放支援 (Active: false)');
 assert(isPlatformPermitted('https://www.hulu.com/watch/123') === true, 'Hulu 處於 Manifest 預授權名單中 (Permitted: true)');
 
@@ -65,9 +65,12 @@ assert(isPlatformPermitted('https://wetv.vip/play/123') === true, 'WeTV 處於 M
 
 assert(isPlatformActive('https://www.google.com') === false, 'Google 非活躍支援平台');
 assert(isPlatformPermitted('https://www.google.com') === false, 'Google 不在授權名單中');
-assert(getActivePlatforms().length === 18, '目前正式局部開放支援之平台總數為 18');
+assert(getActivePlatforms().length === 18, '目前正式局部開放支援之正版平台總數為 18');
 
-// 高風險與第三方影視網站 (activeTab 通用模式支援驗證)
+// 高風險與第三方影視網站 (含 Anime1.me 已併入 activeTab 通用模式支援驗證)
+assert(isPlatformActive('https://anime1.me/23456', false) === false, '預設鎖定狀態下 Anime1.me 已移出正式清單 (Active: false)');
+assert(isPlatformActive('https://anime1.me/23456', true) === true, '彩蛋解鎖狀態下 Anime1.me 獲 activeTab 通用模式放行支援 (Active: true)');
+assert(isPlatformPermitted('https://anime1.me/23456') === false, 'Anime1.me 已完全移出 Manifest 靜態授權名單 (零商店審查風險)');
 assert(isPlatformActive('https://gimy.ai/watch/123', false) === false, '預設鎖定狀態下高風險網站 Gimy 處於不支援狀態 (Active: false)');
 assert(isPlatformActive('https://gimy.ai/watch/123', true) === true, '彩蛋解鎖狀態下高風險網站 Gimy 獲 activeTab 通用模式放行支援 (Active: true)');
 assert(isPlatformActive('https://8maple.tv/show/456', false) === false, '預設鎖定狀態下高風險網站 楓林網 處於不支援狀態 (Active: false)');
@@ -191,7 +194,7 @@ const HOST_WHITELIST = [
   /^https:\/\/www\.bilibili\.com\/video\/[a-zA-Z0-9]+/,
   /^https:\/\/www\.bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/www\.nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/(www\.)?catchplay\.com\/.*(watch|play|video)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
   /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
   /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
@@ -223,8 +226,8 @@ assert(isSafeUrl('https://www.bilibili.com/video/BV1xx411c7mD'), '放行合法 B
 assert(isSafeUrl('https://www.bilibili.com/bangumi/play/ep123456'), '放行合法 Bilibili 番劇網址');
 assert(isSafeUrl('https://www.nicovideo.jp/watch/sm9'), '放行合法 Niconico sm 觀看網址');
 assert(isSafeUrl('https://www.nicovideo.jp/watch/so43652101'), '放行合法 Niconico so 觀看網址');
-assert(isSafeUrl('https://anime1.me/23456'), '放行合法 Anime1.me 單集網址');
-assert(isSafeUrl('https://anime1.me/category/my-anime/'), '放行合法 Anime1.me 分類網址');
+assert(isSafeUrl('https://www.catchplay.com/tw/watch/ed8c3d70-1234'), '放行合法 CATCHPLAY+ 觀看網址');
+assert(!isSafeUrl('https://anime1.me/23456'), '官方預設白名單已移除 Anime1.me (改由彩蛋通用模式控管)');
 assert(isSafeUrl('https://www.netflix.com/watch/80057281'), '放行合法 Netflix 播放網址');
 assert(isSafeUrl('https://netflix.com/watch/80057281'), '放行無 www 前綴之合法 Netflix 播放網址');
 assert(isSafeUrl('https://vimeo.com/76979871'), '放行合法 Vimeo 影片網址');
@@ -521,15 +524,16 @@ function checkTargetSite(url, candidatesUnlocked = false) {
   };
 }
 
-assert(checkTargetSite('https://www.catchplay.com/watch/123', false).isTargetSite === false, '預設狀態下 CatchPlay 標記為不支援 (紅燈)');
-assert(checkTargetSite('https://www.catchplay.com/watch/123', true).isTargetSite === true, '彩蛋解鎖後 CatchPlay 標記為支援 (綠燈)');
+assert(checkTargetSite('https://www.catchplay.com/watch/123', false).isTargetSite === true, '預設狀態下 CATCHPLAY+ 標記為正式支援正版平台 (綠燈)');
+assert(checkTargetSite('https://anime1.me/23456', false).isTargetSite === false, '預設狀態下 Anime1.me 標記為不支援 (紅燈)');
+assert(checkTargetSite('https://anime1.me/23456', true).isTargetSite === true, '彩蛋解鎖後 Anime1.me 標記為通用模式支援 (綠燈)');
 assert(checkTargetSite('https://www.litv.tv/vod/123', false).isTargetSite === false, '預設狀態下 LiTV 標記為不支援 (紅燈)');
 assert(checkTargetSite('https://www.litv.tv/vod/123', true).isTargetSite === true, '彩蛋解鎖後 LiTV 標記為支援 (綠燈)');
 assert(checkTargetSite('https://www.google.com', true).isTargetSite === false, '非串流網站解鎖後仍為不支援 (紅燈)');
 assert(checkTargetSite('https://www.youtube.com/watch?v=123').isTargetSite === true, 'Popup 識別 YouTube 為支援目標頁面');
 assert(checkTargetSite('https://www.bilibili.com/video/BV1xx').isTargetSite === true, 'Popup 識別 Bilibili 為支援目標頁面');
 assert(checkTargetSite('https://www.nicovideo.jp/watch/sm9').isTargetSite === true, 'Popup 識別 Niconico 為支援目標頁面');
-assert(checkTargetSite('https://anime1.me/23456').isTargetSite === true, 'Popup 識別 Anime1.me 為支援目標頁面');
+assert(checkTargetSite('https://www.catchplay.com/tw/watch/ed8c3d70').isTargetSite === true, 'Popup 識別 CATCHPLAY+ 為支援目標頁面');
 assert(checkTargetSite('https://www.netflix.com/watch/80057281').isTargetSite === true, 'Popup 識別 Netflix 為支援目標頁面');
 assert(checkTargetSite('https://vimeo.com/76979871').isTargetSite === true, 'Popup 識別 Vimeo 為支援目標頁面');
 assert(checkTargetSite('https://ani.gamer.com.tw/animeVideo.php?sn=38210').isTargetSite === true, 'Popup 識別動畫瘋為支援目標頁面');
@@ -544,17 +548,10 @@ assert(checkTargetSite('https://video.friday.tw/drama/detail/12345').isTargetSit
 assert(checkTargetSite('https://play.max.com/video/watch/UUID-1234-5678').isTargetSite === true, 'Popup 識別 Max 為支援目標頁面');
 assert(checkTargetSite('https://www.iq.com/play/12345678').isTargetSite === true, 'Popup 識別 iQIYI 為支援目標頁面');
 assert(checkTargetSite('https://tv.apple.com/episode/umc.cmc.4u280a5').isTargetSite === true, 'Popup 識別 Apple TV+ 為支援目標頁面');
-assert(checkTargetSite('https://vimeo.com/76979871').isTargetSite === true, 'Popup 識別 Vimeo 為支援目標頁面');
-assert(checkTargetSite('https://ani.gamer.com.tw/animeVideo.php?sn=38210').isTargetSite === true, 'Popup 識別動畫瘋為支援目標頁面');
-assert(checkTargetSite('https://www.twitch.tv/videos/1234567890').isTargetSite === true, 'Popup 識別 Twitch 為支援目標頁面');
-assert(checkTargetSite('https://www.disneyplus.com/video/4b045e77').isTargetSite === true, 'Popup 識別 Disney+ 為支援目標頁面');
-assert(checkTargetSite('https://www.primevideo.com/detail/0STG2N4Y').isTargetSite === true, 'Popup 識別 Prime Video 為支援目標頁面');
-assert(checkTargetSite('https://www.myvideo.net.tw/details/0/123456').isTargetSite === true, 'Popup 識別 MyVideo 為支援目標頁面');
 assert(checkTargetSite('https://www.netflix.com/browse').isTargetSite === false, 'Popup 識別 Netflix 首頁非觀看頁面 (安全防護)');
 assert(checkTargetSite('https://www.google.com').isTargetSite === false, 'Popup 識別 Google 非目標頁面 (顯示請開啟支援影片提示)');
-assert(checkTargetSite('https://anime1.me/').isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
+assert(checkTargetSite('https://anime1.me/', true).isTargetSite === false, 'Popup 識別 Anime1.me 首頁非播放頁面 (安全防護)');
 // 預先取得授權但尚未正式開放平台測試 (使用者規範：不特別顯示、不亮黃燈)
-assert(checkTargetSite('https://www.catchplay.com/watch/123').isTargetSite === false, 'Popup 識別 CatchPlay 為未開放支援 (isTargetSite: false)');
 assert(checkTargetSite('https://www.hulu.com/watch/123').isTargetSite === false, 'Popup 識別 Hulu 為未開放支援 (isTargetSite: false)');
 assert(checkTargetSite('https://www.litv.tv/vod/123').isTargetSite === false, 'Popup 識別 LiTV 為未開放支援 (isTargetSite: false)');
 
@@ -563,8 +560,8 @@ assert(checkTargetSite('https://www.litv.tv/vod/123').isTargetSite === false, 'P
 // ----------------------------------------------------
 console.log('\n--- 測試套件 6: 燈號狀態標記 (綠燈支援 / 紅燈不支援) 與商店連結自動化測試 ---');
 
-function getSiteIndicatorState(url) {
-  const target = checkTargetSite(url);
+function getSiteIndicatorState(url, candidatesUnlocked = false) {
+  const target = checkTargetSite(url, candidatesUnlocked);
   return {
     isTargetSite: target.isTargetSite,
     lightColor: target.isTargetSite ? 'GREEN' : 'RED',
@@ -584,8 +581,8 @@ assert(biliState.lightColor === 'GREEN', 'Bilibili 顯示綠燈支援標記');
 const nicoState = getSiteIndicatorState('https://www.nicovideo.jp/watch/sm9');
 assert(nicoState.lightColor === 'GREEN', 'Niconico 顯示綠燈支援標記');
 
-const anime1State = getSiteIndicatorState('https://anime1.me/12345');
-assert(anime1State.lightColor === 'GREEN', 'Anime1.me 顯示綠燈支援標記');
+const catchplayActiveState = getSiteIndicatorState('https://www.catchplay.com/watch/123');
+assert(catchplayActiveState.lightColor === 'GREEN', 'CATCHPLAY+ 顯示綠燈支援標記');
 
 const netflixState = getSiteIndicatorState('https://www.netflix.com/watch/80057281');
 assert(netflixState.lightColor === 'GREEN', 'Netflix 顯示綠燈支援標記');
@@ -608,10 +605,12 @@ assert(googleState.lightColor === 'RED', '非支援網站 (Google) 顯示紅燈�
 assert(googleState.badgeKey === 'unsupportedBadge', '非支援網站顯示不支援徽章');
 assert(googleState.storeRedirectAvailable === true, '非支援網站支援點擊前往 Chrome 商店查看完整支援清單');
 
-// 嚴格落實使用者需求：處於授權名單但未開放的網站，一律顯示紅燈不支援 (杜絕特殊顯示或黃燈)
-const catchplayState = getSiteIndicatorState('https://www.catchplay.com/watch/123');
-assert(catchplayState.lightColor === 'RED', '未正式開放支援網站 (CatchPlay) 嚴格顯示紅燈 (杜絕黃燈)');
-assert(catchplayState.badgeKey === 'unsupportedBadge', '未正式開放支援網站顯示不支援徽章');
+// 嚴格落實使用者需求：非正版授權 (Anime1.me) 與未開放網站預設一律顯示紅燈不支援
+const anime1DefaultState = getSiteIndicatorState('https://anime1.me/12345', false);
+assert(anime1DefaultState.lightColor === 'RED', '預設狀態下 Anime1.me 嚴格顯示紅燈不支援');
+assert(anime1DefaultState.badgeKey === 'unsupportedBadge', '預設狀態下 Anime1.me 顯示不支援徽章');
+const anime1UnlockedState = getSiteIndicatorState('https://anime1.me/12345', true);
+assert(anime1UnlockedState.lightColor === 'GREEN', '連擊 3 次版本號解鎖彩蛋後 Anime1.me 轉為綠燈通用模式支援');
 
 const huluState = getSiteIndicatorState('https://www.hulu.com/watch/123');
 assert(huluState.lightColor === 'RED', '未正式開放支援網站 (Hulu) 嚴格顯示紅燈 (杜絕黃燈)');
@@ -951,7 +950,7 @@ const ACTIVE_18_MATRIX = [
   { id: 'youtube', name: 'YouTube', raw: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&ab_channel=Rick', expectedCanon: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
   { id: 'bilibili', name: 'Bilibili', raw: 'https://www.bilibili.com/list/watchlater?bvid=BV1xx411c7mD&p=2&spm_id_from=333', expectedCanon: 'https://www.bilibili.com/video/BV1xx411c7mD?p=2' },
   { id: 'niconico', name: 'Niconico', raw: 'https://sp.nicovideo.jp/watch/sm9?ref=top', expectedCanon: 'https://www.nicovideo.jp/watch/sm9' },
-  { id: 'anime1', name: 'Anime1.me', raw: 'https://anime1.me/?cat=1542', expectedCanon: 'https://anime1.me/?cat=1542' },
+  { id: 'catchplay', name: 'CATCHPLAY+', raw: 'https://www.catchplay.com/tw/watch/ed8c3d70-1234?utm_source=line', expectedCanon: 'https://www.catchplay.com/watch/ed8c3d70-1234' },
   { id: 'netflix', name: 'Netflix', raw: 'https://www.netflix.com/watch/80057281?trackId=13752289&tctx=0%2C0', expectedCanon: 'https://www.netflix.com/watch/80057281' },
   { id: 'vimeo', name: 'Vimeo', raw: 'https://vimeo.com/showcase/9999999/video/76979871', expectedCanon: 'https://vimeo.com/76979871' },
   { id: 'gamer', name: '巴哈姆特動畫瘋', raw: 'https://ani.gamer.com.tw/animeVideo.php?sn=38210&ad=1', expectedCanon: 'https://ani.gamer.com.tw/animeVideo.php?sn=38210' },
@@ -1054,29 +1053,30 @@ console.log('\n--- 測試套件 15: 實務連線與多使用者房間加入情�
 
 // 情境 1: 使用者 B 加入使用者 A 房間，A 有開啟非正式支援名單模式，B 未開啟
 console.log('  ▸ [情境 1: 房主 A 解鎖候選/通用模式，觀眾 B 未開啟加入]');
-const candidateUrl1 = 'https://www.catchplay.com/watch/12345';
+const candidateUrl1 = 'https://www.hulu.com/watch/12345';
 const candidateUrl2 = 'https://www.litv.tv/vod/drama/content.do?brd_id=123';
 const thirdPartyUrl1 = 'https://gimy.ai/watch/789';
 const thirdPartyUrl2 = 'https://8maple.tv/show/101';
-const thirdPartyUrl3 = 'https://myself-bbs.com/thread-123-1-1.html';
+const thirdPartyUrl3 = 'https://anime1.me/23456';
 
 // 1.1 房主 A 處於解鎖狀態 (allowCandidates: true)，在候選與第三方網站開房皆放行
-assert(isUrlAllowed(candidateUrl1, true) === true, '房主 A 解鎖狀態下，CATCHPLAY+ 候選網站判定合法放行');
+assert(isUrlAllowed(candidateUrl1, true) === true, '房主 A 解鎖狀態下，Hulu 候選網站判定合法放行');
 assert(isUrlAllowed(candidateUrl2, true) === true, '房主 A 解鎖狀態下，LiTV 影視候選網站判定合法放行');
 assert(isUrlAllowed(thirdPartyUrl1, true) === true, '房主 A 解鎖狀態下，Gimy 劇迷通用 activeTab 模式判定合法放行');
 assert(isUrlAllowed(thirdPartyUrl2, true) === true, '房主 A 解鎖狀態下，楓林網 8maple 通用 activeTab 模式判定合法放行');
-assert(isUrlAllowed(thirdPartyUrl3, true) === true, '房主 A 解鎖狀態下，Myself 動漫通用 activeTab 模式判定合法放行');
+assert(isUrlAllowed(thirdPartyUrl3, true) === true, '房主 A 解鎖狀態下，Anime1.me 通用 activeTab 模式判定合法放行');
 
 // 1.2 觀眾 B 處於預設鎖定狀態 (allowCandidates: false)，加入時對上述網址全數攔截阻擋跳轉
-assert(isUrlAllowed(candidateUrl1, false) === false, '觀眾 B 未解鎖時，CATCHPLAY+ 候選網站被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(candidateUrl1, false) === false, '觀眾 B 未解鎖時，Hulu 候選網站被嚴格判定為未授權並觸發資安攔截');
 assert(isUrlAllowed(candidateUrl2, false) === false, '觀眾 B 未解鎖時，LiTV 影視候選網站被嚴格判定為未授權並觸發資安攔截');
 assert(isUrlAllowed(thirdPartyUrl1, false) === false, '觀眾 B 未解鎖時，Gimy 劇迷高風險網站被嚴格判定為未授權並觸發資安攔截');
 assert(isUrlAllowed(thirdPartyUrl2, false) === false, '觀眾 B 未解鎖時，楓林網被嚴格判定為未授權並觸發資安攔截');
-assert(isUrlAllowed(thirdPartyUrl3, false) === false, '觀眾 B 未解鎖時，Myself 動漫被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(thirdPartyUrl3, false) === false, '觀眾 B 未解鎖時，Anime1.me 被嚴格判定為未授權並觸發資安攔截');
 
 // 1.3 觀眾 B 隨後在彈窗中連續點擊 3 次版本號解鎖候選模式，即時通過校驗
-assert(isUrlAllowed(candidateUrl1, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 CATCHPLAY+ 順利轉為放行');
+assert(isUrlAllowed(candidateUrl1, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 Hulu 順利轉為放行');
 assert(isUrlAllowed(thirdPartyUrl1, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 Gimy 順利轉為放行');
+assert(isUrlAllowed(thirdPartyUrl3, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 Anime1.me 順利轉為放行');
 
 // 情境 2: 雙方皆開啟非正式支援模式 (A, B 均已解鎖彩蛋)
 console.log('  ▸ [情境 2: 房主 A 與觀眾 B 皆解鎖候選/通用模式]');

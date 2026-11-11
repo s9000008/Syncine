@@ -48,7 +48,8 @@ type PlatformStatusKey =
   | 'fridayConnected'
   | 'maxConnected'
   | 'iqiyiConnected'
-  | 'appleTvConnected';
+  | 'appleTvConnected'
+  | 'catchplayConnected';
 
 const PLATFORM_TAB_STATUS_KEY_MAP: Record<string, PlatformStatusKey> = {
   youtube: 'youtubeConnected',
@@ -69,6 +70,7 @@ const PLATFORM_TAB_STATUS_KEY_MAP: Record<string, PlatformStatusKey> = {
   max: 'maxConnected',
   iqiyi: 'iqiyiConnected',
   appletv: 'appleTvConnected',
+  catchplay: 'catchplayConnected',
 };
 
 export default function Popup() {

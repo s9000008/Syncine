@@ -409,6 +409,12 @@ function findVideoElement(): HTMLVideoElement | null {
         Array.from(document.querySelectorAll('amp-video-player video, apple-tv-plus-player video')) as HTMLVideoElement[]
       ) || findGenericVideoElement()
     );
+  } else if (host.includes('catchplay.com')) {
+    return (
+      pickBestNonAdVideo(
+        Array.from(document.querySelectorAll('.video-js video, video.vjs-tech, #player video, .player-container video')) as HTMLVideoElement[]
+      ) || findGenericVideoElement()
+    );
   }
   return findGenericVideoElement();
 }
@@ -1161,7 +1167,16 @@ export function isPlaylistOrEpisodeSupported(): boolean {
       return false;
     }
 
-    // 18. Anime1.me 上下集與分類合集導覽支援
+    // 18. CATCHPLAY+ 影集選集與下一集支援
+    if (host.includes('catchplay.com')) {
+      if (search.includes('ep=') || search.includes('episode=')) return true;
+      if (document.querySelector('.episode-item, .next-episode, [class*="episode" i], [aria-label*="Next" i], [aria-label*="下一集"]')) {
+        return true;
+      }
+      return false;
+    }
+
+    // 19. Anime1.me 上下集與分類合集導覽支援 (通用模式)
     if (host.includes('anime1.me')) {
       if (search.includes('cat=')) return true;
       if (document.querySelector('.nav-previous a, .nav-next a, a[rel="prev"], a[rel="next"], .cat-links a')) {
@@ -1369,6 +1384,15 @@ function initPlaylistClickListeners() {
         return;
       }
 
+      // CATCHPLAY+: 選集與下一集點擊
+      if (
+        window.location.hostname.includes('catchplay.com') &&
+        target.closest('.episode-item, .next-episode, [class*="episode" i], [aria-label*="Next" i], [aria-label*="下一集"]')
+      ) {
+        markPlaylistActionTriggered('CATCHPLAY+ Episode/Next Click');
+        return;
+      }
+
       // Anime1.me: 上一集 / 下一集 / 全集連結點擊
       if (
         target.closest(
@@ -1391,7 +1415,7 @@ export function checkAndBroadcastPlaylistNavigation(source: string) {
 
   const currentHref = window.location.href;
   // 確保目標頁面必須為合法影音播放路徑（排除使用者退回首頁或 /browse 瀏覽頁，杜絕誤發非播放頁跳轉）
-  if (!isPlatformPermitted(currentHref)) return;
+  if (!isPlatformPermitted(currentHref) && !isUniversalSupportedUrl(currentHref)) return;
 
   const currentVideoId = getVideoIdentifier(currentHref);
   const roomVideoId = getVideoIdentifier(roomState.currentUrl);

@@ -11,7 +11,7 @@ export const SERVER_HOST_WHITELIST: RegExp[] = [
   /^https:\/\/(www\.)?bilibili\.com\/(video\/[a-zA-Z0-9]+|list\/.+\?.*bvid=BV[a-zA-Z0-9]+)/,
   /^https:\/\/(www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/(www\.|sp\.)?nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/(\?cat=[0-9]+|.+)/,
+  /^https:\/\/(www\.)?catchplay\.com\/.*(watch|play|video)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
   /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
   /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
@@ -424,6 +424,14 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       if (epMatch && epMatch[1]) return `appletv:${epMatch[1]}`;
     }
 
+    if (url.hostname.includes('catchplay.com')) {
+      const match = url.pathname.match(/\/(?:watch|play|video)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        const ep = url.searchParams.get('ep') || url.searchParams.get('episode');
+        return ep ? `catchplay:${match[1]}?ep=${ep}` : `catchplay:${match[1]}`;
+      }
+    }
+
     return buildCleanGenericUrl(url);
   } catch (e) {
     return null;
@@ -659,6 +667,17 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
       const cleanPath = url.pathname.replace(/\/+$/, '');
       if (cleanPath && cleanPath !== '/') {
         return `https://tv.apple.com${cleanPath}`;
+      }
+    }
+
+    // 19. CATCHPLAY+: 保留標準 /watch/<id> 並保留分集參數 (?ep=)
+    if (host.includes('catchplay.com')) {
+      const match = url.pathname.match(/\/(watch|play|video)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1] && match[2]) {
+        const ep = url.searchParams.get('ep') || url.searchParams.get('episode');
+        return ep
+          ? `https://www.catchplay.com/${match[1]}/${match[2]}?ep=${encodeURIComponent(ep)}`
+          : `https://www.catchplay.com/${match[1]}/${match[2]}`;
       }
     }
 

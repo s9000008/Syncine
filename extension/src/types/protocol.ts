@@ -424,6 +424,15 @@ export function getVideoIdentifier(rawUrl?: string): string | null {
       }
     }
 
+    // 19. CATCHPLAY+ (如: catchplay.com/tw/watch/ed8c3d70... 或 /watch/abc?ep=3)
+    if (url.hostname.includes('catchplay.com')) {
+      const match = url.pathname.match(/\/(?:watch|play|video)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        const ep = url.searchParams.get('ep') || url.searchParams.get('episode');
+        return ep ? `catchplay:${match[1]}?ep=${ep}` : `catchplay:${match[1]}`;
+      }
+    }
+
     // 其它網址保留非追蹤型業務查詢參數 (如 ?id=, ?ep=) 作為唯一識別
     return buildCleanGenericUrl(url);
   } catch (e) {
@@ -660,6 +669,17 @@ export function getCanonicalVideoUrl(rawUrl?: string): string {
       const cleanPath = url.pathname.replace(/\/+$/, '');
       if (cleanPath && cleanPath !== '/') {
         return `https://tv.apple.com${cleanPath}`;
+      }
+    }
+
+    // 19. CATCHPLAY+: 保留標準 /watch/<id> 並保留分集參數 (?ep=)
+    if (host.includes('catchplay.com')) {
+      const match = url.pathname.match(/\/(watch|play|video)\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1] && match[2]) {
+        const ep = url.searchParams.get('ep') || url.searchParams.get('episode');
+        return ep
+          ? `https://www.catchplay.com/${match[1]}/${match[2]}?ep=${encodeURIComponent(ep)}`
+          : `https://www.catchplay.com/${match[1]}/${match[2]}`;
       }
     }
 

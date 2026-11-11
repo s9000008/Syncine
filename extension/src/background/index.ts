@@ -6,7 +6,7 @@ import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
-// 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇、Niconico 與 Anime1.me)
+// 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇、Niconico 與 CATCHPLAY+ 等 18 大正版平台)
 export const HOST_WHITELIST: RegExp[] = [
   /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
   /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
@@ -15,7 +15,7 @@ export const HOST_WHITELIST: RegExp[] = [
   /^https:\/\/(www\.)?bilibili\.com\/(video\/[a-zA-Z0-9]+|list\/.+\?.*bvid=BV[a-zA-Z0-9]+)/,
   /^https:\/\/(www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/(www\.|sp\.)?nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/(www\.)?catchplay\.com\/.*(watch|play|video)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
   /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
   /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
@@ -600,7 +600,7 @@ function broadcastToVideoTabs(msg: any) {
         targetUrl &&
         (isPlatformDomainActive(targetUrl, candidatesUnlocked) ||
           isPlatformActive(targetUrl, candidatesUnlocked) ||
-          (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))))
+          (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('catchplay.com') || tab.url.includes('netflix.com'))))
       ) {
         chrome.tabs.sendMessage(tab.id, { ...msg, parentTabUrl: targetUrl }).catch(() => {});
         sentCount++;

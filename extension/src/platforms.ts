@@ -66,13 +66,6 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     matchUrl: (url) => url.pathname.includes('/watch/')
   },
   {
-    id: 'anime1',
-    name: 'Anime1.me',
-    enabled: true,
-    domains: ['anime1.me'],
-    matchUrl: (url) => (url.pathname.length > 1 && url.pathname !== '/') || url.searchParams.has('cat')
-  },
-  {
     id: 'netflix',
     name: 'Netflix',
     enabled: true,
@@ -189,18 +182,21 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
       url.pathname.includes('/sport/') ||
       url.pathname.includes('umc.cmc.')
   },
+  {
+    id: 'catchplay',
+    name: 'CATCHPLAY+',
+    enabled: true,
+    domains: ['catchplay.com'],
+    matchUrl: (url) =>
+      url.pathname.includes('/watch/') ||
+      url.pathname.includes('/play/') ||
+      url.pathname.includes('/video/')
+  },
 
   // =========================================================================
   // 預先取得授權但尚未局部開放支援之候選名單 (Permitted Staged - enabled: false)
   // 未來若欲開放，只需將 enabled 改為 true 並實裝專屬選擇器，不需重送 Chrome 審查！
   // =========================================================================
-  {
-    id: 'catchplay',
-    name: 'CATCHPLAY+',
-    enabled: false,
-    domains: ['catchplay.com'],
-    matchUrl: (url) => url.pathname.includes('/watch/')
-  },
   {
     id: 'litv',
     name: 'LiTV 立視線上影視',
@@ -308,6 +304,7 @@ export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
  * 高風險第三方影視與動漫綜合網站清單 (未授權/經常跳轉網域，零 Manifest 宣告，僅在版本號彩蛋解鎖後以 activeTab 模式動態支援)
  */
 export const HIGH_RISK_STREAMING_CATALOG: { name: string; pattern: RegExp }[] = [
+  { name: 'Anime1.me', pattern: /(?:^|\.)anime1\.me/i },
   { name: 'Gimy 劇迷', pattern: /(?:^|\.)gimy\.[a-z0-9_-]+/i },
   { name: '楓林網 (8maple)', pattern: /(?:^|\.)8maple\.[a-z0-9_-]+|maplestage\./i },
   { name: '小鴨影音 / 123KUBO', pattern: /kubo|kobo/i },
@@ -355,6 +352,9 @@ export function isUniversalSupportedUrl(rawUrl?: string): boolean {
       host.startsWith('172.16.')
     ) {
       return false;
+    }
+    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+      return (url.pathname.length > 1 && url.pathname !== '/') || url.searchParams.has('cat');
     }
     // 若命中已知高風險/第三方影視平台特徵，放行通用模式
     if (getHighRiskPlatform(rawUrl)) {
@@ -430,7 +430,7 @@ export const HOST_WHITELIST: RegExp[] = [
   /^https:\/\/(www\.)?bilibili\.com\/(video\/[a-zA-Z0-9]+|list\/.+\?.*bvid=BV[a-zA-Z0-9]+)/,
   /^https:\/\/(www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
   /^https:\/\/(www\.|sp\.)?nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/anime1\.me\/.+/,
+  /^https:\/\/(www\.)?catchplay\.com\/.*(watch|play|video)\/[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
   /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
   /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
@@ -508,8 +508,11 @@ export function isUrlAllowed(rawUrl: string, allowCandidates = false): boolean {
     ) {
       return true;
     }
-    // Anime1.me
-    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+    // CATCHPLAY+
+    if (
+      (host === 'www.catchplay.com' || host === 'catchplay.com' || host.endsWith('.catchplay.com')) &&
+      (parsed.pathname.includes('/watch/') || parsed.pathname.includes('/play/') || parsed.pathname.includes('/video/'))
+    ) {
       return true;
     }
     // Netflix

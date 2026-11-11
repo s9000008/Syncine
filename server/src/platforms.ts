@@ -54,13 +54,6 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
     matchUrl: (url) => url.pathname.includes('/watch/')
   },
   {
-    id: 'anime1',
-    name: 'Anime1.me',
-    enabled: true,
-    domains: ['anime1.me'],
-    matchUrl: (url) => (url.pathname.length > 1 && url.pathname !== '/') || url.searchParams.has('cat')
-  },
-  {
     id: 'netflix',
     name: 'Netflix',
     enabled: true,
@@ -177,15 +170,18 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
       url.pathname.includes('/sport/') ||
       url.pathname.includes('umc.cmc.')
   },
-
-  // 預先授權但尚未開放支援之平台 (enabled: false)
   {
     id: 'catchplay',
     name: 'CATCHPLAY+',
-    enabled: false,
+    enabled: true,
     domains: ['catchplay.com'],
-    matchUrl: (url) => url.pathname.includes('/watch/')
+    matchUrl: (url) =>
+      url.pathname.includes('/watch/') ||
+      url.pathname.includes('/play/') ||
+      url.pathname.includes('/video/')
   },
+
+  // 預先授權但尚未開放支援之平台 (enabled: false)
   {
     id: 'litv',
     name: 'LiTV 立視線上影視',

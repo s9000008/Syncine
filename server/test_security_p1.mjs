@@ -159,7 +159,8 @@ import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.youtube.com/watch?v=dQw4w9WgXcQ')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.bilibili.com/video/BV1xx411c7mD')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.nicovideo.jp/watch/sm9')));
-    assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://anime1.me/12345')));
+    assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.catchplay.com/tw/watch/ed8c3d70')));
+    assert.strictEqual(SERVER_HOST_WHITELIST.some(r => r.test('https://anime1.me/12345')), false, '預設伺服器白名單已移除非正版授權之 Anime1.me');
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://www.netflix.com/watch/80057281')));
     assert.ok(SERVER_HOST_WHITELIST.some(r => r.test('https://netflix.com/watch/80057281')));
     // 攔截釣魚與惡意協定
