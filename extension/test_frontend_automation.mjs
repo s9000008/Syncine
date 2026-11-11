@@ -35,7 +35,7 @@ const { getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } = await
 
 const platformsModulePath = path.join(__dirname, 'dist_test/platforms.mjs');
 execSync(`npx esbuild "${path.join(__dirname, 'src/platforms.ts')}" --bundle --format=esm --outfile="${platformsModulePath}"`, { stdio: 'pipe' });
-const { isPlatformActive, isPlatformPermitted, getPlatformByUrl, getActivePlatforms } = await import(`file://${platformsModulePath.replace(/\\/g, '/')}`);
+const { isPlatformActive, isPlatformPermitted, getPlatformByUrl, getActivePlatforms, isUrlAllowed } = await import(`file://${platformsModulePath.replace(/\\/g, '/')}`);
 
 // ----------------------------------------------------
 // 測試套件 0: 權限名單與支援名單解耦 (Permission Decoupling) 測試
@@ -1046,6 +1046,104 @@ assert(
     contentSrc.includes('requestInitialSyncIfNeeded'),
   '觀眾端入房/跳轉載入完成後主動拉取初始時間軸機制 (P2P + Relay 雙模式) 已實裝'
 );
+
+// ----------------------------------------------------
+// 測試套件 15: 實務連線與多使用者房間加入情境矩陣測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 15: 實務連線與多使用者房間加入情境矩陣測試 ---');
+
+// 情境 1: 使用者 B 加入使用者 A 房間，A 有開啟非正式支援名單模式，B 未開啟
+console.log('  ▸ [情境 1: 房主 A 解鎖候選/通用模式，觀眾 B 未開啟加入]');
+const candidateUrl1 = 'https://www.catchplay.com/watch/12345';
+const candidateUrl2 = 'https://www.litv.tv/vod/drama/content.do?brd_id=123';
+const thirdPartyUrl1 = 'https://gimy.ai/watch/789';
+const thirdPartyUrl2 = 'https://8maple.tv/show/101';
+const thirdPartyUrl3 = 'https://myself-bbs.com/thread-123-1-1.html';
+
+// 1.1 房主 A 處於解鎖狀態 (allowCandidates: true)，在候選與第三方網站開房皆放行
+assert(isUrlAllowed(candidateUrl1, true) === true, '房主 A 解鎖狀態下，CATCHPLAY+ 候選網站判定合法放行');
+assert(isUrlAllowed(candidateUrl2, true) === true, '房主 A 解鎖狀態下，LiTV 影視候選網站判定合法放行');
+assert(isUrlAllowed(thirdPartyUrl1, true) === true, '房主 A 解鎖狀態下，Gimy 劇迷通用 activeTab 模式判定合法放行');
+assert(isUrlAllowed(thirdPartyUrl2, true) === true, '房主 A 解鎖狀態下，楓林網 8maple 通用 activeTab 模式判定合法放行');
+assert(isUrlAllowed(thirdPartyUrl3, true) === true, '房主 A 解鎖狀態下，Myself 動漫通用 activeTab 模式判定合法放行');
+
+// 1.2 觀眾 B 處於預設鎖定狀態 (allowCandidates: false)，加入時對上述網址全數攔截阻擋跳轉
+assert(isUrlAllowed(candidateUrl1, false) === false, '觀眾 B 未解鎖時，CATCHPLAY+ 候選網站被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(candidateUrl2, false) === false, '觀眾 B 未解鎖時，LiTV 影視候選網站被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(thirdPartyUrl1, false) === false, '觀眾 B 未解鎖時，Gimy 劇迷高風險網站被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(thirdPartyUrl2, false) === false, '觀眾 B 未解鎖時，楓林網被嚴格判定為未授權並觸發資安攔截');
+assert(isUrlAllowed(thirdPartyUrl3, false) === false, '觀眾 B 未解鎖時，Myself 動漫被嚴格判定為未授權並觸發資安攔截');
+
+// 1.3 觀眾 B 隨後在彈窗中連續點擊 3 次版本號解鎖候選模式，即時通過校驗
+assert(isUrlAllowed(candidateUrl1, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 CATCHPLAY+ 順利轉為放行');
+assert(isUrlAllowed(thirdPartyUrl1, true) === true, '觀眾 B 點擊版本號解鎖後，再次校驗 Gimy 順利轉為放行');
+
+// 情境 2: 雙方皆開啟非正式支援模式 (A, B 均已解鎖彩蛋)
+console.log('  ▸ [情境 2: 房主 A 與觀眾 B 皆解鎖候選/通用模式]');
+const wetvUrl = 'https://wetv.vip/play/123';
+const litvUrl = 'https://www.litv.tv/vod/123';
+const animeflixUrl = 'https://animeflix.live/watch/456';
+assert(isUrlAllowed(wetvUrl, true) === true, '雙方解鎖模式下，WeTV 順利同步');
+assert(isUrlAllowed(litvUrl, true) === true, '雙方解鎖模式下，LiTV 順利同步');
+assert(isUrlAllowed(animeflixUrl, true) === true, '雙方解鎖模式下，Animeflix 第三方網站順利同步');
+
+// 情境 3: 雙方皆未開啟非正式支援模式 (標準安全模式，18 大正版平台)
+console.log('  ▸ [情境 3: 雙方皆處於預設安全模式，觀看 18 大正式支援正版平台]');
+const ytUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+const gamerUrl = 'https://ani.gamer.com.tw/animeVideo.php?sn=38210';
+const biliUrl = 'https://www.bilibili.com/video/BV1xx411c7mD';
+const netflixUrl = 'https://www.netflix.com/watch/80057281';
+const nicoUrl = 'https://www.nicovideo.jp/watch/sm9';
+const fridayUrl = 'https://video.friday.tw/drama/detail/54321';
+assert(isUrlAllowed(ytUrl, false) === true, '預設安全模式下，YouTube 正常同步無警告');
+assert(isUrlAllowed(gamerUrl, false) === true, '預設安全模式下，巴哈姆特動畫瘋正常同步無警告');
+assert(isUrlAllowed(biliUrl, false) === true, '預設安全模式下，Bilibili 正常同步無警告');
+assert(isUrlAllowed(netflixUrl, false) === true, '預設安全模式下，Netflix 正常同步無警告');
+assert(isUrlAllowed(nicoUrl, false) === true, '預設安全模式下，Niconico 正常同步無警告');
+assert(isUrlAllowed(fridayUrl, false) === true, '預設安全模式下，friDay 影音 (18大正版之一) 正常同步無警告');
+assert(isUrlAllowed(nicoUrl, false) === true, '預設安全模式下，Niconico 正常同步無警告');
+
+// 情境 4: 房主 A 在瀏覽器內部系統頁面開房 (防呆過濾情境)
+console.log('  ▸ [情境 4: 房主 A 在系統內部頁面開房防呆保護]');
+assert(isUrlAllowed('chrome://newtab/', false) === false, 'chrome://newtab/ 在標準模式下絕對禁止放行');
+assert(isUrlAllowed('chrome://newtab/', true) === false, 'chrome://newtab/ 在解鎖模式下亦嚴格禁止放行 (防止繞過)');
+assert(isUrlAllowed('about:blank', true) === false, 'about:blank 在任何模式下皆禁止放行');
+assert(isUrlAllowed('edge://flags', true) === false, 'edge://flags 在任何模式下皆禁止放行');
+assert(isUrlAllowed('chrome-extension://abcdefg/popup.html', true) === false, 'chrome-extension:// 協定在任何模式下皆禁止放行');
+
+// 情境 5: 惡意釣魚跳轉與非安全通訊協定注入防禦
+console.log('  ▸ [情境 5: 惡意腳本注入與釣魚跳轉防禦]');
+assert(isUrlAllowed('javascript:alert(document.cookie)', true) === false, 'javascript: 偽協定被 100% 阻斷');
+assert(isUrlAllowed('data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==', true) === false, 'data: 偽協定被 100% 阻斷');
+assert(isUrlAllowed('file:///C:/Windows/System32/calc.exe', true) === false, 'file: 本機通訊協定被 100% 阻斷');
+assert(isUrlAllowed('http://phishing-youtube.com/watch?v=123', true) === false, '非 HTTPS 非白名單釣魚網址被 100% 阻斷');
+
+// 情境 6: 網路抖動 / 高頻 P2P 重連告警防轟炸模擬驗證
+console.log('  ▸ [情境 6: 高頻事件與 P2P 重連告警防轟炸機制]');
+let simulatedAlertCount = 0;
+let lastAlertUrlSim = '';
+let lastAlertTimeSim = 0;
+function simulateVerifyAndRedirect(url, allowCandidates) {
+  const isSafe = isUrlAllowed(url, allowCandidates);
+  if (!isSafe) {
+    const now = Date.now();
+    if (url === lastAlertUrlSim && now - lastAlertTimeSim < 15000) {
+      return; // 抑制重複告警
+    }
+    lastAlertUrlSim = url;
+    lastAlertTimeSim = now;
+    simulatedAlertCount++;
+  }
+}
+
+// 模擬觀眾 B 在加入 Gimy 房間後，遭遇 5 次突發性事件 (加房成功 + 3次 P2P 重連握手 + 1次心跳)
+simulatedAlertCount = 0;
+lastAlertUrlSim = '';
+lastAlertTimeSim = 0;
+for (let i = 0; i < 5; i++) {
+  simulateVerifyAndRedirect('https://gimy.ai/watch/789', false);
+}
+assert(simulatedAlertCount === 1, `5 次突發重連與心跳事件中，15 秒冷卻防線將告警數嚴格限制為 1 次 (實際觸發: ${simulatedAlertCount})`);
 
 // ----------------------------------------------------
 // 總結報告

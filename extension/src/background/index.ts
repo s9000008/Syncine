@@ -1,13 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted, isUniversalSupportedUrl } from '../platforms';
+import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted, isUniversalSupportedUrl, isUrlAllowed as checkUrlAllowed } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
 // 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇、Niconico 與 Anime1.me)
-const HOST_WHITELIST = [
+export const HOST_WHITELIST: RegExp[] = [
   /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
   /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
   /^https:\/\/(www\.|m\.)?youtube\.com\/(watch\?.*v=|shorts\/|live\/|embed\/)[a-zA-Z0-9_-]+/,
@@ -183,139 +183,8 @@ if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
 }
 
 export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean): boolean {
-  if (!rawUrl || typeof rawUrl !== 'string') return false;
-  const targetUrl = rawUrl.trim();
-
   const allowCandidates = allowCandidatesOverride !== undefined ? allowCandidatesOverride : candidatesUnlocked;
-
-  // 0. 局部開放守衛：只有正式啟用，或已由彩蛋解鎖之候選平台才放行
-  if (!isPlatformActive(targetUrl, allowCandidates)) {
-    return false;
-  }
-
-  // 1. 若處於解鎖模式且為合規候選平台或通用 activeTab 網頁，直接放行
-  if (allowCandidates && (isPlatformPermitted(targetUrl) || isUniversalSupportedUrl(targetUrl))) {
-    return true;
-  }
-
-  // 1. 正則白名單檢驗
-  if (HOST_WHITELIST.some((regex) => regex.test(targetUrl))) {
-    return true;
-  }
-
-  // 2. 原生 URL 解析器雙重驗證 (防範因 query 參數過長、轉義或大小寫導致正則偽陰性)
-  try {
-    const parsed = new URL(targetUrl);
-    if (parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-
-    // YouTube
-    if (
-      ((host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') &&
-        ((parsed.pathname === '/watch' && parsed.searchParams.has('v')) ||
-          parsed.pathname.startsWith('/shorts/') ||
-          parsed.pathname.startsWith('/live/') ||
-          parsed.pathname.startsWith('/embed/'))) ||
-      (host === 'youtu.be' && parsed.pathname.length > 1)
-    ) {
-      return true;
-    }
-    // Bilibili
-    if (
-      (host === 'www.bilibili.com' || host === 'bilibili.com' || host.endsWith('.bilibili.com')) &&
-      (parsed.pathname.includes('/video/') ||
-        parsed.pathname.includes('/bangumi/play/') ||
-        (parsed.pathname.toLowerCase().startsWith('/list/') && parsed.searchParams.has('bvid')))
-    ) {
-      return true;
-    }
-    // Niconico
-    if (
-      (host === 'www.nicovideo.jp' || host === 'nicovideo.jp' || host.endsWith('.nicovideo.jp')) &&
-      parsed.pathname.includes('/watch/')
-    ) {
-      return true;
-    }
-    // Anime1.me
-    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
-      return true;
-    }
-    // Netflix
-    if (
-      (host === 'www.netflix.com' || host === 'netflix.com') &&
-      parsed.pathname.includes('/watch/')
-    ) {
-      return true;
-    }
-    // Vimeo
-    if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) {
-      return true;
-    }
-    // 巴哈姆特動畫瘋
-    if (host === 'ani.gamer.com.tw' && parsed.pathname.includes('/animeVideo.php') && parsed.searchParams.has('sn')) {
-      return true;
-    }
-    // Twitch
-    if (host === 'www.twitch.tv' || host === 'twitch.tv' || host === 'clips.twitch.tv') {
-      return true;
-    }
-    // Disney+
-    if ((host === 'www.disneyplus.com' || host === 'disneyplus.com') && (parsed.pathname.includes('/video/') || parsed.pathname.includes('/play/') || parsed.pathname.includes('/series/'))) {
-      return true;
-    }
-    // Prime Video / Amazon
-    if (
-      (host === 'www.primevideo.com' || host === 'primevideo.com' || host === 'www.amazon.com' || host === 'amazon.com') &&
-      (parsed.pathname.includes('/detail/') || parsed.pathname.includes('/gp/video/') || (parsed.pathname.includes('/watch') && parsed.searchParams.has('gti')))
-    ) {
-      return true;
-    }
-    // MyVideo
-    if ((host === 'www.myvideo.net.tw' || host === 'myvideo.net.tw') && (parsed.pathname.includes('/details/') || parsed.pathname.includes('/player/'))) {
-      return true;
-    }
-    // LINE TV
-    if ((host === 'www.linetv.tw' || host === 'linetv.tw') && parsed.pathname.includes('/drama/')) {
-      return true;
-    }
-    // KKTV
-    if ((host === 'www.kktv.me' || host === 'kktv.me') && parsed.pathname.includes('/play/')) {
-      return true;
-    }
-    // Crunchyroll
-    if ((host === 'www.crunchyroll.com' || host === 'crunchyroll.com') && parsed.pathname.includes('/watch/')) {
-      return true;
-    }
-    // friDay
-    if (host === 'video.friday.tw' && (/\/(detail|drama|movie|anime|show|sn)\//.test(parsed.pathname) || parsed.pathname.includes('/player'))) {
-      return true;
-    }
-    // Max / HBO Max
-    if (
-      (host === 'www.max.com' || host === 'max.com' || host === 'play.max.com' || host === 'www.hbomax.com' || host === 'hbomax.com' || host === 'play.hbomax.com') &&
-      (parsed.pathname.includes('/video/watch') || parsed.pathname.includes('/player/') || parsed.pathname.includes('/watch/'))
-    ) {
-      return true;
-    }
-    // iQIYI
-    if ((host === 'www.iq.com' || host === 'iq.com') && parsed.pathname.includes('/play/')) {
-      return true;
-    }
-    if ((host === 'www.iqiyi.com' || host === 'iqiyi.com') && (parsed.pathname.includes('/v_') || parsed.pathname.includes('/a_'))) {
-      return true;
-    }
-    // Apple TV+
-    if (
-      host === 'tv.apple.com' &&
-      (parsed.pathname.includes('/episode/') || parsed.pathname.includes('/movie/') || parsed.pathname.includes('/show/') || parsed.pathname.includes('/sport/') || parsed.pathname.includes('umc.cmc.'))
-    ) {
-      return true;
-    }
-  } catch (e) {
-    return false;
-  }
-
-  return false;
+  return checkUrlAllowed(rawUrl, allowCandidates);
 }
 
 let lastSecurityAlertUrl = '';
