@@ -336,6 +336,35 @@ export function getHighRiskPlatform(rawUrl?: string): { name: string; isHighRisk
 }
 
 /**
+ * 檢查主機名稱是否為本機、私有網路 (RFC 1918)、Link-Local 雲端中繼資料或內部保留網域 (SSRF 縱深防禦)
+ */
+export function isPrivateOrInternalHost(rawHost: string): boolean {
+  const host = rawHost.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '0:0:0:0:0:0:0:1' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.localhost')
+  ) {
+    return true;
+  }
+  if (
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 檢查當前網址是否為可透過 activeTab 通用模式支援之高風險或第三方串流網頁 (過濾內部與本機網址)
  */
 export function isUniversalSupportedUrl(rawUrl?: string): boolean {
@@ -344,13 +373,7 @@ export function isUniversalSupportedUrl(rawUrl?: string): boolean {
     const url = new URL(rawUrl.trim());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
-    if (
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host.startsWith('192.168.') ||
-      host.startsWith('10.') ||
-      host.startsWith('172.16.')
-    ) {
+    if (isPrivateOrInternalHost(host)) {
       return false;
     }
     if (host === 'anime1.me' || host.endsWith('.anime1.me')) {

@@ -181,9 +181,16 @@ import('./dist/rateLimiter.js').then(({ RateLimiter }) => {
   import('./dist/types.js').then(({ isServerUrlAllowed, getCanonicalVideoUrl }) => {
     console.log('\n6. 測試 D-02 & D-07 伺服器候選平台放行、HTTPS 強制與 URL 清洗...');
     assert.strictEqual(isServerUrlAllowed('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), true);
-    assert.strictEqual(isServerUrlAllowed('https://www.catchplay.com/watch/abc123'), true, 'D-02: 伺服器放行預授權候選平台');
+    assert.strictEqual(isServerUrlAllowed('https://www.catchplay.com/watch/abc123'), true, 'D-02: 伺服器放行正式授權 CATCHPLAY+ 平台');
     assert.strictEqual(isServerUrlAllowed('http://www.catchplay.com/watch/abc123'), false, 'D-02: 嚴格阻斷非 HTTPS 協定');
     assert.strictEqual(isServerUrlAllowed('https://evil-phishing.example.com/watch/123'), false, 'D-02: 阻斷非授權外部釣魚網站');
+    assert.strictEqual(isServerUrlAllowed('https://evil-phishing.example.com/watch/123', true), false, 'SEC-01: allowUniversal 開啟時仍嚴格阻斷非影音白名單之外部釣魚網站');
+    assert.strictEqual(isServerUrlAllowed('https://anime1.me/23456', false), false, 'SEC-01: 預設模式下伺服器阻斷非正版授權之 Anime1.me');
+    assert.strictEqual(isServerUrlAllowed('https://anime1.me/23456', true), true, 'SEC-01: allowUniversal 通用模式下放行 Anime1.me');
+    assert.strictEqual(isServerUrlAllowed('https://172.20.0.1/watch/123', true), false, 'SEC-01: 嚴格阻斷 RFC 1918 172.16.0.0/12 (172.20.x.x) 內部網段');
+    assert.strictEqual(isServerUrlAllowed('https://169.254.169.254/latest/meta-data/', true), false, 'SEC-01: 嚴格阻斷 169.254.169.254 雲端中繼資料 SSRF 端點');
+    assert.strictEqual(isServerUrlAllowed('https://[::1]/watch/123', true), false, 'SEC-01: 嚴格阻斷 IPv6 Loopback [::1]');
+    assert.strictEqual(isServerUrlAllowed('https://0.0.0.0/watch/123', true), false, 'SEC-01: 嚴格阻斷 0.0.0.0 本機位址');
     assert.strictEqual(
       getCanonicalVideoUrl('https://www.litv.tv/vod/drama/content.do?id=12345&utm_medium=cpc&gclid=abc'),
       'https://www.litv.tv/vod/drama/content.do?id=12345',

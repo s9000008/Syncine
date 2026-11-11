@@ -1146,6 +1146,81 @@ for (let i = 0; i < 5; i++) {
 assert(simulatedAlertCount === 1, `5 次突發重連與心跳事件中，15 秒冷卻防線將告警數嚴格限制為 1 次 (實際觸發: ${simulatedAlertCount})`);
 
 // ----------------------------------------------------
+// 測試套件 16: 三大核心平台 (YouTube / Bilibili / Netflix) 深度零迴歸與資安加固驗證
+// ----------------------------------------------------
+console.log('\n--- 測試套件 16: 三大核心平台 (YouTube / Bilibili / Netflix) 深度零迴歸與資安加固驗證 ---');
+
+// 1. YouTube 全方位格式與防誤判驗證
+assert(
+  isUrlAllowed('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL12345&index=2') &&
+    getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL12345&index=2') === 'yt:dQw4w9WgXcQ' &&
+    getCanonicalVideoUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL12345&index=2') === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  '[YouTube 核心檢驗] 播放清單網址識別、放行與 Canonical 純淨化 100% 正確'
+);
+assert(
+  isUrlAllowed('https://youtu.be/dQw4w9WgXcQ?si=abcdef') &&
+    isUrlAllowed('https://www.youtube.com/shorts/dQw4w9WgXcQ') &&
+    isUrlAllowed('https://www.youtube.com/live/dQw4w9WgXcQ') &&
+    isUrlAllowed('https://www.youtube.com/embed/dQw4w9WgXcQ'),
+  '[YouTube 核心檢驗] 短網址 (youtu.be)、Shorts、Live 直播與 Embed 內嵌網址全數支援'
+);
+assert(
+  contentSrc.includes('isYouTubeAdPlaying') &&
+    contentSrc.includes('.ytp-ad-player-overlay') &&
+    contentSrc.includes('yt-navigate-finish'),
+  '[YouTube 核心檢驗] 具備 AdBlocker 相容廣告過濾器與 yt-navigate-finish SPA 換片監聽'
+);
+
+// 2. Bilibili 全方位格式 (BV / av / 番劇 ep / ss / 稍後再看 / 分P) 驗證
+assert(
+  isUrlAllowed('https://www.bilibili.com/video/BV1xx411c7mD?p=3&vd_source=abc') &&
+    getVideoIdentifier('https://www.bilibili.com/video/BV1xx411c7mD?p=3&vd_source=abc') === 'bili:BV1xx411c7mD?p=3' &&
+    getCanonicalVideoUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=3&vd_source=abc') === 'https://www.bilibili.com/video/BV1xx411c7mD?p=3',
+  '[Bilibili 核心檢驗] 多 P 選集 (?p=3) 精確識別為獨立分集並剝離 vd_source 追蹤碼'
+);
+assert(
+  isSameVideoOrWebsite('https://www.bilibili.com/video/BV1xx411c7mD?p=1', 'https://www.bilibili.com/video/BV1xx411c7mD') &&
+    !isSameVideoOrWebsite('https://www.bilibili.com/video/BV1xx411c7mD?p=1', 'https://www.bilibili.com/video/BV1xx411c7mD?p=2'),
+  '[Bilibili 核心檢驗] p=1 與無參數視為同集不重整，切換至 p=2 時正確觸發連播同步跳轉'
+);
+assert(
+  isUrlAllowed('https://www.bilibili.com/bangumi/play/ep123456?from_spmid=666') &&
+    isUrlAllowed('https://www.bilibili.com/bangumi/play/ss45678') &&
+    getCanonicalVideoUrl('https://www.bilibili.com/bangumi/play/ep123456?from_spmid=666') === 'https://www.bilibili.com/bangumi/play/ep123456',
+  '[Bilibili 核心檢驗] 番劇 ep 與 ss 播放頁放行與標準化正確'
+);
+
+// 3. Netflix 全方位防護 (/browse 隔離、tctx 剝離、MAIN World Bridge 毫秒轉換) 驗證
+assert(
+  isUrlAllowed('https://www.netflix.com/watch/80057281?trackId=123&tctx=abc') === true &&
+    isUrlAllowed('https://www.netflix.com/browse') === false,
+  '[Netflix 核心檢驗] 嚴格區分 /watch/<id> 播放頁與 /browse 首頁預覽（首頁不誤觸房間跳轉）'
+);
+assert(
+  bridgeSrc.includes('Math.floor(detail.currentTime * 1000)') &&
+    bridgeSrc.includes('getVideoPlayerBySessionId') &&
+    manifestObj.content_scripts.some((cs) => cs.world === 'MAIN' && cs.js.some((f) => f.includes('netflix_bridge'))),
+  '[Netflix 核心檢驗] Manifest 註冊 MAIN world 橋接腳本，透過毫秒級 seek() 與 watch* session 雙向控制 Cadmium 播放器'
+);
+
+// 4. SEC-01 & SEC-03 資安強化驗證 (RFC 1918 / 雲端 Metadata SSRF 阻斷 & Popup 最小權限注入)
+assert(
+  isServerUrlAllowed('https://172.25.0.1/watch/123', true) === false &&
+    isServerUrlAllowed('https://169.254.169.254/latest/meta-data/', true) === false &&
+    isServerUrlAllowed('https://[::1]/watch/123', true) === false &&
+    isServerUrlAllowed('https://evil-phishing.example.com/watch/123', true) === false,
+  '[SEC-01 資安檢驗] 伺服器端於通用模式下嚴格阻斷 172.16-31.*、169.254.* SSRF 與未知釣魚網域'
+);
+assert(
+  popupSrc.includes('isUniversalSupportedUrl(curTab.url) || isPlatformDomainPermitted(curTab.url)'),
+  '[SEC-03 資安檢驗] Popup.tsx 遵循最小權限原則，僅對核可之通用影音網域或預授權平台執行腳本探測與注入'
+);
+assert(
+  bgSrc.includes('export { HOST_WHITELIST }'),
+  '[DEBT-01 技術債清理] Background 統一由 platforms.ts 匯入並轉匯出 HOST_WHITELIST，消除重複定義'
+);
+
+// ----------------------------------------------------
 // 總結報告
 // ----------------------------------------------------
 console.log('\n====================================================');

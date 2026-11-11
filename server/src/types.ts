@@ -1,4 +1,4 @@
-import { isPlatformActive, isPlatformPermitted } from './platforms';
+import { isPlatformActive, isPlatformPermitted, isPrivateOrInternalHost, isUniversalSupportedUrl } from './platforms';
 
 export type ConnectionMode = 'DEFAULT' | 'CUSTOM_IP' | 'P2P';
 
@@ -206,24 +206,18 @@ export function isServerUrlAllowed(rawUrl: string, allowUniversal = false): bool
     const parsed = new URL(targetUrl);
     if (parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
-    // 基礎 SSRF 防護：嚴格阻斷本機與內部私有 IP
-    if (
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host.startsWith('192.168.') ||
-      host.startsWith('10.') ||
-      host.startsWith('172.16.')
-    ) {
+    // 基礎 SSRF 防護：嚴格阻斷本機、RFC 1918 私有網段 (含 172.16-31.*)、169.254.* 雲端中繼資料與內部主機
+    if (isPrivateOrInternalHost(host)) {
       return false;
     }
 
-    // 1. 白名單守衛：開放所有在權限名單中之目標平台 (涵蓋現行 18 個活躍平台與 9 個候選預授權平台)
+    // 1. 白名單守衛：開放所有在權限名單中之目標平台 (涵蓋現行 18 個活躍平台與 8 個候選預授權平台)
     if (isPlatformPermitted(targetUrl)) {
       return true;
     }
 
-    // 2. 若由客戶端攜帶 allowUniversal (例如解鎖 activeTab 通用模式)，放行合法外部 HTTPS 網址
-    if (allowUniversal) {
+    // 2. 若由客戶端攜帶 allowUniversal (解鎖 activeTab 通用模式)，僅放行經核可之通用影音網域，嚴格阻斷任意外部釣魚網址
+    if (allowUniversal && isUniversalSupportedUrl(targetUrl)) {
       return true;
     }
 

@@ -240,6 +240,85 @@ export const PLATFORM_REGISTRY: PlatformDefinition[] = [
   }
 ];
 
+export const HIGH_RISK_STREAMING_CATALOG: { name: string; pattern: RegExp }[] = [
+  { name: 'Anime1.me', pattern: /(?:^|\.)anime1\.me/i },
+  { name: 'Gimy 劇迷', pattern: /(?:^|\.)gimy\.[a-z0-9_-]+/i },
+  { name: '楓林網 (8maple)', pattern: /(?:^|\.)8maple\.[a-z0-9_-]+|maplestage\./i },
+  { name: '小鴨影音 / 123KUBO', pattern: /kubo|kobo/i },
+  { name: 'MoMoVOD', pattern: /(?:^|\.)momovod\.[a-z0-9_-]+/i },
+  { name: '伊莉影音', pattern: /eyny\.com/i },
+  { name: '歐樂影院 (OleVod)', pattern: /olevod/i },
+  { name: 'AGE動漫', pattern: /(?:^|\.)(agemys|agefans)\.[a-z0-9_-]+/i },
+  { name: '櫻花動漫', pattern: /(?:^|\.)(yhdm|yinghuacd|yhdmp)\.[a-z0-9_-]+/i },
+  { name: 'Myself 動漫', pattern: /myself-bbs\.com/i },
+  { name: 'Girigiri愛動漫', pattern: /girigirilove/i },
+  { name: 'Animeflix / Zoro (HiAnime)', pattern: /animeflix|zoro\.to|hianime\.to/i }
+];
+
+export function isPrivateOrInternalHost(rawHost: string): boolean {
+  const host = rawHost.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '0:0:0:0:0:0:0:1' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.localhost')
+  ) {
+    return true;
+  }
+  if (
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function getHighRiskPlatform(rawUrl?: string): { name: string; isHighRisk: boolean } | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const url = new URL(rawUrl.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const host = url.hostname.toLowerCase();
+    for (const item of HIGH_RISK_STREAMING_CATALOG) {
+      if (item.pattern.test(host)) {
+        return { name: item.name, isHighRisk: true };
+      }
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+export function isUniversalSupportedUrl(rawUrl?: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  try {
+    const url = new URL(rawUrl.trim());
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    if (isPrivateOrInternalHost(host)) {
+      return false;
+    }
+    if (host === 'anime1.me' || host.endsWith('.anime1.me')) {
+      return (url.pathname.length > 1 && url.pathname !== '/') || url.searchParams.has('cat');
+    }
+    if (getHighRiskPlatform(rawUrl)) {
+      return true;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
   try {
@@ -261,8 +340,13 @@ export function getPlatformByUrl(rawUrl?: string): PlatformDefinition | null {
 
 export function isPlatformActive(rawUrl?: string, allowCandidates = false): boolean {
   const p = getPlatformByUrl(rawUrl);
-  if (!p) return false;
-  return allowCandidates ? true : Boolean(p.enabled);
+  if (p) {
+    return allowCandidates ? true : Boolean(p.enabled);
+  }
+  if (allowCandidates && isUniversalSupportedUrl(rawUrl)) {
+    return true;
+  }
+  return false;
 }
 
 export function isPlatformPermitted(rawUrl?: string): boolean {

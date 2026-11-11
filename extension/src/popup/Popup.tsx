@@ -21,7 +21,13 @@ import {
   Sparkles
 } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
-import { isPlatformActive, getPlatformByUrl, getHighRiskPlatform } from '../platforms';
+import {
+  isPlatformActive,
+  isPlatformDomainPermitted,
+  isUniversalSupportedUrl,
+  getPlatformByUrl,
+  getHighRiskPlatform
+} from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -203,7 +209,13 @@ export default function Popup() {
         setActiveTabUrl(curTab.url);
         if (curTab.id && (curTab.url.startsWith('http://') || curTab.url.startsWith('https://'))) {
           chrome.storage?.local?.get(['syncine_unlock_candidates'], (res) => {
-            if (res?.syncine_unlock_candidates && curTab.id) {
+            // 最小權限原則 (Least Privilege)：僅在解鎖彩蛋且當前網址屬於核可之通用影音網域或預授權平台時才動態探測與注入 content.js
+            if (
+              res?.syncine_unlock_candidates &&
+              curTab.id &&
+              curTab.url &&
+              (isUniversalSupportedUrl(curTab.url) || isPlatformDomainPermitted(curTab.url))
+            ) {
               chrome.tabs.sendMessage(curTab.id, { type: 'CS_PING' }, (pingRes) => {
                 if (chrome.runtime.lastError || !pingRes) {
                   if ((chrome as any)?.scripting?.executeScript) {

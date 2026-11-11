@@ -1,40 +1,20 @@
 import { io, Socket } from 'socket.io-client';
 import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
-import { isPlatformActive, isPlatformDomainActive, isPlatformPermitted, isUniversalSupportedUrl, isUrlAllowed as checkUrlAllowed } from '../platforms';
+import {
+  HOST_WHITELIST,
+  isPlatformActive,
+  isPlatformDomainActive,
+  isPlatformPermitted,
+  isUniversalSupportedUrl,
+  isUrlAllowed as checkUrlAllowed
+} from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
 import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
 
-// 規格 5.1 安全白名單 (支援 YouTube 各種參數排列、Bilibili 一般影片與番劇、Niconico 與 CATCHPLAY+ 等 18 大正版平台)
-export const HOST_WHITELIST: RegExp[] = [
-  /^https:\/\/www\.youtube\.com\/watch\?.*v=[a-zA-Z0-9_-]+/,
-  /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.|m\.)?youtube\.com\/(watch\?.*v=|shorts\/|live\/|embed\/)[a-zA-Z0-9_-]+/,
-  /^https:\/\/youtu\.be\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?bilibili\.com\/(video\/[a-zA-Z0-9]+|list\/.+\?.*bvid=BV[a-zA-Z0-9]+)/,
-  /^https:\/\/(www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)[0-9]+/,
-  /^https:\/\/(www\.|sp\.)?nicovideo\.jp\/watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/(www\.)?catchplay\.com\/.*(watch|play|video)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?netflix\.com\/watch\/[0-9]+/,
-  /^https:\/\/(www\.|player\.)?vimeo\.com\/([0-9]{5,}|channels\/.+|groups\/.+|showcase\/.+|video\/[0-9]+)/,
-  /^https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?.*sn=[0-9]+/,
-  /^https:\/\/(www\.)?twitch\.tv\/(videos\/[0-9]+|[a-zA-Z0-9_]{3,25}(\/clip\/[a-zA-Z0-9_-]+|\/)?)/,
-  /^https:\/\/clips\.twitch\.tv\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?disneyplus\.com\/([a-zA-Z]{2}(-[a-zA-Z]{2,4})?\/)?(video|play|series)\/[a-zA-Z0-9_\/-]+/,
-  /^https:\/\/(www\.)?primevideo\.com\/(([a-zA-Z0-9_-]+\/)*detail\/[a-zA-Z0-9._-]+|watch\?.*gti=[a-zA-Z0-9._-]+)/,
-  /^https:\/\/(www\.)?amazon\.com\/gp\/video\/detail\/[a-zA-Z0-9._-]+/,
-  /^https:\/\/(www\.)?myvideo\.net\.tw\/(details\/[0-9]+\/[0-9]+|player\/[0-9]+)/,
-  /^https:\/\/(www\.)?linetv\.tw\/([a-zA-Z-]+\/)?drama\/[0-9]+(\/eps\/[0-9]+)?/,
-  /^https:\/\/(www\.)?kktv\.me\/([a-zA-Z-]+\/)?play\/[a-zA-Z0-9]+/,
-  /^https:\/\/(www\.)?crunchyroll\.com\/([a-zA-Z]{2}(-[a-zA-Z]{2,4})?\/)?watch\/[a-zA-Z0-9]+/,
-  /^https:\/\/video\.friday\.tw\/((drama|movie|anime|show|detail|sn)\/(detail\/)?[0-9]+|player)/,
-  /^https:\/\/(www\.|play\.)?max\.com\/.*(video\/watch|player|watch)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.|play\.)?hbomax\.com\/.*(video\/watch|player|watch)\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?iq\.com\/([a-zA-Z_-]+\/)?play\/[a-zA-Z0-9_-]+/,
-  /^https:\/\/(www\.)?iqiyi\.com\/[va]_[a-zA-Z0-9]+\.html/,
-  /^https:\/\/tv\.apple\.com\/.+/
-];
+// 規格 5.1 安全白名單單一真理來源 (由 platforms.ts 統一維護並轉匯出供相容性引用)
+export { HOST_WHITELIST };
 
 let socket: Socket | null = null;
 let currentRoomState: RoomStateInfo | null = null;
@@ -594,13 +574,12 @@ function broadcastToVideoTabs(msg: any) {
     tabs.forEach((tab) => {
       const pendingUrl = (tab as any).pendingUrl;
       const targetUrl = tab.url || pendingUrl;
-      // 局部開放守衛：僅向已正式啟用支援之分頁發送廣播 (涵蓋 tab.url.includes('nicovideo.jp') || tab.url.includes('anime1.me') || tab.url.includes('netflix.com'))
+      // 局部開放守衛：僅向已正式啟用支援之分頁發送廣播 (涵蓋 tab.url.includes('nicovideo.jp') || tab.url.includes('catchplay.com') || tab.url.includes('netflix.com'))
       if (
         tab.id &&
         targetUrl &&
         (isPlatformDomainActive(targetUrl, candidatesUnlocked) ||
-          isPlatformActive(targetUrl, candidatesUnlocked) ||
-          (tab.url && (tab.url.includes('nicovideo.jp') || tab.url.includes('catchplay.com') || tab.url.includes('netflix.com'))))
+          isPlatformActive(targetUrl, candidatesUnlocked))
       ) {
         chrome.tabs.sendMessage(tab.id, { ...msg, parentTabUrl: targetUrl }).catch(() => {});
         sentCount++;

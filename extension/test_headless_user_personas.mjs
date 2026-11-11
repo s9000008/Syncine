@@ -269,6 +269,115 @@ async function runHeadlessUserPersonaTests() {
 
     await new Promise((r) => setTimeout(r, 500));
     assert(officialDialogTriggered === false, '正規播放進度同步過程中，0 個安全警告，播放器操作順暢無阻');
+
+    // ----------------------------------------------------
+    // 測試模組 6: 三大核心平台 (YouTube / Bilibili / Netflix) 與新平台 (CATCHPLAY+) DOM 注入與控制實測
+    // ----------------------------------------------------
+    console.log('\n--- 模組 6: 三大核心平台 (YouTube / Bilibili / Netflix) 與新平台 (CATCHPLAY+) 無頭實測 ---');
+
+    const coreTestPage = await browserB.newPage();
+    await coreTestPage.setRequestInterception(true);
+    coreTestPage.on('request', (req) => {
+      const reqUrl = req.url();
+      if (reqUrl.includes('youtube.com/watch')) {
+        req.respond({
+          status: 200,
+          contentType: 'text/html',
+          body: '<!DOCTYPE html><html><body><div id="movie_player"><video class="html5-main-video" src="yt.mp4"></video></div></body></html>'
+        });
+      } else if (reqUrl.includes('bilibili.com/video/')) {
+        req.respond({
+          status: 200,
+          contentType: 'text/html',
+          body: '<!DOCTYPE html><html><body><div class="bpx-player-video-wrap"><video src="bili.mp4"></video></div></body></html>'
+        });
+      } else if (reqUrl.includes('netflix.com/watch/')) {
+        req.respond({
+          status: 200,
+          contentType: 'text/html',
+          body: `<!DOCTYPE html><html><head><script>
+            window.__nfSeekCalls = [];
+            window.netflix = {
+              appContext: {
+                state: {
+                  playerApp: {
+                    getAPI: () => ({
+                      videoPlayer: {
+                        getAllPlayerSessionIds: () => ['watch-session-80057281'],
+                        getVideoPlayerBySessionId: () => ({
+                          seek: (ms) => { window.__nfSeekCalls.push(ms); },
+                          play: () => {},
+                          pause: () => {}
+                        })
+                      }
+                    })
+                  }
+                }
+              }
+            };
+          </script></head><body><div data-uia="player"><video src="nf.mp4"></video></div></body></html>`
+        });
+      } else if (reqUrl.includes('catchplay.com/tw/watch/')) {
+        req.respond({
+          status: 200,
+          contentType: 'text/html',
+          body: '<!DOCTYPE html><html><body><video class="vjs-tech" src="cp.mp4"></video></body></html>'
+        });
+      } else {
+        req.respond({ status: 200, contentType: 'text/plain', body: 'ok' });
+      }
+    });
+
+    // 6.1 YouTube 實測
+    await coreTestPage.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 600));
+    const ytPing = await workerB.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/*' });
+      if (!tabs[0]?.id) return false;
+      return new Promise((res) => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'CS_PING' }, (reply) => res(Boolean(reply?.success && reply?.isSiteActive)));
+      });
+    });
+    assert(ytPing === true, '[YouTube E2E] Content Script 自動注入並即時回應 CS_PING 存活探測 (isSiteActive=true)');
+
+    // 6.2 Bilibili 實測
+    await coreTestPage.goto('https://www.bilibili.com/video/BV1xx411c7mD', { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 600));
+    const biliPing = await workerB.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'https://www.bilibili.com/*' });
+      if (!tabs[0]?.id) return false;
+      return new Promise((res) => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'CS_PING' }, (reply) => res(Boolean(reply?.success && reply?.isSiteActive)));
+      });
+    });
+    assert(biliPing === true, '[Bilibili E2E] Content Script 自動注入並即時回應 CS_PING 存活探測 (isSiteActive=true)');
+
+    // 6.3 Netflix MAIN World Bridge + Content Script 雙世界協同實測
+    await coreTestPage.goto('https://www.netflix.com/watch/80057281', { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 700));
+    const nfBridgeResult = await coreTestPage.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('SYNCINE_NETFLIX_CMD', { detail: { action: 'SEEK', currentTime: 120.5 } }));
+      return {
+        handledAttr: document.documentElement.dataset.syncineNfHandled,
+        seekCalls: window.__nfSeekCalls
+      };
+    });
+    assert(
+      nfBridgeResult.handledAttr === '1' && Array.isArray(nfBridgeResult.seekCalls) && nfBridgeResult.seekCalls[0] === 120500,
+      '[Netflix E2E] MAIN World netflix_bridge.js 成功攔截 SYNCINE_NETFLIX_CMD 並以 120500ms 精準呼叫 Cadmium API'
+    );
+
+    // 6.4 CATCHPLAY+ 新正式支援平台實測
+    await coreTestPage.goto('https://www.catchplay.com/tw/watch/ed8c3d70-1234', { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 600));
+    const cpPing = await workerB.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'https://www.catchplay.com/*' });
+      if (!tabs[0]?.id) return false;
+      return new Promise((res) => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'CS_PING' }, (reply) => res(Boolean(reply?.success && reply?.isSiteActive)));
+      });
+    });
+    assert(cpPing === true, '[CATCHPLAY+ E2E] 新正式開放平台自動注入 Content Script 並正常運作 (isSiteActive=true)');
   } finally {
     if (browserA) await browserA.close();
     if (browserB) await browserB.close();

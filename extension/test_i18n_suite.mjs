@@ -467,11 +467,13 @@ assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 保留�
 assert(contentScriptSource.includes('findNetflixVideo'), 'Content Script 實作 Netflix 專屬選擇器');
 assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 保留通用模式 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
 
-// 4. Background 白名單與廣播範圍驗證
-assert(backgroundScriptSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'Background HOST_WHITELIST 支援 Niconico 安全跳轉');
-assert(backgroundScriptSource.includes('catchplay\\.com\\/.*(watch|play|video)\\/[a-zA-Z0-9_-]+'), 'Background HOST_WHITELIST 支援 CATCHPLAY+ 安全跳轉');
-assert(!backgroundScriptSource.includes('anime1\\.me\\/.+'), 'Background 官方預設 HOST_WHITELIST 已移除 Anime1.me (改由彩蛋通用模式控管)');
-assert(backgroundScriptSource.includes('netflix\\.com\\/watch\\/[0-9]+'), 'Background HOST_WHITELIST 支援 Netflix 安全跳轉');
+// 4. Background 與 Platforms 白名單與廣播範圍驗證 (單一真理來源)
+const platformsSource = fs.readFileSync(path.join(__dirname, 'src/platforms.ts'), 'utf-8');
+const whitelistSource = backgroundScriptSource + '\n' + platformsSource;
+assert(whitelistSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'HOST_WHITELIST 支援 Niconico 安全跳轉');
+assert(whitelistSource.includes('catchplay\\.com\\/.*(watch|play|video)\\/[a-zA-Z0-9_-]+'), 'HOST_WHITELIST 支援 CATCHPLAY+ 安全跳轉');
+assert(!whitelistSource.includes('anime1\\.me\\/.+'), '官方預設 HOST_WHITELIST 已移除 Anime1.me (改由彩蛋通用模式控管)');
+assert(whitelistSource.includes('netflix\\.com\\/watch\\/[0-9]+'), 'HOST_WHITELIST 支援 Netflix 安全跳轉');
 assert(
   backgroundScriptSource.includes("tab.url.includes('nicovideo.jp')") &&
     backgroundScriptSource.includes("tab.url.includes('catchplay.com')") &&
