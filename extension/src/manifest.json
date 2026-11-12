@@ -171,6 +171,19 @@
     },
     {
       "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "js": [
+        "src/content/youtube_bridge.ts"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
         "https://static.crunchyroll.com/*"
       ],
       "js": [

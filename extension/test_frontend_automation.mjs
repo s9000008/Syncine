@@ -1171,6 +1171,28 @@ assert(
   '[YouTube 核心檢驗] 具備 AdBlocker 相容廣告過濾器與 yt-navigate-finish SPA 換片監聽'
 );
 
+const ytBridgeSrc = fs.readFileSync(path.join(__dirname, 'src/content/youtube_bridge.ts'), 'utf-8');
+assert(
+  ytBridgeSrc.includes("document.getElementById('movie_player')") &&
+    ytBridgeSrc.includes('player.seekTo(detail.currentTime, true)') &&
+    ytBridgeSrc.includes('player.playVideo()') &&
+    ytBridgeSrc.includes('player.pauseVideo()') &&
+    ytBridgeSrc.includes('player.setPlaybackRate(detail.playbackRate)'),
+  '[YouTube 核心檢驗] youtube_bridge.ts 調用原生 #movie_player API 支援 seekTo(true)、play、pause 與 rate 控制'
+);
+assert(
+  manifestObj.content_scripts.some(
+    (cs) => cs.world === 'MAIN' && cs.matches.some((m) => m.includes('youtube.com')) && cs.js.some((f) => f.includes('youtube_bridge'))
+  ),
+  '[YouTube 核心檢驗] Manifest 註冊 MAIN world 橋接腳本，直接溝通 YouTube 播放器隔離環境'
+);
+assert(
+  contentSrc.includes('SYNCINE_YOUTUBE_CMD') &&
+    contentSrc.includes('if (video.seeking || isUserSeeking)') &&
+    contentSrc.includes('const isPaused = wasPlayingBeforeSeek ? false : targetVideo.paused'),
+  '[YouTube 控制異常修復檢驗] Content Script 實裝 SYNCINE_YOUTUBE_CMD 適配器並徹底過濾 seek 觸發之偽 pause 事件'
+);
+
 // 2. Bilibili 全方位格式 (BV / av / 番劇 ep / ss / 稍後再看 / 分P) 驗證
 assert(
   isUrlAllowed('https://www.bilibili.com/video/BV1xx411c7mD?p=3&vd_source=abc') &&

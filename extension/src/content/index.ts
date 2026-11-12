@@ -583,8 +583,8 @@ function safePlayVideo(video: HTMLVideoElement) {
 
 /**
  * 跨平台安全播放控制適配器 (Cross-Platform Playback Adapter)
- * 在 Netflix 平台上，直接修改 HTML5 video.currentTime 會被 Cadmium 播放器攔截並拋出崩潰異常
- * 透過自訂事件轉發給 MAIN 世界的 netflix_bridge.js 調用內部 VideoPlayer API
+ * 1. Netflix: 透過自訂事件轉發給 MAIN 世界的 netflix_bridge.js 調用內部 VideoPlayer API
+ * 2. YouTube: 透過自訂事件轉發給 MAIN 世界的 youtube_bridge.js 調用內部 #movie_player API (解決 DASH/MSE 緩衝與原生控制遲滯)
  */
 function applySeek(video: HTMLVideoElement, targetTime: number) {
   if (window.location.hostname.includes('netflix.com')) {
@@ -593,6 +593,16 @@ function applySeek(video: HTMLVideoElement, targetTime: number) {
         detail: { action: 'SEEK', currentTime: targetTime }
       })
     );
+  } else if (window.location.hostname.includes('youtube.com')) {
+    document.documentElement.dataset.syncineYtHandled = '0';
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_YOUTUBE_CMD', {
+        detail: { action: 'SEEK', currentTime: targetTime }
+      })
+    );
+    if (document.documentElement.dataset.syncineYtHandled !== '1') {
+      video.currentTime = targetTime;
+    }
   } else {
     video.currentTime = targetTime;
   }
@@ -615,6 +625,21 @@ function applyPlay(video: HTMLVideoElement) {
       }, 250);
       return;
     }
+  } else if (window.location.hostname.includes('youtube.com')) {
+    document.documentElement.dataset.syncineYtHandled = '0';
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_YOUTUBE_CMD', {
+        detail: { action: 'PLAY' }
+      })
+    );
+    if (document.documentElement.dataset.syncineYtHandled === '1') {
+      setTimeout(() => {
+        if (video.paused && roomState.isInRoom && roomPlaybackState === 'PLAYING') {
+          safePlayVideo(video);
+        }
+      }, 250);
+      return;
+    }
   }
   safePlayVideo(video);
 }
@@ -628,6 +653,16 @@ function applyPause(video: HTMLVideoElement) {
       })
     );
     if (document.documentElement.dataset.syncineNfHandled === '1') {
+      return;
+    }
+  } else if (window.location.hostname.includes('youtube.com')) {
+    document.documentElement.dataset.syncineYtHandled = '0';
+    window.dispatchEvent(
+      new CustomEvent('SYNCINE_YOUTUBE_CMD', {
+        detail: { action: 'PAUSE' }
+      })
+    );
+    if (document.documentElement.dataset.syncineYtHandled === '1') {
       return;
     }
   }
@@ -690,6 +725,13 @@ function applySyncState(data: SyncData) {
   ) {
     try {
       targetVideo.playbackRate = data.playbackRate;
+      if (window.location.hostname.includes('youtube.com')) {
+        window.dispatchEvent(
+          new CustomEvent('SYNCINE_YOUTUBE_CMD', {
+            detail: { action: 'RATE', playbackRate: data.playbackRate }
+          })
+        );
+      }
     } catch (_) {}
   }
 
@@ -794,6 +836,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
       return;
     }
 
+    roomPlaybackState = 'PLAYING';
     console.log(`[Syncine Host] 捕捉到本機播放操作 (play)，發送 BG_SYNC_STATE: PLAY (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
       type: 'BG_SYNC_STATE',
@@ -814,6 +857,12 @@ function attachVideoListeners(video: HTMLVideoElement) {
     if (!isCurrentActiveVideoTab()) return;
     if (isProgrammatic() || isYouTubeAdPlaying()) return;
 
+    // 關鍵修復：若當前處於進度條跳轉 (seeking) 或使用者拖曳進度中，絕不外發 PAUSE 指令！
+    // 杜絕 YouTube 或其它影音播放器於 timeline 點擊時底層短暫暫停導致廣播錯誤的 PAUSE 事件
+    if (video.seeking || isUserSeeking) {
+      return;
+    }
+
     // 房主手動暫停，卡頓狀態隨之結束 (不再於恢復時自動發送 PLAY)
     hostStallActive = false;
 
@@ -827,6 +876,8 @@ function attachVideoListeners(video: HTMLVideoElement) {
       }
       return;
     }
+
+    roomPlaybackState = 'PAUSED';
 
     console.log(`[Syncine Host] 捕捉到本機暫停操作 (pause)，發送 BG_SYNC_STATE: PAUSE (currentTime: ${video.currentTime.toFixed(2)}s)`);
     chrome.runtime.sendMessage({
@@ -847,7 +898,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
 
     lastSyncedTime = targetVideo.currentTime;
     // 若跳轉前處於播放狀態，或當前已開播，則目標狀態認定為播放中 (paused: false)
-    const isPaused = targetVideo.paused && !wasPlayingBeforeSeek;
+    const isPaused = wasPlayingBeforeSeek ? false : targetVideo.paused;
 
     console.log(`[Syncine Host] 捕捉到本機進度跳轉 (seek)，發送 BG_SYNC_STATE: SEEK -> ${targetVideo.currentTime.toFixed(2)}s (paused: ${isPaused})`);
     chrome.runtime.sendMessage({
@@ -882,7 +933,7 @@ function attachVideoListeners(video: HTMLVideoElement) {
 
     if (!isUserSeeking) {
       isUserSeeking = true;
-      wasPlayingBeforeSeek = !video.paused;
+      wasPlayingBeforeSeek = !video.paused || roomPlaybackState === 'PLAYING';
     }
 
     if (seekDebounceTimer) clearTimeout(seekDebounceTimer);

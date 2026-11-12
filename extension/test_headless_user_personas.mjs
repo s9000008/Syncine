@@ -289,7 +289,23 @@ async function runHeadlessUserPersonaTests() {
         req.respond({
           status: 200,
           contentType: 'text/html',
-          body: '<!DOCTYPE html><html><body><div id="movie_player"><video class="html5-main-video" src="yt.mp4"></video></div></body></html>'
+          body: `<!DOCTYPE html><html><head><script>
+            window.__ytCmds = [];
+            window.__initMockYt = () => {
+              const mp = document.getElementById('movie_player');
+              if (mp) {
+                mp.seekTo = (sec, allowAhead) => { window.__ytCmds.push({ action: 'SEEK', sec, allowAhead }); };
+                mp.playVideo = () => { window.__ytCmds.push({ action: 'PLAY' }); };
+                mp.pauseVideo = () => { window.__ytCmds.push({ action: 'PAUSE' }); };
+                mp.setPlaybackRate = (rate) => { window.__ytCmds.push({ action: 'RATE', rate }); };
+              }
+            };
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', window.__initMockYt);
+            } else {
+              window.__initMockYt();
+            }
+          </script></head><body><div id="movie_player"><video class="html5-main-video" src="yt.mp4"></video></div></body></html>`
         });
       } else if (reqUrl.includes('bilibili.com/video/')) {
         req.respond({
@@ -345,6 +361,25 @@ async function runHeadlessUserPersonaTests() {
       });
     });
     assert(ytPing === true, '[YouTube E2E] Content Script 自動注入並即時回應 CS_PING 存活探測 (isSiteActive=true)');
+
+    const ytBridgeResult = await coreTestPage.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('SYNCINE_YOUTUBE_CMD', { detail: { action: 'SEEK', currentTime: 45 } }));
+      window.dispatchEvent(new CustomEvent('SYNCINE_YOUTUBE_CMD', { detail: { action: 'PAUSE' } }));
+      window.dispatchEvent(new CustomEvent('SYNCINE_YOUTUBE_CMD', { detail: { action: 'PLAY' } }));
+      window.dispatchEvent(new CustomEvent('SYNCINE_YOUTUBE_CMD', { detail: { action: 'RATE', playbackRate: 1.5 } }));
+      return {
+        handledAttr: document.documentElement.dataset.syncineYtHandled,
+        ytCmds: window.__ytCmds
+      };
+    });
+    assert(
+      ytBridgeResult.handledAttr === '1' &&
+        Array.isArray(ytBridgeResult.ytCmds) &&
+        ytBridgeResult.ytCmds.length === 4 &&
+        ytBridgeResult.ytCmds[0].sec === 45 &&
+        ytBridgeResult.ytCmds[0].allowAhead === true,
+      '[YouTube E2E] MAIN World youtube_bridge.js 成功攔截 SYNCINE_YOUTUBE_CMD 並精準呼叫 #movie_player (seekTo/pause/play/rate)'
+    );
 
     // 6.2 Bilibili 實測
     await coreTestPage.goto('https://www.bilibili.com/video/BV1xx411c7mD', { waitUntil: 'domcontentloaded' });
