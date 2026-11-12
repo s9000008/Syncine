@@ -315,8 +315,14 @@ assert(detailWithIds.requestId === 're***56', 'sanitizeDetails 自動遮蔽 requ
 
 const popupSource = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
 assert(
-  popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'"),
-  'Popup.tsx 在 ERR_AUDIT_REJECTED (被拒絕加入 P2P) 時隱藏回報與複製診斷按鈕'
+  popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'") &&
+    popupSource.includes('NON_REPORTABLE_ERROR_CODES') &&
+    popupSource.includes("'ERR_INVALID_CODE'"),
+  'Popup.tsx 在 ERR_AUDIT_REJECTED 與 ERR_INVALID_CODE 等非系統錯誤時隱藏 GitHub 回報與診斷複製按鈕'
+);
+assert(
+  popupSource.includes('disabled={loading || !shareCodeInput.trim()}'),
+  'Popup.tsx 在邀請碼輸入框為空值時直接禁用 (disabled) 申請加入房間按鈕，杜絕空值誤送出'
 );
 assert(
   popupSource.includes("msg.type === 'CS_CONNECTION_STATUS_CHANGED'") &&

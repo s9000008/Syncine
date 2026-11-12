@@ -36,6 +36,19 @@ import { parseConnectionCode, formatShareCode } from '../utils/connectionParser'
 const CHROME_STORE_URL =
   'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip';
 
+// 屬於使用者輸入校驗或正常房間業務邏輯狀態之提示碼（非系統/網路故障，不顯示 GitHub Issue 回報與診斷複製按鈕）
+const NON_REPORTABLE_ERROR_CODES = new Set<string>([
+  'ERR_AUDIT_REJECTED',
+  'ERR_INVALID_CODE',
+  'ERR_CUSTOM_IP_REQUIRED',
+  'ERR_ROOM_NOT_FOUND',
+  'ERR_ROOM_FULL',
+  'ERR_ROOM_CLOSED',
+  'ERR_PERMISSION_DENIED',
+  'ERR_HOST_ONLY',
+  'ERR_UNAUTHORIZED_URL'
+]);
+
 type PlatformStatusKey =
   | 'youtubeConnected'
   | 'bilibiliConnected'
@@ -374,6 +387,10 @@ export default function Popup() {
   // ----------------------------------------------------
   const handleShareCodeChange = (input: string) => {
     setShareCodeInput(input);
+    if (errorMessage) {
+      setErrorMessage(null);
+      setLastErrorCode(null);
+    }
     if (!input.trim()) {
       setDetectedCodeInfo(null);
       return;
@@ -405,6 +422,11 @@ export default function Popup() {
   const handleJoinRoom = () => {
     const input = shareCodeInput.trim();
     if (!input) {
+      return;
+    }
+
+    const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
+    if (!parsed.roomId || !/^[A-Z0-9]{6}$/i.test(parsed.roomId)) {
       setLastErrorCode('ERR_INVALID_CODE');
       setErrorMessage(translateReturnCode('ERR_INVALID_CODE'));
       return;
@@ -413,8 +435,6 @@ export default function Popup() {
     setLoading(true);
     setErrorMessage(null);
     setLastErrorCode(null);
-
-    const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
 
     safeSendMessage(
       {
@@ -712,8 +732,8 @@ export default function Popup() {
               </button>
             </div>
 
-            {/* 一鍵回報至 GitHub 與複製診斷按鈕 (房主拒絕入房申請屬正常權限決策，不顯示回報按鈕) */}
-            {lastErrorCode !== 'ERR_AUDIT_REJECTED' && (
+            {/* 一鍵回報至 GitHub 與複製診斷按鈕 (使用者輸入驗證、房號不存在或房主拒絕入房等非系統錯誤不顯示回報按鈕) */}
+            {lastErrorCode !== 'ERR_AUDIT_REJECTED' && !NON_REPORTABLE_ERROR_CODES.has(lastErrorCode || '') && (
               <>
                 <div className="pt-1.5 border-t border-red-500/20 flex items-center gap-2">
                   <button
@@ -940,8 +960,8 @@ export default function Popup() {
                   <button
                     id="btn-join-room"
                     onClick={handleJoinRoom}
-                    disabled={loading}
-                    className="w-full mt-3 py-2.5 px-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center gap-2 border border-teal-400/30 cursor-pointer disabled:opacity-50"
+                    disabled={loading || !shareCodeInput.trim()}
+                    className="w-full mt-3 py-2.5 px-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center gap-2 border border-teal-400/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? (
                       <>

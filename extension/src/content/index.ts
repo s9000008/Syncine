@@ -1214,13 +1214,24 @@ function initPlaylistClickListeners() {
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
-      // YouTube: 下一部/上一部/清單條目/推薦下一部
+      // YouTube: 下一部/上一部/清單條目/片尾自動連播按鈕 (僅限明確之上下集與播放清單動作)
       if (
         target.closest(
-          '.ytp-next-button, .ytp-prev-button, ytd-playlist-panel-video-renderer, #playlist-items ytd-playlist-panel-video-renderer, .ytp-upnext'
+          '.ytp-next-button, .ytp-prev-button, ytd-playlist-panel-video-renderer, #playlist-items ytd-playlist-panel-video-renderer, .ytp-autonav-endscreen-upnext-button'
         )
       ) {
         markPlaylistActionTriggered('YouTube Next/Prev/Playlist Click');
+        return;
+      }
+
+      // YouTube 防誤觸：若房主點擊的是右側一般推薦影片、搜尋結果或首頁影片卡片（非上下集按鈕、非播放清單），明確清除自動跳轉信號，強制改由手動「推送」
+      if (
+        window.location.hostname.includes('youtube.com') &&
+        target.closest(
+          'ytd-compact-video-renderer, ytd-video-renderer, ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-reel-item-renderer, .ytp-ce-element, .ytp-videowall-still'
+        )
+      ) {
+        lastPlaylistActionTime = 0;
         return;
       }
 
@@ -1405,6 +1416,18 @@ function initPlaylistClickListeners() {
     },
     true
   );
+
+  // 支援 YouTube 播放器原生上下一部快捷鍵 (Shift+N / Shift+P)
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (!isSiteActive || !roomState.isInRoom || !roomState.isHost) return;
+      if (window.location.hostname.includes('youtube.com') && e.shiftKey && (e.key === 'N' || e.key === 'n' || e.key === 'P' || e.key === 'p')) {
+        markPlaylistActionTriggered('YouTube Shift+N/P Shortcut');
+      }
+    },
+    true
+  );
 }
 
 /**
@@ -1423,14 +1446,18 @@ export function checkAndBroadcastPlaylistNavigation(source: string) {
   // 1. 若影片 ID 未改變，不觸發房間跳轉
   if (!currentVideoId || currentVideoId === roomVideoId || isSameVideoOrWebsite(currentHref, roomState.currentUrl)) return;
 
-  // 2. 條件檢查：「只有在畫面或網站有支援這個功能時才能生效，或是有觸發這個功能時才生效」
+  // 2. 條件檢查：必須是「房主主動點擊上下一集按鈕 / 播放清單選集」或「影片自然播畢 (ended) 自動連播下一集」才自動同步
+  // 若房主只是點擊旁邊的推薦影片、搜尋結果或首頁其他無關影片，則絕不自動同步，必須由房主在面板點擊「推送」按鈕
   const hasSupport = isPlaylistOrEpisodeSupported();
-  const isRecentAction = Date.now() - lastPlaylistActionTime < 15000; // 15秒內曾觸發換集或影片播畢
+  const isRecentAction = Date.now() - lastPlaylistActionTime < 15000; // 15秒內曾觸發上下集按鈕、選集點擊或影片播畢
 
-  if (!hasSupport && !isRecentAction) {
-    console.log(`[Syncine Playlist] 忽略跳轉 (${source})：當前頁面不具備清單/選集支援且未偵測到換集觸發`);
+  if (!isRecentAction) {
+    console.log(`[Syncine Playlist] 忽略自動跳轉 (${source})：未偵測到上下集按鈕或播放清單選集觸發 (hasSupport=${hasSupport})，需透過手動推送切換`);
     return;
   }
+
+  // 消耗本次上下集觸發信號，避免 15 秒內再點其他無關推薦影片時被誤判
+  lastPlaylistActionTime = 0;
 
   // 3. 取得純淨標準網址
   const cleanTarget = getCanonicalVideoUrl(currentHref);

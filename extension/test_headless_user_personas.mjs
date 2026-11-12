@@ -68,12 +68,18 @@ async function runHeadlessUserPersonaTests() {
     await popupPageA.goto(`chrome-extension://${extIdA}/src/popup/index.html`, { waitUntil: 'domcontentloaded' });
     await new Promise((r) => setTimeout(r, 600));
 
-    // 1.1 預設進入視圖驗證
+    // 1.1 預設進入視圖與空值防呆驗證
     const defaultButtons = await popupPageA.evaluate(() => {
       return Array.from(document.querySelectorAll('button')).map((b) => b.innerText.trim());
     });
     assert(defaultButtons.includes('加入房間 (Guest)'), 'Popup 面板預設顯示「加入房間 (Guest)」標籤按鈕');
     assert(defaultButtons.includes('🔑 申請加入房間'), 'Popup 面板預設優先渲染加入房間表單視圖 (以觀眾為多數之 UX 導向)');
+
+    const joinBtnDisabledWhenEmpty = await popupPageA.evaluate(() => {
+      const btn = document.querySelector('#btn-join-room');
+      return Boolean(btn && btn.disabled);
+    });
+    assert(joinBtnDisabledWhenEmpty === true, '當邀請碼輸入框為空值時，「🔑 申請加入房間」按鈕預設為 disabled 禁用狀態，防止空值送出拋錯');
 
     // 1.2 切換至建立房間
     await popupPageA.evaluate(() => {

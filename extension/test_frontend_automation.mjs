@@ -1219,6 +1219,12 @@ assert(
   bgSrc.includes('export { HOST_WHITELIST }'),
   '[DEBT-01 技術債清理] Background 統一由 platforms.ts 匯入並轉匯出 HOST_WHITELIST，消除重複定義'
 );
+assert(
+  contentSrc.includes('if (!isRecentAction)') &&
+    contentSrc.includes('ytd-compact-video-renderer') &&
+    contentSrc.includes('lastPlaylistActionTime = 0'),
+  '[YouTube 換片行為邊界檢驗] 僅在點擊上下一集按鈕或播放清單時自動同步，點擊一般推薦影片/搜尋結果時不自動跳轉，保留手動推送機制'
+);
 
 // ----------------------------------------------------
 // 總結報告
