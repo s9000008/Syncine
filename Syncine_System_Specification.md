@@ -10,7 +10,7 @@
 本專案旨在開發一款瀏覽器擴充套件（Chrome Extension V3），配合彈性連線機制（預設中繼、自架伺服器、WebRTC P2P 直連），實現跨地理位置、跨網頁、低延遲的網頁影片「即時同步播放」服務。
 
 ### 1.2 支援目標網站（當前版本已支援 18 大主流影音串流平台）
-1. **YouTube**：標準網頁版影片播放頁（處理 SPA 網頁架構與廣告過濾）。
+1. **YouTube**：標準網頁版影片播放頁（處理 SPA 網頁架構、廣告過濾，並以 MV3 `world: "MAIN"` 橋接調用原生 `#movie_player` API 進行安全 Seek/Play/Pause/Rate 控制，搭配 `video.seeking` 互斥防線杜絕進度條拖曳偽暫停與 DASH/MSE 分片卡頓）。
 2. **Bilibili (嗶哩嗶哩)**：標準網頁版影片與番劇播放頁（處理動態載入 DOM、分 P 與番劇 ep/ss）。
 3. **Niconico (ニコニコ動画)**：`nicovideo.jp/watch/*` 播放頁（處理多重 `<video>` 篩選、廣告容器隔離與 SPA 導航）。
 4. **Anime1.me**：單集播放頁與番劇分類合集頁（處理 Video.js `.vjs-tech` 選擇器、`.vjs-big-play-button` 懶載入自動喚醒與合集頁多部影片切換鎖定）。
@@ -331,6 +331,33 @@ if (isTopFrame && isSiteActive) {
 2. **全開預計支援名單**：解鎖狀態下，所有已於 Manifest 預宣告之 9 大候選串流平台（CatchPlay+、LiTV、WeTV、Bilibili 國際版、Hulu、Peacock、Paramount+、HBO GO 等）全面轉為綠燈支援狀態。
 3. **後端白名單全面放行**：伺服器端 `isServerUrlAllowed` 採用 `isPlatformPermitted` 驗證，直接放行所有授權名單中之候選平台跳轉與同步廣播。
 4. **標準影片通用方案 (findGenericVideoElement)**：針對尚未開發客製化選擇器的候選網站，Content Script 自動以 HTML5 `<video>` 元素的可見面積、播放時長與已載入來源進行智能探測，並調用原生 `play()`, `pause()`, `currentTime` 執行標準同步控制。
+
+### 5.5 跨平台原生播放器安全控制適配器 (Cross-Platform Native Player Bridge Specification)
+
+為徹底解決大型影音串流平台（如 Netflix、YouTube）採用 DASH/MSE 分片緩衝、DRM 授權保護或專屬狀態機所引發之控制遲滯與播放器崩潰問題，系統實施「雙層環境安全調用適配器 (Dual-Layer Bridge Adapter)」標準規範：
+
+#### 5.5.1 執行環境職責分工 (World Isolation & Bridging Architecture)
+1. **Isolated World (Content Script)**：
+   - 負責房間狀態管理、P2P / Background 通訊、DOM 節點監視與通用事件捕捉。
+   - 不得直接操作具備專屬播放引擎之 HTML5 `<video>` 元素（嚴禁直接賦值 `video.currentTime`、`video.play()`、`video.pause()`），改為派發具備安全資料結構之 `CustomEvent`。
+2. **MAIN World (Dedicated Bridge Script)**：
+   - 於 Manifest 宣告 `world: "MAIN"`, `run_at: "document_start"`，直接運行於目標頁面全域 JavaScript 執行環境。
+   - 監聽自訂控制事件，直接調用平台官方內部 API，並於執行完畢後標記 `document.documentElement.dataset` 作為握手狀態回執。
+
+#### 5.5.2 核心平台適配器標準實裝
+1. **Netflix Cadmium Bridge (`netflix_bridge.ts`)**：
+   - 監聽 `SYNCINE_NETFLIX_CMD`。
+   - 透過 `window.netflix.appContext.state.playerApp.getAPI().videoPlayer` 調用 `seek(ms)`、`play()`、`pause()`。
+   - 必須將秒數精確換算為毫秒 (`Math.floor(currentTime * 1000)`)，杜絕直接修改 `currentTime` 導致 Cadmium 崩潰。
+2. **YouTube MoviePlayer Bridge (`youtube_bridge.ts`)**：
+   - 監聽 `SYNCINE_YOUTUBE_CMD`。
+   - 鎖定原生 `#movie_player` API：
+     - **跳轉 (SEEK)**：呼叫 `player.seekTo(detail.currentTime, true)`，強制開啟 `allowSeekAhead` 預拉取遠端影音分片，杜絕黑屏卡頓。
+     - **播放/暫停 (PLAY/PAUSE)**：呼叫原生 `player.playVideo()` 與 `player.pauseVideo()`，徹底繞過 Chrome Autoplay 阻攔與內部播放狀態脫節。
+     - **倍速 (RATE)**：呼叫 `player.setPlaybackRate(detail.playbackRate)`。
+   - **底層事件互斥防線**：
+     - 在 Content Script 之 `pause` 監聽器中，嚴格設置 `if (video.seeking || isUserSeeking) return;`，阻斷 YouTube 進度條拖曳時底層瞬態暫停所外發的偽 `PAUSE` 廣播。
+     - 跳轉狀態認定依據：`const isPaused = wasPlayingBeforeSeek ? false : targetVideo.paused;`，防止跳轉中斷播放。
 
 ---
 
