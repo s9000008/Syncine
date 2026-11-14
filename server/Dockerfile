@@ -34,7 +34,7 @@ WORKDIR /app
 # 1. NODE_ENV=production 關閉開發輔助
 # 2. --max-old-space-size=192：為 256MB 容器保留 ~64MB 給 OS 與原生程序，杜絕 OOM Killer
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=8080 \
     NODE_OPTIONS="--max-old-space-size=192"
 
 # 複製依賴檔案並僅安裝生產所需套件
@@ -47,8 +47,8 @@ COPY --from=builder /app/dist ./dist
 # 切換為 Node 官方無特權使用者 (node:1000)，嚴禁 root 權限執行
 USER node
 
-# 宣告服務監聽埠
-EXPOSE 3000
+# 宣告服務監聽埠 (對齊 Fly.io internal_port = 8080)
+EXPOSE 8080
 
 # 透過 dumb-init 啟動 node，避免 npm 阻斷 SIGTERM 訊號造成無法優雅關機
 ENTRYPOINT ["dumb-init", "--"]

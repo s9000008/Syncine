@@ -419,6 +419,333 @@ async function runHeadlessUserPersonaTests() {
       });
     });
     assert(cpPing === true, '[CATCHPLAY+ E2E] 新正式開放平台自動注入 Content Script 並正常運作 (isSiteActive=true)');
+
+    // ----------------------------------------------------
+    // 測試模組 7: 模擬第三方擴充套件控制權衝突、斷路保護與 Popup 衝突橫幅 / 脫敏診斷 E2E
+    // ----------------------------------------------------
+    console.log('\n--- 模組 7: 模擬第三方擴充套件打架 (YouTube Contention)、斷路器保護與 Popup 警示橫幅 E2E ---');
+
+    await coreTestPage.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ&token=SECRET_XYZ_TOKEN', {
+      waitUntil: 'domcontentloaded'
+    });
+    await coreTestPage.bringToFront();
+    await new Promise((r) => setTimeout(r, 700));
+
+    // 讓觀眾 B 進入受控房間並由房主同步為 PAUSED
+    const ytTabId = await workerB.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/*' });
+      const targetTabId = tabs[0]?.id;
+      if (!targetTabId) return null;
+
+      await new Promise((resolve) => {
+        chrome.runtime.onMessage.dispatch
+          ? resolve()
+          : resolve();
+      });
+
+      return targetTabId;
+    });
+
+    // 透過 Worker 模擬 CS_ROOM_STATE_CHANGED 設定房態並觸發 PAUSE 同步
+    await workerB.evaluate(async (tabId) => {
+      const roomPayload = {
+        roomId: 'ROOM999Z',
+        isHost: false,
+        allowGuestControl: false,
+        serverUrl: 'https://syncine.fly.dev',
+        currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        mode: 'DEFAULT'
+      };
+      await chrome.storage.local.set({ syncine_room_state: roomPayload });
+      chrome.tabs.sendMessage(tabId, { type: 'CS_ROOM_STATE_CHANGED', payload: roomPayload });
+      await new Promise((r) => setTimeout(r, 150));
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CS_SYNC_RECEIVED',
+        payload: {
+          data: {
+            action: 'PAUSE',
+            currentTime: 12,
+            paused: true,
+            timestamp: Date.now()
+          }
+        }
+      });
+    }, ytTabId);
+
+    // 同步 Popup B 進入同房狀態，確保 Background Session 已水合 Room999Z
+    const contentionPopupB = await browserB.newPage();
+    await contentionPopupB.goto(`chrome-extension://${extIdB}/src/popup/index.html`, { waitUntil: 'domcontentloaded' });
+    await contentionPopupB.evaluate(async () => {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: {
+              roomId: 'ROOM999Z',
+              isHost: false,
+              allowGuestControl: false,
+              serverUrl: 'https://syncine.fly.dev',
+              currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+              mode: 'DEFAULT'
+            }
+          },
+          () => resolve()
+        );
+      });
+    });
+
+    // 等待 applySyncState 的 1000ms programmatic 窗口期結束後，模擬第三方擴充套件連續搶按 play
+    await new Promise((r) => setTimeout(r, 1150));
+    await coreTestPage.evaluate(() => {
+      window.__ytCmds = [];
+    });
+
+    const pauseCountsAfterBursts = [];
+    for (let i = 0; i < 4; i++) {
+      await coreTestPage.evaluate(() => {
+        const video = document.querySelector('video');
+        if (video) video.dispatchEvent(new Event('play'));
+      });
+      await new Promise((r) => setTimeout(r, 500));
+      const pauseCount = await coreTestPage.evaluate(
+        () => (window.__ytCmds || []).filter((c) => c.action === 'PAUSE').length
+      );
+      pauseCountsAfterBursts.push(pauseCount);
+    }
+
+    assert(
+      pauseCountsAfterBursts[0] === 1 &&
+        pauseCountsAfterBursts[1] === 2 &&
+        pauseCountsAfterBursts[2] === 2 &&
+        pauseCountsAfterBursts[3] === 2,
+      `[Contention E2E] 模擬第三方連續 4 次強制播放：前 2 次正常回滾 (${pauseCountsAfterBursts[0]}→${pauseCountsAfterBursts[1]})，第 3 次達閾值即刻啟動斷路冷卻並於第 4 次持續抑制震盪 (${pauseCountsAfterBursts[2]}→${pauseCountsAfterBursts[3]})`
+    );
+
+    // 驗證冷卻期間遠端房主新 PLAY 指令仍立即執行不受阻擋
+    await coreTestPage.evaluate(() => {
+      window.__ytCmds = [];
+    });
+    await workerB.evaluate((tabId) => {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CS_SYNC_RECEIVED',
+        payload: {
+          data: {
+            action: 'PLAY',
+            currentTime: 15,
+            paused: false,
+            timestamp: Date.now()
+          }
+        }
+      });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 250));
+    const hostOverridePlayReceived = await coreTestPage.evaluate(
+      () => (window.__ytCmds || []).some((c) => c.action === 'PLAY')
+    );
+    assert(hostOverridePlayReceived === true, '[Contention E2E] 斷路冷卻期間收到房主遠端 PLAY 指令仍即時穿透執行');
+
+    // 重新整理 Popup 驗證非阻塞式衝突警示橫幅渲染與統一脫敏診斷報告
+    await contentionPopupB.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 700));
+    const bannerVisible = await contentionPopupB.evaluate(() => Boolean(document.querySelector('[data-testid="contention-alert-banner"]')));
+    assert(bannerVisible === true, '[Popup E2E] 發生播放控制權衝突時，Popup 正確顯示非阻塞式琥珀色警示橫幅');
+
+    const diagResult = await contentionPopupB.evaluate(() => {
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_DIAGNOSTIC_REPORT' }, (res) => resolve(res));
+      });
+    });
+    const diagMd = diagResult?.data?.markdownReport || '';
+    assert(
+      diagResult?.success === true &&
+        diagResult?.data?.contentionDetected === true &&
+        diagMd.includes('www.youtube.com') &&
+        !diagMd.includes('ROOM999Z') &&
+        !diagMd.includes('dQw4w9WgXcQ') &&
+        !diagMd.includes('SECRET_XYZ_TOKEN'),
+      '[Privacy Diagnostic E2E] GET_DIAGNOSTIC_REPORT 產出統一脫敏報告（含 hostname、遮罩 roomId，絕無 Query Token / 影片 ID 外洩）'
+    );
+
+    // 測試點擊忽略提醒並重整確認持久化
+    await contentionPopupB.evaluate(() => {
+      const btn = document.querySelector('[data-testid="contention-alert-banner"] button[aria-label]');
+      if (btn) btn.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    await contentionPopupB.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 600));
+    const bannerAfterDismiss = await contentionPopupB.evaluate(() =>
+      Boolean(document.querySelector('[data-testid="contention-alert-banner"]'))
+    );
+    assert(bannerAfterDismiss === false, '[Popup E2E] 使用者點擊忽略後，重整 Popup 橫幅保持關閉狀態');
+
+    // ----------------------------------------------------
+    // 模組 8：跨執行環境 (ISOLATED -> MAIN) YouTube 進度條/暫停控制與首頁開房同步韌性測試
+    // ----------------------------------------------------
+    console.log('\n--- [模組 8] YouTube ISOLATED -> MAIN 跨世界橋接、首頁開房與 Seek 後暫停不鎖死驗證 ---');
+
+    // 8.1 驗證當房間建立於 YouTube 首頁 (https://www.youtube.com/) 時，觀眾與房主進入具體影片後能透過 CS_SYNC_RECEIVED 控制 #movie_player 與 <video>
+    await coreTestPage.evaluate(() => {
+      window.__ytCmds = [];
+    });
+    await workerB.evaluate(async (tabId) => {
+      const homeRoomPayload = {
+        roomId: 'ROOM999Z',
+        isHost: false,
+        allowGuestControl: false,
+        serverUrl: 'https://syncine.fly.dev',
+        currentUrl: 'https://www.youtube.com/',
+        mode: 'DEFAULT'
+      };
+      chrome.tabs.sendMessage(tabId, { type: 'CS_ROOM_STATE_CHANGED', payload: homeRoomPayload });
+      await new Promise((r) => setTimeout(r, 100));
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CS_SYNC_RECEIVED',
+        payload: {
+          data: {
+            action: 'SEEK',
+            currentTime: 712.4,
+            paused: true,
+            timestamp: Date.now(),
+            videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+          }
+        }
+      });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 250));
+
+    const crossWorldSeekResult = await coreTestPage.evaluate(() => {
+      const cmds = window.__ytCmds || [];
+      const v = document.querySelector('video');
+      return {
+        hasSeekCmd: cmds.some((c) => c.action === 'SEEK' && Math.abs((c.sec ?? c.t) - 712.4) < 1),
+        hasPauseCmd: cmds.some((c) => c.action === 'PAUSE'),
+        videoTime: v ? v.currentTime : -1,
+        videoPaused: v ? v.paused : false
+      };
+    });
+    assert(
+      crossWorldSeekResult.hasSeekCmd === true &&
+        crossWorldSeekResult.hasPauseCmd === true &&
+        Math.abs(crossWorldSeekResult.videoTime - 712.4) < 1 &&
+        crossWorldSeekResult.videoPaused === true,
+      `[YouTube Cross-World Bridge E2E] ISOLATED Content Script 透過 DOM Bridge 跨世界精準驅動 MAIN World #movie_player.seekTo(712.4) 與 pauseVideo() (videoTime=${crossWorldSeekResult.videoTime.toFixed(1)}s, paused=${crossWorldSeekResult.videoPaused})`
+    );
+
+    // 8.2 驗證房主在同一頁面觸發 seeking -> seeked (即使處於 programmatic 期間) 後，接續觸發 pause 絕不因 isUserSeeking 殘留而漏發
+    await workerB.evaluate(async (tabId) => {
+      const hostRoomPayload = {
+        roomId: 'ROOM999Z',
+        isHost: true,
+        allowGuestControl: false,
+        serverUrl: 'https://syncine.fly.dev',
+        currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        mode: 'DEFAULT'
+      };
+      await chrome.storage.local.set({ syncine_room_state: hostRoomPayload });
+      chrome.tabs.sendMessage(tabId, { type: 'CS_ROOM_STATE_CHANGED', payload: hostRoomPayload });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // 在 Background Worker 監聽房主 Content Script 是否正常發出 BG_SYNC_STATE (SEEK 與 PAUSE)
+    await workerB.evaluate(() => {
+      self.__capturedHostSyncActions = [];
+      if (!self.__hostSyncSpyBound) {
+        self.__hostSyncSpyBound = true;
+        chrome.runtime.onMessage.addListener((msg) => {
+          if (msg && msg.type === 'BG_SYNC_STATE' && msg.data) {
+            self.__capturedHostSyncActions.push({
+              action: msg.data.action,
+              currentTime: msg.data.currentTime,
+              videoUrl: msg.data.videoUrl
+            });
+          }
+        });
+      }
+    });
+
+    await coreTestPage.evaluate(async () => {
+      const v = document.querySelector('video');
+      if (!v) return;
+      v.currentTime = 300;
+      v.dispatchEvent(new Event('seeking'));
+      v.dispatchEvent(new Event('seeked'));
+      await new Promise((r) => setTimeout(r, 120));
+      v.dispatchEvent(new Event('pause'));
+    });
+    await new Promise((r) => setTimeout(r, 250));
+
+    const capturedHostActions = await workerB.evaluate(() => self.__capturedHostSyncActions || []);
+    const hasHostSeek = capturedHostActions.some((a) => a.action === 'SEEK' && Math.abs(a.currentTime - 300) < 1);
+    const hasHostPause = capturedHostActions.some(
+      (a) => a.action === 'PAUSE' && a.videoUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    );
+    assert(
+      hasHostSeek === true && hasHostPause === true,
+      `[YouTube Host Control E2E] 房主拖曳進度條 (SEEK) 後接續按暫停 (PAUSE)，isUserSeeking 正確歸零且兩項控制信令皆攜帶標準 videoUrl 成功送達 Background`
+    );
+
+    // 驗證擴充套件更新後「已開啟分頁熱重注 (Re-Injection)」與 P2P 首次入房審核通過後自動觸發 BG_REQUEST_INIT_SYNC
+    await workerB.evaluate(async (tabId) => {
+      self.__capturedInitSyncCount = 0;
+      if (!self.__initSyncSpyBound) {
+        self.__initSyncSpyBound = true;
+        chrome.runtime.onMessage.addListener((msg) => {
+          if (msg && msg.type === 'BG_REQUEST_INIT_SYNC') {
+            self.__capturedInitSyncCount = (self.__capturedInitSyncCount || 0) + 1;
+          }
+        });
+      }
+      // 模擬擴充套件更新後由 Background 對既有 YouTube 分頁重新注入 youtube_bridge.js (MAIN) 與 content.js (ISOLATED)
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['youtube_bridge.js'],
+        world: 'MAIN'
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js'],
+        world: 'ISOLATED'
+      });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 350));
+
+    // 先發送 guestAwaitingApproval: true (模擬 P2P 觀眾剛按加入等待房主核准)，此時不應提前消耗 initSyncKey
+    await workerB.evaluate((tabId) => {
+      self.__capturedInitSyncCount = 0;
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CS_ROOM_STATE_CHANGED',
+        payload: {
+          roomId: 'ROOM999Z',
+          isHost: false,
+          allowGuestControl: false,
+          currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          guestAwaitingApproval: true
+        }
+      });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 200));
+    const initSyncWhileWaiting = await workerB.evaluate(() => self.__capturedInitSyncCount || 0);
+
+    // 接著模擬房主核准通過 (guestAwaitingApproval: false)，此時觀眾必須立即發出 BG_REQUEST_INIT_SYNC
+    await workerB.evaluate((tabId) => {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CS_ROOM_STATE_CHANGED',
+        payload: {
+          roomId: 'ROOM999Z',
+          isHost: false,
+          allowGuestControl: false,
+          currentUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          guestAwaitingApproval: false
+        }
+      });
+    }, ytTabId);
+    await new Promise((r) => setTimeout(r, 250));
+    const initSyncAfterApproved = await workerB.evaluate(() => self.__capturedInitSyncCount || 0);
+    assert(
+      initSyncWhileWaiting === 0 && initSyncAfterApproved >= 1,
+      `[First-Run Update & P2P Approval E2E] 擴充套件更新熱重注後，P2P 審核等待期間不提前鎖死 (${initSyncWhileWaiting})，房主核准瞬間立即觸發初始同步請求 (${initSyncAfterApproved})`
+    );
   } finally {
     if (browserA) await browserA.close();
     if (browserB) await browserB.close();

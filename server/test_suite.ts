@@ -1,7 +1,12 @@
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './src/roomManager';
+import { RateLimiter } from './src/rateLimiter';
+import { validateSyncData } from './src/types';
+import { isServerUrlAllowed } from './src/platforms';
 import { sanitizeLog } from './src/utils';
 import { io as ClientSocket, Socket as ClientSocketType } from '../extension/node_modules/socket.io-client';
 
@@ -240,8 +245,9 @@ async function runAllTests() {
     });
   });
 
-  const TEST_PORT = 3999;
-  await new Promise<void>((res) => httpServer.listen(TEST_PORT, res));
+  await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', res));
+  const addr = httpServer.address();
+  const TEST_PORT = typeof addr === 'object' && addr ? addr.port : 3999;
 
   try {
     // 3.1 測試 /health 端點
@@ -385,6 +391,62 @@ async function runAllTests() {
   } finally {
     await new Promise<void>((res) => httpServer.close(() => res()));
     ioServer.close();
+  }
+
+  // ----------------------------------------------------
+  // 4. Phase 1-3 SDD 加固迴歸測試 (驗證器 / IP限流 / 房間上限 / Shared 同步)
+  // ----------------------------------------------------
+  console.log('\n--- 模組 4: SDD Phase 1-3 安全驗證器、IP 限流與 Shared 單一真理來源檢驗 ---');
+  {
+    const guestHb = validateSyncData({ action: 'HEARTBEAT', currentTime: 10, timestamp: Date.now(), paused: false }, false);
+    assert(guestHb === null, 'validateSyncData 攔截 Guest 端偽造發送之 HEARTBEAT 封包');
+
+    const badTime = validateSyncData({ action: 'SEEK', currentTime: -5, timestamp: Date.now() }, true);
+    assert(badTime === null, 'validateSyncData 攔截負數 currentTime 異常封包');
+
+    const badRate = validateSyncData({ action: 'PLAY', currentTime: 12, playbackRate: 99, timestamp: Date.now() }, true);
+    assert(badRate === null, 'validateSyncData 攔截超出範圍 playbackRate (99x) 異常封包');
+
+    const validPlay = validateSyncData(
+      { action: 'PLAY', currentTime: 25.5, playbackRate: 1.5, paused: false, timestamp: Date.now(), extraEvil: 'x' },
+      false
+    ) as any;
+    assert(
+      validPlay !== null && validPlay.action === 'PLAY' && validPlay.extraEvil === undefined,
+      'validateSyncData 白名單重建欄位並剝離未授權多餘屬性'
+    );
+
+    const rl = new RateLimiter();
+    const testIp = ['198', '51', '100', '10'].join('.');
+    const nowTs = Date.now();
+    let ipBlocked = false;
+    for (let i = 0; i < 15; i++) {
+      const res = rl.checkSensitive(`sock-${i}`, nowTs + i, testIp);
+      if (!res.allowed) {
+        ipBlocked = true;
+        break;
+      }
+    }
+    assert(ipBlocked === true, 'RateLimiter 阻止同一 IP 透過斷線重連更換 Socket ID 繞過敏感操作限流');
+
+    const capMgr = new RoomManager(2);
+    capMgr.createRoom('s1', 'u1', 'https://www.youtube.com/watch?v=123');
+    capMgr.createRoom('s2', 'u2', 'https://www.youtube.com/watch?v=456');
+    assert(capMgr.getRoomCount() === 2 && capMgr.isAtRoomCapacity() === true, 'RoomManager 精確統計房間數並於達到 MAX_ROOMS 時觸發容量保護');
+    capMgr.handleDisconnect('s1', undefined, true);
+    capMgr.handleDisconnect('s2', undefined, true);
+
+    assert(isServerUrlAllowed('http://www.youtube.com/watch?v=dQw4w9WgXcQ') === false, '伺服器嚴格拒絕明文 http:// YouTube 網址');
+
+    const sharedDir = path.resolve(__dirname, '../shared');
+    const localSharedDir = path.resolve(__dirname, './src/shared');
+    if (fs.existsSync(sharedDir)) {
+      for (const file of ['platforms.ts', 'protocol.ts', 'sanitize.ts']) {
+        const srcA = fs.readFileSync(path.join(sharedDir, file), 'utf8').replace(/\r\n/g, '\n');
+        const srcB = fs.readFileSync(path.join(localSharedDir, file), 'utf8').replace(/\r\n/g, '\n');
+        assert(srcA === srcB, `shared/${file} 與 server/src/shared/${file} 內容 100% 同步一致`);
+      }
+    }
   }
 
   // ----------------------------------------------------

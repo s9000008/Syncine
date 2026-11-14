@@ -3,11 +3,34 @@ import { RoomState, RoomMember, ConnectionMode } from './types';
 import { sanitizeLog } from './utils';
 
 export const MAX_ROOM_MEMBERS = 100;
+export const DEFAULT_MAX_ROOMS = Math.max(
+  1,
+  Number.parseInt(process.env.MAX_ROOMS || '1000', 10) || 1000
+);
 
 export class RoomManager {
   private rooms: Map<string, RoomState> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private onHostTimeoutCallback?: (room: RoomState) => void;
+  private readonly maxRooms: number;
+
+  constructor(maxRooms: number = DEFAULT_MAX_ROOMS) {
+    this.maxRooms = maxRooms;
+  }
+
+  /**
+   * 檢查目前是否已達伺服器全域最大房間數上限
+   */
+  public isAtRoomCapacity(): boolean {
+    return this.rooms.size >= this.maxRooms;
+  }
+
+  /**
+   * 取得目前活躍房間總數
+   */
+  public getRoomCount(): number {
+    return this.rooms.size;
+  }
 
   /**
    * 設定房主逾時轉移時的回呼函式
@@ -71,6 +94,11 @@ export class RoomManager {
   ): RoomState {
     // 若此 Socket 已在舊房間中，先自動退出舊房間以防止跨房廣播與記憶體洩漏
     this.leavePreviousRoomIfNeeded(socketId);
+
+    if (this.rooms.size >= this.maxRooms) {
+      console.warn(`[RoomManager] 伺服器房間數已達上限 (${this.maxRooms})，拒絕建立新房間`);
+      throw new Error('ERR_ROOM_FULL');
+    }
 
     const roomId = this.generateRoomId();
     const hostResumeToken = this.generateResumeToken();

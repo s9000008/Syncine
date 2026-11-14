@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && node build_content.mjs",
-    "test": "node test_i18n_suite.mjs && node test_error_reporting.mjs && node test_frontend_automation.mjs",
+    "test": "node test_i18n_suite.mjs && node test_error_reporting.mjs && node test_frontend_automation.mjs && node test_contention_and_privacy.mjs",
     "test:e2e": "node test_headless_user_personas.mjs",
     "test:all": "npm test && npm run test:e2e",
-    "zip": "tsc && vite build && node build_content.mjs && powershell -Command \"Compress-Archive -Path dist/* -DestinationPath ../extension-build.zip -Force\"",
+    "zip": "tsc && vite build && node build_content.mjs && node ../scripts/zip-extension.mjs",
     "security:check": "node ../.agents/skills/security-agent/scripts/scan_secrets.js"
   },
   "dependencies": {

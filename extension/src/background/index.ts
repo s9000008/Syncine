@@ -1,598 +1,87 @@
-import { io, Socket } from 'socket.io-client';
-import { RoomStateInfo, ConnectionMode, ExtensionMessage, getVideoIdentifier, getCanonicalVideoUrl, isSameVideoOrWebsite } from '../types/protocol';
 import {
-  HOST_WHITELIST,
-  isPlatformActive,
-  isPlatformDomainActive,
-  isPlatformPermitted,
-  isUniversalSupportedUrl,
-  isUrlAllowed as checkUrlAllowed
-} from '../platforms';
+  ConnectionMode,
+  ExtensionMessage,
+  PlaybackConflictState,
+  RoomStateInfo,
+  getCanonicalVideoUrl,
+  getVideoIdentifier,
+  isNonVideoBrowsePage,
+  validateSyncData
+} from '../types/protocol';
+import { HOST_WHITELIST, isPlatformPermitted, isUniversalSupportedUrl } from '../platforms';
 import { DEFAULT_SERVER_URL } from '../config';
-import { APP_VERSION } from '../version';
 import { sanitizeLog } from '../utils/sanitize';
 import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
+import {
+  buildUnifiedDiagnosticReport,
+  recordContentionDiagnostic,
+  recordDiagnosticEvent
+} from './modules/diagnostics';
+import {
+  ensureSessionHydrated,
+  getCandidatesUnlocked,
+  getRoomState,
+  getUserId,
+  persistRoomSession,
+  setRoomState
+} from './modules/session';
+import { clearBadgeAndResetSession, initKeepAliveListeners, syncKeepAliveAlarm } from './modules/keepAlive';
+import { closeOffscreenDocument, ensureOffscreenDocument, sendOffscreenMessage } from './modules/offscreenManager';
+import {
+  broadcastRoomState,
+  broadcastToVideoTabs,
+  isUrlAllowed,
+  reinjectExistingVideoTabs,
+  syncJoinRequestBadge,
+  verifyAndRedirect
+} from './modules/redirector';
+import { disconnectSocket, getSocket, initSocketConnection } from './modules/socketClient';
 
 // 規格 5.1 安全白名單單一真理來源 (由 platforms.ts 統一維護並轉匯出供相容性引用)
 export { HOST_WHITELIST };
+export { isUrlAllowed, verifyAndRedirect };
 
-let socket: Socket | null = null;
-let currentRoomState: RoomStateInfo | null = null;
-let memberCountSyncTimer: ReturnType<typeof setInterval> | null = null;
+const hydrateBackgroundSession = () =>
+  ensureSessionHydrated({
+    onRelaySessionRestored: (saved) => {
+      syncKeepAliveAlarm(true);
+      if (saved.serverUrl) {
+        initSocketConnection(saved.serverUrl).catch((err) => {
+          console.warn('[Background] 自動恢復工作階段連線失敗:', sanitizeLog(err?.message || err));
+        });
+      }
+    }
+  });
+
+// Service Worker 啟動時立即觸發非阻塞還原、保活監聽初始化與已開啟分頁之腳本自癒檢查
+hydrateBackgroundSession().then(() => {
+  reinjectExistingVideoTabs();
+});
+initKeepAliveListeners();
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onInstalled) {
+  chrome.runtime.onInstalled.addListener(() => {
+    hydrateBackgroundSession().then(() => {
+      reinjectExistingVideoTabs();
+    });
+  });
+}
+
+function sanitizeRoomInitialUrl(rawUrl?: string): string {
+  const isBrowserInternalUrl =
+    typeof rawUrl === 'string' &&
+    (rawUrl.startsWith('chrome://') ||
+      rawUrl.startsWith('about:') ||
+      rawUrl.startsWith('edge://') ||
+      rawUrl.startsWith('chrome-extension://') ||
+      rawUrl.startsWith('moz-extension://'));
+  return isBrowserInternalUrl ? '' : getCanonicalVideoUrl(rawUrl);
+}
 
 /**
- * 密碼學安全隨機 User ID 產生器 (杜絕偽造與預測)
+ * 解析複合分享碼 (RoomID|Base64(ServerURL))
  */
-function generateSecureUserId(prefix: string = 'user_', byteLength: number = 8): string {
-  const array = new Uint8Array(byteLength);
-  crypto.getRandomValues(array);
-  return prefix + Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-let userId: string = generateSecureUserId();
-
-const SESSION_STORAGE_KEY = 'syncine_active_session';
-
-function persistRoomSession(state: RoomStateInfo | null) {
-  if (state) {
-    chrome.storage?.local?.set({ [SESSION_STORAGE_KEY]: state });
-  } else {
-    chrome.storage?.local?.remove([SESSION_STORAGE_KEY]);
-  }
-}
-
-// 在 Chrome MV3 Service Worker 中讀取 User ID 與前次未結束之工作階段
-chrome.storage?.local?.get(['syncine_user_id', 'coview_user_id', SESSION_STORAGE_KEY], (result) => {
-  if (result?.syncine_user_id) {
-    userId = result.syncine_user_id;
-  } else if (result?.coview_user_id) {
-    userId = result.coview_user_id;
-    chrome.storage?.local?.set({ syncine_user_id: userId });
-  } else {
-    chrome.storage?.local?.set({ syncine_user_id: userId });
-  }
-
-  // 嘗試還原前次房間工作階段
-  if (result?.[SESSION_STORAGE_KEY]) {
-    const saved = result[SESSION_STORAGE_KEY] as RoomStateInfo;
-    console.log('[Background] 還原前次本機暫存工作階段:', sanitizeLog(saved.roomId));
-    currentRoomState = saved;
-    currentRoomState.connectionStatus = 'RECONNECTING';
-    if (saved.mode !== 'P2P' && saved.serverUrl) {
-      initSocketConnection(saved.serverUrl).catch((err) => {
-        console.warn('[Background] 自動恢復工作階段連線失敗:', err);
-      });
-    }
-  }
-});
-
-// ----------------------------------------------------
-// 1. MV3 保活機制 (Keep-Alive)
-// ----------------------------------------------------
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'syncine-keepalive' || port.name === 'coview-keepalive') {
-    console.log('[Background] 收到 Content Script 長連接保活 Port');
-    port.onDisconnect.addListener((p) => {
-      const lastError = chrome.runtime.lastError;
-      const portError = (p as any)?.error;
-      if (lastError || portError) {
-        // 正常 bfcache 或分頁關閉釋放
-      }
-      console.log('[Background] Content Script Port 斷開');
-    });
-  }
-});
-
-chrome.alarms.create('syncine-ping-alarm', { periodInMinutes: 0.33 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'syncine-ping-alarm' || alarm.name === 'coview-ping-alarm') {
-    if (socket && socket.connected) {
-      socket.emit('PING_ALIVE', { timestamp: Date.now() });
-      console.log('[Background Keep-Alive] 發送 Alarm 輕量 Ping');
-    }
-  }
-});
-
-// ----------------------------------------------------
-// 2. Offscreen Document 生命週期管理 (WebRTC 核心載體)
-// ----------------------------------------------------
-let creatingOffscreen: Promise<void> | null = null;
-
-async function ensureOffscreenDocument() {
-  const offscreenUrl = 'src/offscreen/index.html';
-  if ((chrome as any).offscreen?.hasDocument) {
-    const hasDoc = await (chrome as any).offscreen.hasDocument();
-    if (hasDoc) return;
-  }
-
-  if (creatingOffscreen) {
-    await creatingOffscreen;
-  } else {
-    try {
-      creatingOffscreen = (chrome as any).offscreen.createDocument({
-        url: offscreenUrl,
-        reasons: [(chrome as any).offscreen.Reason.WEB_RTC],
-        justification: 'WebRTC P2P DataChannel connection for Syncine sync'
-      });
-      await creatingOffscreen;
-      creatingOffscreen = null;
-      console.log('[Background] 成功建立 Offscreen Document');
-    } catch (err: any) {
-      creatingOffscreen = null;
-      if (!err.message?.includes('Only a single offscreen document may be created')) {
-        console.error('[Background] 建立 Offscreen Document 失敗:', err);
-      }
-    }
-  }
-}
-
-async function closeOffscreenDocument() {
-  try {
-    if ((chrome as any).offscreen?.hasDocument) {
-      const hasDoc = await (chrome as any).offscreen.hasDocument();
-      if (!hasDoc) return;
-    }
-    await (chrome as any).offscreen.closeDocument();
-    console.log('[Background] Offscreen Document 已關閉');
-  } catch (err) {
-    // 忽略關閉錯誤
-  }
-}
-
-// ----------------------------------------------------
-// 3. 資安防禦：網域白名單過濾跳轉
-// ----------------------------------------------------
-/**
- * 網域安全白名單檢驗函式 (雙重防禦：正則 + 原生 URL 語法解析)
- */
-// 隱藏功能：彩蛋解鎖之預計支援候選名單旗標
-let candidatesUnlocked = false;
-
-if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
-  chrome.storage.local.get(['syncine_unlock_candidates'], (res) => {
-    candidatesUnlocked = Boolean(res?.syncine_unlock_candidates);
-  });
-}
-
-if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.syncine_unlock_candidates) {
-      candidatesUnlocked = Boolean(changes.syncine_unlock_candidates.newValue);
-    }
-  });
-}
-
-export function isUrlAllowed(rawUrl: string, allowCandidatesOverride?: boolean): boolean {
-  const allowCandidates = allowCandidatesOverride !== undefined ? allowCandidatesOverride : candidatesUnlocked;
-  return checkUrlAllowed(rawUrl, allowCandidates);
-}
-
-let lastSecurityAlertUrl = '';
-let lastSecurityAlertTime = 0;
-
-export function verifyAndRedirect(targetUrl: string) {
-  const cleanUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
-  const isSafe = isUrlAllowed(cleanUrl);
-  if (isSafe) {
-    console.log(`[Background] 通過安全白名單，處理跳轉/同步: ${cleanUrl}`);
-    // 查詢全域所有分頁，判定觀眾或房主是否已在目標網站/影片
-    chrome.tabs.query({}, (tabs) => {
-      // 1. 優先查詢當前焦點視窗的活躍分頁，若無則查詢全域活躍分頁
-      const activeTab = tabs && (tabs.find((t) => t.active && (t as any).lastFocusedWindow) || tabs.find((t) => t.active));
-
-      // 2. 核心防重整守衛：若當前活躍分頁已在目標影片/網站，絕對不強制刷新畫面 (杜絕 tabs.update)
-      const isAlreadyOnVideo = activeTab && isSameVideoOrWebsite(activeTab.url, cleanUrl);
-      if (isAlreadyOnVideo) {
-        console.log(`[Background] 當前活躍分頁已在目標網站/影片 (Tab ID: ${activeTab.id}): ${cleanUrl}，不強制刷新畫面`);
-        if (activeTab.id) {
-          chrome.tabs.sendMessage(activeTab.id, {
-            type: 'CS_ROOM_STATE_CHANGED',
-            payload: currentRoomState
-          }).catch(() => {});
-        }
-        return;
-      }
-
-      // 3. 檢查其他非活躍分頁中是否已有分頁在目標影片/網站
-      const existingTargetTab = tabs && tabs.find((t) => isSameVideoOrWebsite(t.url, cleanUrl));
-      if (existingTargetTab && existingTargetTab.id) {
-        console.log(`[Background] 偵測到現有分頁已在目標網站/影片 (Tab ID: ${existingTargetTab.id}): ${cleanUrl}，切換焦點，不強制刷新畫面`);
-        chrome.tabs.sendMessage(existingTargetTab.id, {
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-        // 僅切換至目標影片分頁，絕對不調用 chrome.tabs.update 重新載入網址
-        chrome.tabs.update(existingTargetTab.id, { active: true });
-        return;
-      }
-
-      // 4. 若所有分頁皆不在目標網站/影片，才執行導航跳轉至新影片
-      if (activeTab && activeTab.id) {
-        console.log(`[Background] 目標網站與觀眾當前畫面不同，導航活躍分頁至: ${cleanUrl}`);
-        chrome.tabs.update(activeTab.id, { url: cleanUrl });
-      } else {
-        console.log(`[Background] 查無活躍分頁，自動新建分頁載入目標影片: ${cleanUrl}`);
-        chrome.tabs.create({ url: cleanUrl });
-      }
-    });
-  } else {
-    console.error(`[Syncine 資安警告] 攔截非白名單跳轉網址: ${cleanUrl}`);
-    const now = Date.now();
-    // 核心防轟炸冷卻機制：若 15 秒內已針對同一非安全網址發出過警告，則抑制重複發送
-    if (cleanUrl === lastSecurityAlertUrl && now - lastSecurityAlertTime < 15000) {
-      console.warn(`[Syncine Background] 15秒內已針對此網址發出資安警告，抑制重複派發: ${cleanUrl}`);
-      return;
-    }
-    lastSecurityAlertUrl = cleanUrl;
-    lastSecurityAlertTime = now;
-
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'SHOW_SECURITY_ALERT',
-          payload: { url: cleanUrl, version: APP_VERSION }
-        }).catch(() => {});
-      }
-    });
-  }
-}
-
-// ----------------------------------------------------
-// 4. WebSocket 初始化與 Socket.IO 連線 (兼作信令通道)
-// ----------------------------------------------------
-function initSocketConnection(serverUrl: string): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    if (socket && socket.connected && (socket as any)._serverUrl === serverUrl) {
-      console.log(`[Background] 重用現有 Socket.IO 連線: ${serverUrl}`);
-      return resolve(socket);
-    }
-
-    if (socket) {
-      socket.disconnect();
-      socket = null;
-    }
-
-    console.log(`[Background] 初始化 Socket.IO 連線: ${serverUrl}`);
-
-    socket = io(serverUrl, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 8000
-    });
-    (socket as any)._serverUrl = serverUrl;
-
-    let isSettled = false;
-    let connectCount = 0;
-
-    const connectTimer = setTimeout(() => {
-      if (!isSettled) {
-        isSettled = true;
-        reject(new Error('ERR_SERVER_TIMEOUT'));
-      }
-    }, 8000);
-
-    socket.on('connect', () => {
-      connectCount++;
-      if (!isSettled) {
-        isSettled = true;
-        clearTimeout(connectTimer);
-        console.log(`[Background] Socket.IO 已成功連線至: ${serverUrl} (ID: ${socket?.id})`);
-        resolve(socket!);
-      }
-
-      if (currentRoomState) {
-        currentRoomState.connectionStatus = 'CONNECTED';
-        persistRoomSession(currentRoomState);
-
-        // 若為斷線後的重新連線，自動發送 JOIN_ROOM 進行房間狀態回魂
-        if (connectCount > 1 && currentRoomState.roomId && currentRoomState.mode !== 'P2P') {
-          console.log(`[Background Reconnect] 網路連線已恢復 (ID: ${socket?.id})，自動發送 JOIN_ROOM 回魂加入房間: ${currentRoomState.roomId}`);
-          socket?.emit('JOIN_ROOM', {
-            event: 'JOIN_ROOM',
-            roomId: currentRoomState.roomId,
-            data: {
-              userId,
-              mode: currentRoomState.mode,
-              isReconnecting: true,
-              resumeToken: currentRoomState.resumeToken
-            }
-          });
-        }
-
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    socket.once('connect_error', (err) => {
-      if (!isSettled) {
-        isSettled = true;
-        clearTimeout(connectTimer);
-        console.error(`[Background] Socket.IO 首連失敗 (${serverUrl}):`, err.message);
-        reject(new Error('ERR_SERVER_UNREACHABLE'));
-      }
-    });
-
-    socket.io.on('reconnect_attempt', (attempt) => {
-      console.log(`[Background Reconnect] 正在嘗試重新連線至伺服器 (第 ${attempt} 次)...`);
-      if (currentRoomState && currentRoomState.connectionStatus !== 'RECONNECTING') {
-        currentRoomState.connectionStatus = 'RECONNECTING';
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    // 接收 SYNC_STATE 訊息轉發至 Content Script (常規與回退中繼)
-    socket.on('SYNC_STATE', (data) => {
-      // 若處於 P2P 直連中，忽略伺服器重複中繼的 SYNC_STATE
-      if (currentRoomState?.mode === 'P2P' && currentRoomState?.p2pStatus === 'CONNECTED') {
-        return;
-      }
-      console.log('[Background] 收到 Socket SYNC_STATE，廣播給頁面 Content Script:', data);
-      broadcastToVideoTabs({
-        type: 'CS_SYNC_RECEIVED',
-        payload: data
-      });
-    });
-
-    // 接收 REQUEST_CURRENT_STATE (Host 被要求回傳當前狀態給新觀眾)
-    socket.on('REQUEST_CURRENT_STATE', (data) => {
-      console.log('[Background] 收到 REQUEST_CURRENT_STATE，請 Host Content Script 報備進度:', data);
-      broadcastToVideoTabs({
-        type: 'CS_REQUEST_CURRENT_STATE',
-        payload: data
-      });
-    });
-
-    // 接收 REDIRECT_ROOM 網頁跳轉
-    socket.on('REDIRECT_ROOM', (data) => {
-      console.log('[Background] 收到 REDIRECT_ROOM 網頁跳轉:', data);
-      if (data.data?.targetUrl) {
-        const cleanTarget = getCanonicalVideoUrl(data.data.targetUrl);
-        if (currentRoomState) {
-          currentRoomState.currentUrl = cleanTarget;
-          persistRoomSession(currentRoomState);
-        }
-        verifyAndRedirect(cleanTarget);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-      }
-    });
-
-    // 接收 TOGGLE_PERMISSION 權限變更
-    socket.on('TOGGLE_PERMISSION', (data) => {
-      if (currentRoomState) {
-        currentRoomState.allowGuestControl = data.data.allowGuestControl;
-        persistRoomSession(currentRoomState);
-      }
-      broadcastToVideoTabs({
-        type: 'CS_PERMISSION_UPDATED',
-        payload: data.data
-      });
-    });
-
-    // 接收伺服器定時或即時人數校準通知
-    socket.on('MEMBER_COUNT_UPDATED', (data: { count: number }) => {
-      console.log('[Background] 收到伺服器人數校準更新:', data.count);
-      if (currentRoomState) {
-        currentRoomState.connectedPeerCount = data.count;
-        persistRoomSession(currentRoomState);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    // 啟動 30 秒中繼模式定期校準 (清除舊計時器，防止重連累積洩漏)
-    if (memberCountSyncTimer) {
-      clearInterval(memberCountSyncTimer);
-      memberCountSyncTimer = null;
-    }
-    memberCountSyncTimer = setInterval(() => {
-      if (socket && socket.connected && currentRoomState && currentRoomState.mode !== 'P2P') {
-        socket.emit('GET_ROOM_MEMBER_COUNT', { roomId: currentRoomState.roomId });
-      }
-    }, 30000);
-
-    // WebRTC P2P 信令事件監聽
-    socket.on('MEMBER_JOINED', (data: any) => {
-      console.log('[Background] 收到新成員加入房間通知:', data);
-      if (currentRoomState?.mode === 'P2P' && currentRoomState?.isHost && data.socketId) {
-        console.log(`[Background Host] P2P 模式：觸發與新成員 (${data.socketId}) 之 DataChannel 握手`);
-        chrome.runtime.sendMessage({
-          type: 'OFFSCREEN_NEW_PEER',
-          payload: { socketId: data.socketId, userId: data.userId }
-        } as ExtensionMessage).catch(() => {});
-      }
-    });
-
-    socket.on('SIGNAL_OFFER', (data: any) => {
-      console.log('[Background Guest] 收到 SIGNAL_OFFER 信令，轉發給 Offscreen:', data);
-      chrome.runtime.sendMessage({
-        type: 'OFFSCREEN_SIGNAL_OFFER',
-        payload: data.data
-      } as ExtensionMessage).catch(() => {});
-    });
-
-    socket.on('SIGNAL_ANSWER', (data: any) => {
-      console.log('[Background Host] 收到 SIGNAL_ANSWER 信令，轉發給 Offscreen:', data);
-      chrome.runtime.sendMessage({
-        type: 'OFFSCREEN_SIGNAL_ANSWER',
-        payload: data.data
-      } as ExtensionMessage).catch(() => {});
-    });
-
-    socket.on('SIGNAL_ICE_CANDIDATE', (data: any) => {
-      chrome.runtime.sendMessage({
-        type: 'OFFSCREEN_SIGNAL_ICE_CANDIDATE',
-        payload: data.data
-      } as ExtensionMessage).catch(() => {});
-    });
-
-    socket.on('P2P_FALLBACK', (data: any) => {
-      console.warn('[Background] 收到伺服器 P2P_FALLBACK 通知，系統降級回退至伺服器中繼:', data);
-      if (currentRoomState) {
-        currentRoomState.p2pStatus = 'FALLBACK';
-        currentRoomState.mode = 'DEFAULT';
-        persistRoomSession(currentRoomState);
-      }
-      broadcastToVideoTabs({
-        type: 'CS_ROOM_STATE_CHANGED',
-        payload: currentRoomState
-      });
-    });
-
-    // 接收回魂/重連成功事件 (適用於自動重連後的回應與角色校準)
-    socket.on('JOIN_ROOM_SUCCESS', (res: any) => {
-      console.log('[Background] 收到 JOIN_ROOM_SUCCESS (回魂/校準成功):', res);
-      if (currentRoomState && currentRoomState.roomId === res.roomId) {
-        currentRoomState.isHost = res.data.isHost;
-        currentRoomState.allowGuestControl = res.data.allowGuestControl;
-        if (res.data.currentUrl) {
-          currentRoomState.currentUrl = getCanonicalVideoUrl(res.data.currentUrl);
-        }
-        if (res.data.resumeToken) {
-          currentRoomState.resumeToken = res.data.resumeToken;
-        } else if (!res.data.isHost) {
-          currentRoomState.resumeToken = undefined;
-        }
-        currentRoomState.connectionStatus = 'CONNECTED';
-        persistRoomSession(currentRoomState);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    // 接收 HOST_PRIVILEGE_GRANTED (原房主離線逾時換人，新房主獲頒權限與 Token)
-    socket.on('HOST_PRIVILEGE_GRANTED', (res: { resumeToken?: string }) => {
-      console.log('[Background] 收到 HOST_PRIVILEGE_GRANTED，被正式提升為房主');
-      if (currentRoomState) {
-        currentRoomState.isHost = true;
-        if (res?.resumeToken) {
-          currentRoomState.resumeToken = res.resumeToken;
-        }
-        persistRoomSession(currentRoomState);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    // 接收 HOST_CHANGED (原房主離線逾時轉移廣播，同步校準房間內成員之房主狀態)
-    socket.on('HOST_CHANGED', (res: { newHostUserId?: string }) => {
-      console.log('[Background] 收到 HOST_CHANGED 房主轉移通知:', sanitizeLog(res?.newHostUserId));
-      if (currentRoomState && res?.newHostUserId) {
-        currentRoomState.isHost = res.newHostUserId === userId;
-        persistRoomSession(currentRoomState);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-
-    // 監聽伺服器錯誤（若重連回魂時房間已被銷毀或過期）
-    socket.on('ERROR', (err: any) => {
-      console.warn('[Background] 收到伺服器錯誤通知:', err);
-      const code = err?.code;
-      const msg = err?.message || '';
-      if (
-        (code === 'ERR_ROOM_NOT_FOUND' || code === 'ERR_ROOM_CLOSED' || msg.includes('房間不存在') || msg.includes('房間已關閉')) &&
-        currentRoomState
-      ) {
-        console.warn(`[Background] 房間 ${currentRoomState.roomId} 已過期銷毀，自動重置房間狀態`);
-        currentRoomState = null;
-        persistRoomSession(null);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: null
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: null
-        }).catch(() => {});
-      }
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.warn(`[Background] WebSocket 連線中斷: ${reason}`);
-      if (currentRoomState) {
-        currentRoomState.connectionStatus = 'DISCONNECTED';
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-    });
-  });
-}
-
-function broadcastToVideoTabs(msg: any) {
-  chrome.tabs.query({}, (tabs) => {
-    let sentCount = 0;
-    tabs.forEach((tab) => {
-      const pendingUrl = (tab as any).pendingUrl;
-      const targetUrl = tab.url || pendingUrl;
-      // 局部開放守衛：僅向已正式啟用支援之分頁發送廣播 (涵蓋 tab.url.includes('nicovideo.jp') || tab.url.includes('catchplay.com') || tab.url.includes('netflix.com'))
-      if (
-        tab.id &&
-        targetUrl &&
-        (isPlatformDomainActive(targetUrl, candidatesUnlocked) ||
-          isPlatformActive(targetUrl, candidatesUnlocked))
-      ) {
-        chrome.tabs.sendMessage(tab.id, { ...msg, parentTabUrl: targetUrl }).catch(() => {});
-        sentCount++;
-      }
-    });
-    console.log(`[Background] broadcastToVideoTabs (${msg?.type || 'unknown'}): 已發送至 ${sentCount} 個影片分頁 (系統查詢到 ${tabs.length} 個分頁)`);
-  });
-}
-
-// ----------------------------------------------------
-// 5. 解析複合分享碼 (RoomID|Base64(ServerURL))
-// ----------------------------------------------------
-function parseShareCode(inputCode: string): { roomId: string; serverUrl: string; mode: ConnectionMode } {
+export function parseShareCode(inputCode: string): { roomId: string; serverUrl: string; mode: ConnectionMode } {
   const parsed = parseConnectionCode(inputCode, 'DEFAULT', DEFAULT_SERVER_URL);
   return {
     roomId: parsed.roomId,
@@ -601,927 +90,811 @@ function parseShareCode(inputCode: string): { roomId: string; serverUrl: string;
   };
 }
 
-// ----------------------------------------------------
-// 6. Message 監聽器 (來自 Popup, Content Script 與 Offscreen)
-// ----------------------------------------------------
-chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendResponse) => {
-  const { type, payload } = request;
+function handleCreateRoom(payload: any, sendResponse: (res: any) => void): void {
+  const mode: ConnectionMode = payload?.mode || 'DEFAULT';
+  const serverUrl = payload?.customServerUrl || DEFAULT_SERVER_URL;
+  const cleanUrl = sanitizeRoomInitialUrl(payload?.currentUrl);
+  const userId = getUserId();
+  const candidatesUnlocked = getCandidatesUnlocked();
 
-  switch (type) {
-    case 'BG_CREATE_ROOM': {
-      const mode: ConnectionMode = payload?.mode || 'DEFAULT';
-      const serverUrl = payload?.customServerUrl || DEFAULT_SERVER_URL;
-      const rawUrl = payload?.currentUrl;
-      // 排除瀏覽器系統內部網址 (如 chrome://newtab/、about:blank、edge:// 等)，避免無效網址作為房間初始同步目標
-      const isBrowserInternalUrl =
-        typeof rawUrl === 'string' &&
-        (rawUrl.startsWith('chrome://') ||
-          rawUrl.startsWith('about:') ||
-          rawUrl.startsWith('edge://') ||
-          rawUrl.startsWith('chrome-extension://') ||
-          rawUrl.startsWith('moz-extension://'));
-      const cleanUrl = isBrowserInternalUrl ? '' : getCanonicalVideoUrl(rawUrl);
-
-      if (mode === 'P2P') {
-        ensureOffscreenDocument()
-          .then(() => {
-            chrome.runtime.sendMessage(
-              {
-                type: 'OFFSCREEN_PEER_CREATE_ROOM',
-                payload: { userId }
-              } as ExtensionMessage,
-              (res) => {
-                if (res?.success) {
-                  const compositeCode = formatShareCode('P2P', res.roomId);
-                  currentRoomState = {
-                    roomId: res.roomId,
-                    isHost: true,
-                    allowGuestControl: false,
-                    serverUrl: 'P2P',
-                    currentUrl: cleanUrl,
-                    mode: 'P2P',
-                    p2pStatus: 'CONNECTED',
-                    connectionStatus: 'CONNECTED',
-                    connectedPeerCount: 1,
-                    pendingJoinRequests: [],
-                    compositeCode
-                  };
-                  persistRoomSession(currentRoomState);
-                  broadcastToVideoTabs({
-                    type: 'CS_ROOM_STATE_CHANGED',
-                    payload: currentRoomState
-                  });
-                  sendResponse({
-                    success: true,
-                    compositeCode,
-                    roomId: res.roomId,
-                    roomState: currentRoomState
-                  });
-                } else {
-                  sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
-                }
-              }
-            );
-          })
-          .catch((err) => {
-            sendResponse({ success: false, error: err.message });
+  if (mode === 'P2P') {
+    sendOffscreenMessage({
+      type: 'OFFSCREEN_PEER_CREATE_ROOM',
+      payload: { userId }
+    } as ExtensionMessage)
+      .then((res) => {
+        if (res?.success) {
+          const compositeCode = formatShareCode('P2P', res.roomId);
+          const nextState: RoomStateInfo = {
+            roomId: res.roomId,
+            isHost: true,
+            allowGuestControl: false,
+            serverUrl: 'P2P',
+            currentUrl: cleanUrl,
+            mode: 'P2P',
+            p2pStatus: 'CONNECTED',
+            connectionStatus: 'CONNECTED',
+            connectedPeerCount: 1,
+            pendingJoinRequests: [],
+            compositeCode
+          };
+          setRoomState(nextState);
+          persistRoomSession(nextState);
+          syncKeepAliveAlarm(true);
+          broadcastToVideoTabs({
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: nextState
           });
-        return true;
-      }
-
-      initSocketConnection(serverUrl)
-        .then((s) => {
-          s.emit('CREATE_ROOM', {
-            event: 'CREATE_ROOM',
-            data: {
-              userId,
-              currentUrl: cleanUrl,
-              isSelfHosted: mode === 'CUSTOM_IP' || !!payload.customServerUrl,
-              mode,
-              customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined,
-              language: payload.language,
-              allowUniversal: candidatesUnlocked
-            }
+          sendResponse({
+            success: true,
+            compositeCode,
+            roomId: res.roomId,
+            roomState: nextState
           });
-
-          let createSettled = false;
-          const cleanupCreateListeners = () => {
-            s.off('CREATE_ROOM_SUCCESS', onCreateSuccess);
-            s.off('ERROR', onCreateError);
-          };
-
-          const createTimer = setTimeout(() => {
-            if (createSettled) return;
-            createSettled = true;
-            cleanupCreateListeners();
-            sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
-          }, 6000);
-
-          const onCreateSuccess = async (res: any) => {
-            if (createSettled) return;
-            createSettled = true;
-            clearTimeout(createTimer);
-            cleanupCreateListeners();
-            const compositeCode = formatShareCode(mode, res.roomId, serverUrl);
-
-            currentRoomState = {
-              roomId: res.roomId,
-              isHost: true,
-              allowGuestControl: res.data.allowGuestControl,
-              serverUrl,
-              currentUrl: cleanUrl,
-              mode,
-              p2pStatus: undefined,
-              connectionStatus: 'CONNECTED',
-              connectedPeerCount: 1,
-              compositeCode,
-              resumeToken: res.data?.resumeToken
-            };
-            persistRoomSession(currentRoomState);
-
-            broadcastToVideoTabs({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            });
-
-            sendResponse({ success: true, compositeCode, roomId: res.roomId, roomState: currentRoomState });
-          };
-
-          const onCreateError = (err: any) => {
-            if (createSettled) return;
-            createSettled = true;
-            clearTimeout(createTimer);
-            cleanupCreateListeners();
-            const code = err?.code || 'ERR_UNKNOWN';
-            sendResponse({ success: false, error: code, code });
-          };
-
-          s.once('CREATE_ROOM_SUCCESS', onCreateSuccess);
-          s.once('ERROR', onCreateError);
-        })
-        .catch((err) => {
-          console.error('[Background] BG_CREATE_ROOM 失敗:', err);
-          sendResponse({ success: false, error: err.message });
-        });
-      return true;
-    }
-
-    case 'BG_JOIN_ROOM': {
-      const rawInput = payload.shareCode ? payload.shareCode.trim() : '';
-      const fallbackMode: ConnectionMode = payload.mode || 'P2P';
-      const parsed = parseConnectionCode(rawInput, fallbackMode, DEFAULT_SERVER_URL);
-      const { roomId, serverUrl, mode } = parsed;
-
-      if (!roomId) {
-        sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
-        return true;
-      }
-
-      // 若判定模式為 P2P，走 PeerJS 雲端握手
-      if (mode === 'P2P') {
-        ensureOffscreenDocument()
-          .then(() => {
-            chrome.runtime.sendMessage(
-              {
-                type: 'OFFSCREEN_PEER_JOIN_ROOM',
-                payload: { roomId, userId }
-              } as ExtensionMessage,
-              (res) => {
-                if (res?.success) {
-                  // 若在回調抵達前已收到核准訊號，避免被覆蓋為 awaitingApproval: true
-                  if (!currentRoomState || currentRoomState.p2pStatus !== 'CONNECTED') {
-                    currentRoomState = {
-                      roomId: res.roomId,
-                      isHost: false,
-                      allowGuestControl: false,
-                      serverUrl: 'P2P',
-                      mode: 'P2P',
-                      p2pStatus: 'CONNECTING',
-                      connectionStatus: 'CONNECTED',
-                      guestAwaitingApproval: true,
-                      connectedPeerCount: 1,
-                      compositeCode: formatShareCode('P2P', res.roomId)
-                    };
-                    persistRoomSession(currentRoomState);
-                  }
-                  broadcastToVideoTabs({
-                    type: 'CS_ROOM_STATE_CHANGED',
-                    payload: currentRoomState
-                  });
-                  sendResponse({ success: true, roomId: res.roomId, roomState: currentRoomState });
-                } else {
-                  const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED';
-                  sendResponse({ success: false, error: errCode, code: errCode });
-                }
-              }
-            );
-          })
-          .catch((err) => {
-            sendResponse({ success: false, error: err.message, code: 'ERR_P2P_SIGNAL_FAILED' });
-          });
-        return true;
-      }
-
-      // 伺服器模式 (DEFAULT 或 CUSTOM_IP)
-      initSocketConnection(serverUrl)
-        .then((s) => {
-          s.emit('JOIN_ROOM', {
-            event: 'JOIN_ROOM',
-            roomId,
-            data: {
-              userId,
-              mode,
-              resumeToken: (currentRoomState?.roomId === roomId) ? currentRoomState.resumeToken : undefined
-            }
-          });
-
-          let joinSettled = false;
-          const cleanupJoinListeners = () => {
-            s.off('JOIN_ROOM_SUCCESS', onJoinSuccess);
-            s.off('ERROR', onJoinError);
-          };
-
-          const joinTimer = setTimeout(() => {
-            if (joinSettled) return;
-            joinSettled = true;
-            cleanupJoinListeners();
-            sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
-          }, 6000);
-
-          const onJoinSuccess = async (res: any) => {
-            if (joinSettled) return;
-            joinSettled = true;
-            clearTimeout(joinTimer);
-            cleanupJoinListeners();
-            const actualMode: ConnectionMode = res.data?.mode || mode;
-
-            currentRoomState = {
-              roomId: res.roomId,
-              isHost: res.data?.isHost ?? false,
-              allowGuestControl: res.data.allowGuestControl,
-              serverUrl,
-              currentUrl: getCanonicalVideoUrl(res.data.currentUrl),
-              mode: actualMode,
-              p2pStatus: undefined,
-              connectionStatus: 'CONNECTED',
-              connectedPeerCount: 0,
-              compositeCode: formatShareCode(actualMode, res.roomId, serverUrl),
-              resumeToken: res.data?.resumeToken
-            };
-            persistRoomSession(currentRoomState);
-
-            if (!currentRoomState.isHost && currentRoomState.currentUrl) {
-              verifyAndRedirect(currentRoomState.currentUrl);
-            }
-
-            if (actualMode === 'P2P') {
-              await ensureOffscreenDocument();
-              chrome.runtime.sendMessage({
-                type: 'OFFSCREEN_INIT_P2P',
-                payload: {
-                  role: 'GUEST',
-                  roomId: res.roomId,
-                  userId,
-                  socketId: s.id,
-                  hostSocketId: res.data.hostSocketId
-                }
-              } as ExtensionMessage).catch(() => {});
-            }
-
-            broadcastToVideoTabs({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            });
-
-            sendResponse({ success: true, roomId: res.roomId, roomState: currentRoomState });
-          };
-
-          const onJoinError = (err: any) => {
-            if (joinSettled) return;
-            joinSettled = true;
-            clearTimeout(joinTimer);
-            cleanupJoinListeners();
-            const code = err?.code || 'ERR_ROOM_NOT_FOUND';
-            sendResponse({
-              success: false,
-              error: code,
-              code
-            });
-          };
-
-          s.once('JOIN_ROOM_SUCCESS', onJoinSuccess);
-          s.once('ERROR', onJoinError);
-        })
-        .catch((err) => {
-          sendResponse({ success: false, error: err.message, code: 'ERR_SERVER_UNREACHABLE' });
-        });
-      return true;
-    }
-
-
-    // 雙向路由：若 P2P 直連已建立，優先透過 DataChannel 傳送；否則透過 Socket.IO
-    case 'BG_SYNC_STATE': {
-      const syncData = payload?.data ?? (request as any).data;
-      const targetGuestSocketId = payload?.targetGuestSocketId ?? (request as any).targetGuestSocketId;
-
-      if (!syncData) break;
-
-      const handleForwardSync = (room: RoomStateInfo | null) => {
-        if (!room) {
-          console.warn('[Background] BG_SYNC_STATE 捨棄：尚未加入房間或工作階段已丟失');
-          return;
+        } else {
+          const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED';
+          sendResponse({ success: false, error: errCode, code: errCode });
         }
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err?.message || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
+      });
+    return;
+  }
 
-        // 若房主初次在目標分頁操作且未記錄 currentUrl，自動綁定當前分頁網址為房間目標
-        if (room.isHost && !room.currentUrl && sender.tab?.url) {
-          room.currentUrl = getCanonicalVideoUrl(sender.tab.url);
-          persistRoomSession(room);
+  initSocketConnection(serverUrl)
+    .then((s) => {
+      s.emit('CREATE_ROOM', {
+        event: 'CREATE_ROOM',
+        data: {
+          userId,
+          currentUrl: cleanUrl,
+          isSelfHosted: mode === 'CUSTOM_IP' || !!payload?.customServerUrl,
+          mode,
+          customServerUrl: mode === 'CUSTOM_IP' ? serverUrl : undefined,
+          language: payload?.language,
+          allowUniversal: candidatesUnlocked
         }
+      });
 
-        // 核心過濾防線：比對發送事件的分頁網址是否符合房間目標影片
-        if (sender.tab?.url && room.currentUrl) {
-          const senderVideoId = getVideoIdentifier(sender.tab.url);
-          const roomVideoId = getVideoIdentifier(room.currentUrl);
-          if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
-            console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sender.tab.url})`);
-            return;
-          }
-        }
-
-        console.log(`[Background] 轉發影音同步事件: action=${syncData.action}, time=${syncData.currentTime?.toFixed?.(2)}s, mode=${room.mode}, p2pStatus=${room.p2pStatus}`);
-
-        if (room.mode === 'P2P') {
-          chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_SEND_DATA',
-            payload: syncData
-          } as ExtensionMessage).catch(() => {});
-        } else if (socket) {
-          socket.emit('SYNC_STATE', {
-            event: 'SYNC_STATE',
-            roomId: room.roomId,
-            targetGuestSocketId,
-            data: syncData
-          });
-        }
+      let createSettled = false;
+      const cleanupCreateListeners = () => {
+        s.off('CREATE_ROOM_SUCCESS', onCreateSuccess);
+        s.off('ERROR', onCreateError);
       };
 
-      if (currentRoomState) {
-        handleForwardSync(currentRoomState);
-      } else {
-        chrome.storage?.local?.get([SESSION_STORAGE_KEY], (res) => {
-          if (res?.[SESSION_STORAGE_KEY]) {
-            currentRoomState = res[SESSION_STORAGE_KEY];
-          }
-          handleForwardSync(currentRoomState);
-        });
-      }
-      break;
-    }
+      const createTimer = setTimeout(() => {
+        if (createSettled) return;
+        createSettled = true;
+        cleanupCreateListeners();
+        sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
+      }, 6000);
 
-    case 'BG_REDIRECT_ROOM': {
-      const rawTargetUrl = payload?.targetUrl ?? (request as any).targetUrl;
-      if (!rawTargetUrl || typeof rawTargetUrl !== 'string') {
-        sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
-        return true;
-      }
-      if (currentRoomState && currentRoomState.isHost) {
-        const cleanTarget = getCanonicalVideoUrl(rawTargetUrl);
-        if (!isUrlAllowed(cleanTarget)) {
-          verifyAndRedirect(cleanTarget);
-          sendResponse({ success: false, error: 'ERR_UNAUTHORIZED_URL', code: 'ERR_UNAUTHORIZED_URL' });
-          return true;
-        }
-        currentRoomState.currentUrl = cleanTarget;
-        persistRoomSession(currentRoomState);
-        verifyAndRedirect(cleanTarget);
-
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-
-        if (currentRoomState.mode === 'P2P' && currentRoomState.p2pStatus === 'CONNECTED') {
-          chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_SEND_DATA',
-            payload: {
-              type: 'REDIRECT_ROOM',
-              targetUrl: cleanTarget
-            }
-          } as ExtensionMessage).catch(() => {});
-        }
-
-        if (socket) {
-          socket.emit('REDIRECT_ROOM', {
-            event: 'REDIRECT_ROOM',
-            roomId: currentRoomState.roomId,
-            data: {
-              targetUrl: cleanTarget,
-              allowUniversal: candidatesUnlocked
-            }
-          });
-        }
-        sendResponse({ success: true });
-      } else {
-        sendResponse({ success: false, error: 'ERR_HOST_ONLY', code: 'ERR_HOST_ONLY' });
-      }
-      return true;
-    }
-
-    case 'BG_TOGGLE_PERMISSION': {
-      if (currentRoomState && currentRoomState.isHost) {
-        currentRoomState.allowGuestControl = payload.allowGuestControl;
-        broadcastToVideoTabs({
-          type: 'CS_PERMISSION_UPDATED',
-          payload: { allowGuestControl: payload.allowGuestControl }
-        });
-
-        if (currentRoomState.mode === 'P2P') {
-          chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_UPDATE_PERMISSION',
-            payload: { allowGuestControl: payload.allowGuestControl }
-          } as ExtensionMessage).catch(() => {});
-
-          if (currentRoomState.p2pStatus === 'CONNECTED') {
-            chrome.runtime.sendMessage({
-              type: 'OFFSCREEN_SEND_DATA',
-              payload: {
-                type: 'TOGGLE_PERMISSION',
-                allowGuestControl: payload.allowGuestControl
-              }
-            } as ExtensionMessage).catch(() => {});
-          }
-        }
-
-        if (socket) {
-          socket.emit('TOGGLE_PERMISSION', {
-            event: 'TOGGLE_PERMISSION',
-            roomId: currentRoomState.roomId,
-            data: { allowGuestControl: payload.allowGuestControl }
-          });
-        }
-        sendResponse({ success: true });
-      }
-      return true;
-    }
-
-    case 'BG_LEAVE_ROOM': {
-      chrome.action.setBadgeText({ text: '' });
-      if (memberCountSyncTimer) {
-        clearInterval(memberCountSyncTimer);
-        memberCountSyncTimer = null;
-      }
-      chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLOSE_P2P' } as ExtensionMessage).catch(() => {});
-      if (socket) {
-        socket.emit('LEAVE_ROOM');
-        socket.disconnect();
-        socket = null;
-      }
-      closeOffscreenDocument().catch(() => {});
-      currentRoomState = null;
-      persistRoomSession(null);
-      broadcastToVideoTabs({
-        type: 'CS_ROOM_STATE_CHANGED',
-        payload: null
-      });
-      chrome.runtime.sendMessage({
-        type: 'CS_ROOM_STATE_CHANGED',
-        payload: null
-      }).catch(() => {});
-      sendResponse({ success: true });
-      break;
-    }
-
-    case 'BG_APPROVE_JOIN_REQUEST': {
-      chrome.runtime.sendMessage(
-        {
-          type: 'OFFSCREEN_APPROVE_JOIN_REQUEST',
-          payload: {
-            requestId: payload.requestId,
-            hostCurrentUrl: currentRoomState?.currentUrl
-          }
-        } as ExtensionMessage,
-        () => {
-          if (currentRoomState && currentRoomState.pendingJoinRequests) {
-            currentRoomState.pendingJoinRequests = currentRoomState.pendingJoinRequests.filter(
-              (r) => r.requestId !== payload.requestId
-            );
-            const count = currentRoomState.pendingJoinRequests.length;
-            chrome.action.setBadgeText({ text: count > 0 ? `${count}` : '' });
-            chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-            broadcastToVideoTabs({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            });
-            chrome.runtime.sendMessage({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            }).catch(() => {});
-          }
-          // 房主核准觀眾後，延遲主動推播一次當前影片時間與播放狀態，加速已就緒觀眾對齊
-          setTimeout(() => {
-            if (currentRoomState?.isHost) {
-              broadcastToVideoTabs({
-                type: 'CS_REQUEST_CURRENT_STATE',
-                payload: {}
-              });
-            }
-          }, 600);
-          sendResponse({ success: true });
-        }
-      );
-      return true;
-    }
-
-    case 'BG_REJECT_JOIN_REQUEST': {
-      chrome.runtime.sendMessage(
-        {
-          type: 'OFFSCREEN_REJECT_JOIN_REQUEST',
-          payload: { requestId: payload.requestId }
-        } as ExtensionMessage,
-        () => {
-          if (currentRoomState && currentRoomState.pendingJoinRequests) {
-            currentRoomState.pendingJoinRequests = currentRoomState.pendingJoinRequests.filter(
-              (r) => r.requestId !== payload.requestId
-            );
-            const count = currentRoomState.pendingJoinRequests.length;
-            chrome.action.setBadgeText({ text: count > 0 ? `${count}` : '' });
-            chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-            broadcastToVideoTabs({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            });
-            chrome.runtime.sendMessage({
-              type: 'CS_ROOM_STATE_CHANGED',
-              payload: currentRoomState
-            }).catch(() => {});
-          }
-          sendResponse({ success: true });
-        }
-      );
-      return true;
-    }
-
-    case 'BG_REQUEST_INIT_SYNC': {
-      if (currentRoomState && !currentRoomState.isHost) {
-        if (currentRoomState.mode === 'P2P') {
-          chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_SEND_DATA',
-            payload: { type: 'REQUEST_INIT_SYNC' }
-          } as ExtensionMessage).catch(() => {});
-        } else if (socket && socket.connected) {
-          socket.emit('REQUEST_INIT_SYNC', {
-            event: 'REQUEST_INIT_SYNC',
-            roomId: currentRoomState.roomId
-          });
-        }
-      }
-      sendResponse({ success: true });
-      break;
-    }
-
-    case 'CS_JOIN_REQUESTS_UPDATED': {
-      if (currentRoomState) {
-        const requests = payload.pendingRequests || [];
-        currentRoomState.pendingJoinRequests = requests;
-        const count = requests.length;
-        chrome.action.setBadgeText({ text: count > 0 ? `${count}` : '' });
-        chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-      break;
-    }
-
-    case 'GET_ROOM_STATE': {
-      const tabUrl = sender.tab?.url;
-      if (currentRoomState) {
-        sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode, tabUrl });
-      } else {
-        chrome.storage?.local?.get([SESSION_STORAGE_KEY, 'syncine_user_id'], (result) => {
-          if (result?.[SESSION_STORAGE_KEY]) {
-            currentRoomState = result[SESSION_STORAGE_KEY];
-            console.log('[Background] GET_ROOM_STATE 從本機 storage 成功還原房間狀態:', currentRoomState?.roomId);
-          }
-          sendResponse({ roomState: currentRoomState, userId, compositeCode: currentRoomState?.compositeCode, tabUrl });
-        });
-        return true;
-      }
-      break;
-    }
-
-    case 'GET_P2P_DIAGNOSTIC': {
-      ensureOffscreenDocument()
-        .then(() => {
-          chrome.runtime.sendMessage(
-            {
-              type: 'OFFSCREEN_GET_DIAGNOSTIC',
-              payload: { errorCode: payload?.errorCode }
-            } as ExtensionMessage,
-            (res) => {
-              sendResponse(res || { success: false });
-            }
-          );
-        })
-        .catch((err) => {
-          sendResponse({ success: false, error: err.message });
-        });
-      return true;
-    }
-
-    // ----------------------------------------------------
-    // Offscreen WebRTC 消息與信令轉發
-    // ----------------------------------------------------
-    case 'OFFSCREEN_SIGNAL_OFFER': {
-      if (socket && currentRoomState) {
-        socket.emit('SIGNAL_OFFER', {
-          event: 'SIGNAL_OFFER',
-          roomId: currentRoomState.roomId,
-          data: payload
-        });
-      }
-      break;
-    }
-
-    case 'OFFSCREEN_SIGNAL_ANSWER': {
-      if (socket && currentRoomState) {
-        socket.emit('SIGNAL_ANSWER', {
-          event: 'SIGNAL_ANSWER',
-          roomId: currentRoomState.roomId,
-          data: payload
-        });
-      }
-      break;
-    }
-
-    case 'OFFSCREEN_SIGNAL_ICE_CANDIDATE': {
-      if (socket && currentRoomState) {
-        socket.emit('SIGNAL_ICE_CANDIDATE', {
-          event: 'SIGNAL_ICE_CANDIDATE',
-          roomId: currentRoomState.roomId,
-          data: payload
-        });
-      }
-      break;
-    }
-
-    case 'BG_P2P_GUEST_APPROVED': {
-      if (currentRoomState) {
-        currentRoomState.p2pStatus = 'CONNECTED';
-        currentRoomState.guestAwaitingApproval = false;
-        currentRoomState.connectedPeerCount = payload?.memberCount || 2;
-        const prevUrl = currentRoomState.currentUrl;
-        if (payload?.hostCurrentUrl) {
-          currentRoomState.currentUrl = getCanonicalVideoUrl(payload.hostCurrentUrl);
-        }
-        persistRoomSession(currentRoomState);
-        // 核心防轟炸：若網址未變更且已在 JOIN_ROOM_SUCCESS 階段校驗過，切勿重複執行 verifyAndRedirect 避免二次警報
-        if (!currentRoomState.isHost && currentRoomState.currentUrl) {
-          if (!prevUrl || prevUrl !== currentRoomState.currentUrl) {
-            verifyAndRedirect(currentRoomState.currentUrl);
-          }
-        }
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-      sendResponse({ success: true });
-      break;
-    }
-
-    case 'CS_ROOM_STATE_CHANGED': {
-      if (payload === null) {
-        currentRoomState = null;
-        persistRoomSession(null);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: null
-        });
-      } else if (payload) {
-        currentRoomState = {
-          ...(currentRoomState || {}),
-          ...payload
+      const onCreateSuccess = (res: any) => {
+        if (createSettled) return;
+        createSettled = true;
+        clearTimeout(createTimer);
+        cleanupCreateListeners();
+        const compositeCode = formatShareCode(mode, res.roomId, serverUrl);
+        const nextState: RoomStateInfo = {
+          roomId: res.roomId,
+          isHost: true,
+          allowGuestControl: Boolean(res.data?.allowGuestControl),
+          serverUrl,
+          currentUrl: cleanUrl,
+          mode,
+          p2pStatus: undefined,
+          connectionStatus: 'CONNECTED',
+          connectedPeerCount: 1,
+          compositeCode,
+          resumeToken: res.data?.resumeToken
         };
-        persistRoomSession(currentRoomState);
+        setRoomState(nextState);
+        persistRoomSession(nextState);
+        syncKeepAliveAlarm(true);
+
         broadcastToVideoTabs({
           type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
+          payload: nextState
         });
-      }
-      break;
-    }
 
-    case 'OFFSCREEN_P2P_STATUS': {
-      if (currentRoomState) {
-        currentRoomState.p2pStatus = payload.status;
-        currentRoomState.connectedPeerCount = payload.peerCount;
-        if (payload.status === 'CONNECTED') {
-          currentRoomState.serverlessHandshakeState = 'CONNECTED';
-        }
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-        // 即時通知開啟中的 Popup 控制面板
-        chrome.runtime.sendMessage({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        }).catch(() => {});
-      }
-      break;
-    }
+        sendResponse({ success: true, compositeCode, roomId: res.roomId, roomState: nextState });
+      };
 
-    case 'OFFSCREEN_TRIGGER_FALLBACK': {
-      console.warn('[Background] Offscreen 回報 P2P 連線失敗，啟動降級流程:', payload.reason);
-      if (socket && currentRoomState) {
-        socket.emit('P2P_FALLBACK', {
-          roomId: currentRoomState.roomId,
-          reason: payload.reason
-        });
-        currentRoomState.p2pStatus = 'FALLBACK';
-        currentRoomState.mode = 'DEFAULT';
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-      }
-      break;
-    }
+      const onCreateError = (err: any) => {
+        if (createSettled) return;
+        createSettled = true;
+        clearTimeout(createTimer);
+        cleanupCreateListeners();
+        const code = err?.code || 'ERR_UNKNOWN';
+        sendResponse({ success: false, error: code, code });
+      };
 
-    case 'OFFSCREEN_DATA_RECEIVED': {
-      // 來自 DataChannel 直連同步事件
-      const syncData = payload;
-      if (!syncData || typeof syncData !== 'object') break;
+      s.once('CREATE_ROOM_SUCCESS', onCreateSuccess);
+      s.once('ERROR', onCreateError);
+    })
+    .catch((err) => {
+      console.warn('[Background] BG_CREATE_ROOM 失敗:', sanitizeLog(err?.message || err));
+      sendResponse({ success: false, error: err?.message || 'ERR_SERVER_UNREACHABLE', code: err?.message || 'ERR_SERVER_UNREACHABLE' });
+    });
+}
 
-      // 房主端二重防禦：若房主已關閉觀眾控制，且為播放操作 (PLAY/PAUSE/SEEK)，直接忽略
-      if (currentRoomState?.isHost && !currentRoomState.allowGuestControl && syncData.action) {
-        console.warn('[Background Security Drop] 房主已關閉觀眾操作，忽略 DataChannel 傳入的播放操作');
-        break;
-      }
+function handleJoinRoom(payload: any, sendResponse: (res: any) => void): void {
+  const rawInput = payload?.shareCode ? String(payload.shareCode).trim() : '';
+  const fallbackMode: ConnectionMode = payload?.mode || 'P2P';
+  const parsed = parseConnectionCode(rawInput, fallbackMode, DEFAULT_SERVER_URL);
+  const { roomId, serverUrl, mode } = parsed;
+  const userId = getUserId();
 
-      // 觀眾端不可發起 REDIRECT_ROOM 或 TOGGLE_PERMISSION
-      if (currentRoomState?.isHost && (syncData.type === 'REDIRECT_ROOM' || syncData.type === 'TOGGLE_PERMISSION')) {
-        console.warn('[Background Security Drop] 拒絕處理 DataChannel 傳入之偽造特權指令:', syncData.type);
-        break;
-      }
+  if (!roomId) {
+    sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
+    return;
+  }
 
-      if (syncData.action) {
-        console.log(`[Background] 收到 DataChannel 影音操作 (${syncData.action})，廣播至目標分頁`);
-        broadcastToVideoTabs({
-          type: 'CS_SYNC_RECEIVED',
-          payload: { data: syncData }
-        });
-      } else if (syncData.type === 'REDIRECT_ROOM') {
-        console.log(`[Background] 收到 DataChannel 推播網址 (${syncData.targetUrl})，執行跳轉並保存房間狀態`);
-        const cleanTarget = getCanonicalVideoUrl(syncData.targetUrl);
-        if (currentRoomState) {
-          currentRoomState.currentUrl = cleanTarget;
-          persistRoomSession(currentRoomState);
-        }
-        verifyAndRedirect(cleanTarget);
-        broadcastToVideoTabs({
-          type: 'CS_ROOM_STATE_CHANGED',
-          payload: currentRoomState
-        });
-      } else if (syncData.type === 'TOGGLE_PERMISSION') {
-        console.log(`[Background] 收到 DataChannel 權限變更 (${syncData.allowGuestControl})`);
-        if (currentRoomState) {
-          currentRoomState.allowGuestControl = syncData.allowGuestControl;
-          persistRoomSession(currentRoomState);
-        }
-        broadcastToVideoTabs({
-          type: 'CS_PERMISSION_UPDATED',
-          payload: { allowGuestControl: syncData.allowGuestControl }
-        });
-      } else if (syncData.type === 'REQUEST_INIT_SYNC') {
-        if (currentRoomState?.isHost) {
-          broadcastToVideoTabs({
-            type: 'CS_REQUEST_CURRENT_STATE',
-            payload: {}
-          });
-        }
-      }
-      break;
-    }
-
-    // Serverless 剪貼簿模式專屬訊息 (完全不經任何伺服器)
-    case 'BG_SERVERLESS_CREATE_OFFER': {
-      ensureOffscreenDocument()
-        .then(() => {
-          chrome.runtime.sendMessage(
-            { type: 'OFFSCREEN_SERVERLESS_CREATE_OFFER' } as ExtensionMessage,
-            (res) => {
-              if (res?.success) {
-                if (!currentRoomState) {
-                  currentRoomState = {
-                    roomId: res.roomId,
-                    isHost: true,
-                    allowGuestControl: false,
-                    serverUrl: 'P2P',
-                    currentUrl: getCanonicalVideoUrl(payload?.currentUrl),
-                    mode: 'P2P',
-                    p2pStatus: 'CONNECTING',
-                    serverlessHandshakeState: 'AWAITING_ANSWER',
-                    offerCode: res.offerCode,
-                    connectedPeerCount: 1
-                  };
-                } else {
-                  currentRoomState.offerCode = res.offerCode;
-                }
-                broadcastToVideoTabs({
-                  type: 'CS_ROOM_STATE_CHANGED',
-                  payload: currentRoomState
-                });
-                sendResponse({
-                  success: true,
-                  offerCode: res.offerCode,
-                  roomId: res.roomId,
-                  peerId: res.peerId,
-                  roomState: currentRoomState
-                });
-              } else {
-                sendResponse({ success: false, error: res?.error || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
-              }
-            }
-          );
-        })
-        .catch((err) => {
-          sendResponse({ success: false, error: err.message });
-        });
-      return true;
-    }
-
-    case 'BG_SERVERLESS_ACCEPT_OFFER': {
-      ensureOffscreenDocument()
-        .then(() => {
-          chrome.runtime.sendMessage(
-            {
-              type: 'OFFSCREEN_SERVERLESS_ACCEPT_OFFER',
-              payload: { offerCode: payload.offerCode }
-            } as ExtensionMessage,
-            (res) => {
-              if (res?.success) {
-                currentRoomState = {
-                  roomId: res.roomId,
-                  isHost: false,
-                  allowGuestControl: false,
-                  serverUrl: 'P2P',
-                  currentUrl: getCanonicalVideoUrl(payload?.currentUrl),
-                  mode: 'P2P',
-                  p2pStatus: 'CONNECTING',
-                  serverlessHandshakeState: 'AWAITING_HOST_CONFIRM',
-                  answerCode: res.answerCode,
-                  connectedPeerCount: 0
-                };
-                broadcastToVideoTabs({
-                  type: 'CS_ROOM_STATE_CHANGED',
-                  payload: currentRoomState
-                });
-                sendResponse({
-                  success: true,
-                  answerCode: res.answerCode,
-                  roomId: res.roomId,
-                  roomState: currentRoomState
-                });
-              } else {
-                sendResponse({ success: false, error: res?.error || 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
-              }
-            }
-          );
-        })
-        .catch((err) => {
-          sendResponse({ success: false, error: err.message });
-        });
-      return true;
-    }
-
-    case 'BG_SERVERLESS_ACCEPT_ANSWER': {
-      chrome.runtime.sendMessage(
-        {
-          type: 'OFFSCREEN_SERVERLESS_ACCEPT_ANSWER',
-          payload: { answerCode: payload.answerCode }
-        } as ExtensionMessage,
-        (res) => {
-          if (res?.success) {
-            if (currentRoomState) {
-              currentRoomState.serverlessHandshakeState = 'CONNECTED';
-              currentRoomState.p2pStatus = 'CONNECTED';
-              currentRoomState.connectedPeerCount = 1;
-              broadcastToVideoTabs({
-                type: 'CS_ROOM_STATE_CHANGED',
-                payload: currentRoomState
-              });
-              chrome.runtime.sendMessage({
-                type: 'CS_ROOM_STATE_CHANGED',
-                payload: currentRoomState
-              }).catch(() => {});
-            }
-            sendResponse({ success: true, roomState: currentRoomState });
-          } else {
-            sendResponse({ success: false, error: res?.error || 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
+  if (mode === 'P2P') {
+    sendOffscreenMessage({
+      type: 'OFFSCREEN_PEER_JOIN_ROOM',
+      payload: { roomId, userId }
+    } as ExtensionMessage)
+      .then((res) => {
+        if (res?.success) {
+          const existingState = getRoomState();
+          // 若在回調抵達前已收到核准訊號，避免被覆蓋為 awaitingApproval: true
+          if (!existingState || existingState.p2pStatus !== 'CONNECTED') {
+            const nextState: RoomStateInfo = {
+              roomId: res.roomId,
+              isHost: false,
+              allowGuestControl: false,
+              serverUrl: 'P2P',
+              mode: 'P2P',
+              p2pStatus: 'CONNECTING',
+              connectionStatus: 'CONNECTED',
+              guestAwaitingApproval: true,
+              connectedPeerCount: 1,
+              compositeCode: formatShareCode('P2P', res.roomId)
+            };
+            setRoomState(nextState);
+            persistRoomSession(nextState);
           }
+          syncKeepAliveAlarm(true);
+          const latestState = getRoomState();
+          broadcastToVideoTabs({
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: latestState
+          });
+          sendResponse({ success: true, roomId: res.roomId, roomState: latestState });
+        } else {
+          const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED';
+          sendResponse({ success: false, error: errCode, code: errCode });
         }
-      );
-      return true;
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err?.message || 'ERR_P2P_SIGNAL_FAILED', code: 'ERR_P2P_SIGNAL_FAILED' });
+      });
+    return;
+  }
+
+  initSocketConnection(serverUrl)
+    .then((s) => {
+      const existingState = getRoomState();
+      s.emit('JOIN_ROOM', {
+        event: 'JOIN_ROOM',
+        roomId,
+        data: {
+          userId,
+          mode,
+          resumeToken: existingState?.roomId === roomId ? existingState.resumeToken : undefined
+        }
+      });
+
+      let joinSettled = false;
+      const cleanupJoinListeners = () => {
+        s.off('JOIN_ROOM_SUCCESS', onJoinSuccess);
+        s.off('ERROR', onJoinError);
+      };
+
+      const joinTimer = setTimeout(() => {
+        if (joinSettled) return;
+        joinSettled = true;
+        cleanupJoinListeners();
+        sendResponse({ success: false, error: 'ERR_SERVER_TIMEOUT', code: 'ERR_SERVER_TIMEOUT' });
+      }, 6000);
+
+      const onJoinSuccess = (res: any) => {
+        if (joinSettled) return;
+        joinSettled = true;
+        clearTimeout(joinTimer);
+        cleanupJoinListeners();
+        const actualMode: ConnectionMode = res.data?.mode || mode;
+
+        const nextState: RoomStateInfo = {
+          roomId: res.roomId,
+          isHost: res.data?.isHost ?? false,
+          allowGuestControl: Boolean(res.data?.allowGuestControl),
+          serverUrl,
+          currentUrl: getCanonicalVideoUrl(res.data?.currentUrl),
+          mode: actualMode,
+          p2pStatus: undefined,
+          connectionStatus: 'CONNECTED',
+          connectedPeerCount: 0,
+          compositeCode: formatShareCode(actualMode, res.roomId, serverUrl),
+          resumeToken: res.data?.resumeToken
+        };
+        setRoomState(nextState);
+        persistRoomSession(nextState);
+        syncKeepAliveAlarm(true);
+
+        if (!nextState.isHost && nextState.currentUrl) {
+          verifyAndRedirect(nextState.currentUrl);
+        }
+
+        broadcastToVideoTabs({
+          type: 'CS_ROOM_STATE_CHANGED',
+          payload: nextState
+        });
+
+        sendResponse({ success: true, roomId: res.roomId, roomState: nextState });
+      };
+
+      const onJoinError = (err: any) => {
+        if (joinSettled) return;
+        joinSettled = true;
+        clearTimeout(joinTimer);
+        cleanupJoinListeners();
+        const code = err?.code || 'ERR_ROOM_NOT_FOUND';
+        sendResponse({ success: false, error: code, code });
+      };
+
+      s.once('JOIN_ROOM_SUCCESS', onJoinSuccess);
+      s.once('ERROR', onJoinError);
+    })
+    .catch((err) => {
+      sendResponse({ success: false, error: err?.message || 'ERR_SERVER_UNREACHABLE', code: 'ERR_SERVER_UNREACHABLE' });
+    });
+}
+
+function handleOffscreenDataReceived(syncData: any): void {
+  if (!syncData || typeof syncData !== 'object') return;
+  const currentRoomState = getRoomState();
+
+  // 房主端二重防禦：若房主已關閉觀眾控制，且為播放操作，直接忽略
+  if (currentRoomState?.isHost && !currentRoomState.allowGuestControl && syncData.action) {
+    console.warn('[Background Security Drop] 房主已關閉觀眾操作，忽略 DataChannel 傳入的播放操作');
+    return;
+  }
+
+  // 觀眾端不可發起 REDIRECT_ROOM 或 TOGGLE_PERMISSION
+  if (currentRoomState?.isHost && (syncData.type === 'REDIRECT_ROOM' || syncData.type === 'TOGGLE_PERMISSION')) {
+    console.warn('[Background Security Drop] 拒絕處理 DataChannel 傳入之偽造特權指令:', sanitizeLog(syncData.type));
+    return;
+  }
+
+  if (syncData.action) {
+    const validated = validateSyncData(syncData, !currentRoomState?.isHost);
+    if (!validated) {
+      console.warn('[Background Security Drop] 捨棄校驗失敗的 DataChannel 播放同步封包');
+      return;
+    }
+    broadcastToVideoTabs({
+      type: 'CS_SYNC_RECEIVED',
+      payload: { data: validated }
+    });
+  } else if (syncData.type === 'REDIRECT_ROOM') {
+    const cleanTarget = getCanonicalVideoUrl(syncData.targetUrl);
+    if (!isUrlAllowed(cleanTarget)) {
+      verifyAndRedirect(cleanTarget);
+      return;
+    }
+    if (currentRoomState) {
+      currentRoomState.currentUrl = cleanTarget;
+      persistRoomSession(currentRoomState);
+    }
+    verifyAndRedirect(cleanTarget);
+    broadcastToVideoTabs({
+      type: 'CS_ROOM_STATE_CHANGED',
+      payload: currentRoomState
+    });
+  } else if (syncData.type === 'TOGGLE_PERMISSION') {
+    const allow = Boolean(syncData.allowGuestControl);
+    if (currentRoomState) {
+      currentRoomState.allowGuestControl = allow;
+      persistRoomSession(currentRoomState);
+    }
+    broadcastToVideoTabs({
+      type: 'CS_PERMISSION_UPDATED',
+      payload: { allowGuestControl: allow }
+    });
+  } else if (syncData.type === 'REQUEST_INIT_SYNC') {
+    if (currentRoomState?.isHost) {
+      broadcastToVideoTabs({
+        type: 'CS_REQUEST_CURRENT_STATE',
+        payload: {}
+      });
     }
   }
-});
+}
 
-// 監聽分頁載入完成：若處於 activeTab 通用模式且為外部網頁，自動注入 content.js
+// ----------------------------------------------------
+// Message 監聽器 (來自 Popup, Content Script 與 Offscreen)
+// ----------------------------------------------------
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((request: ExtensionMessage, sender, sendResponse) => {
+    const { type, payload } = request;
+
+    switch (type) {
+      case 'BG_CREATE_ROOM': {
+        hydrateBackgroundSession().then(() => handleCreateRoom(payload, sendResponse));
+        return true;
+      }
+
+      case 'BG_JOIN_ROOM': {
+        hydrateBackgroundSession().then(() => handleJoinRoom(payload, sendResponse));
+        return true;
+      }
+
+      case 'BG_SYNC_STATE': {
+        const syncData = payload?.data ?? (request as any).data;
+        const targetGuestSocketId = payload?.targetGuestSocketId ?? (request as any).targetGuestSocketId;
+        if (!syncData) break;
+
+        hydrateBackgroundSession().then(() => {
+          const room = getRoomState();
+          if (!room) {
+            console.warn('[Background] BG_SYNC_STATE 捨棄：尚未加入房間或工作階段已丟失');
+            return;
+          }
+
+          if (
+            room.isHost &&
+            (!room.currentUrl || isNonVideoBrowsePage(room.currentUrl)) &&
+            sender.tab?.url &&
+            !isNonVideoBrowsePage(sender.tab.url)
+          ) {
+            room.currentUrl = getCanonicalVideoUrl(sender.tab.url);
+            persistRoomSession(room);
+            broadcastRoomState(room);
+          }
+
+          if (sender.tab?.url && !isNonVideoBrowsePage(sender.tab.url) && !syncData.videoUrl) {
+            syncData.videoUrl = getCanonicalVideoUrl(sender.tab.url);
+          }
+
+          if (sender.tab?.url && room.currentUrl && !isNonVideoBrowsePage(room.currentUrl)) {
+            const senderVideoId = getVideoIdentifier(sender.tab.url);
+            const roomVideoId = getVideoIdentifier(room.currentUrl);
+            if (senderVideoId && roomVideoId && senderVideoId !== roomVideoId) {
+              if (!(room.isHost && sender.tab.active && !isNonVideoBrowsePage(sender.tab.url))) {
+                console.log(`[Background] 捨棄來自非當前房間目標影片分頁的同步事件 (${sanitizeLog(sender.tab.url)})`);
+                return;
+              }
+            }
+          }
+
+          if (room.mode === 'P2P') {
+            chrome.runtime
+              .sendMessage({
+                type: 'OFFSCREEN_SEND_DATA',
+                payload: syncData
+              } as ExtensionMessage)
+              .catch(() => {});
+          } else {
+            const socket = getSocket();
+            if (socket) {
+              socket.emit('SYNC_STATE', {
+                event: 'SYNC_STATE',
+                roomId: room.roomId,
+                targetGuestSocketId,
+                data: syncData
+              });
+            }
+          }
+        });
+        break;
+      }
+
+      case 'BG_REDIRECT_ROOM': {
+        const rawTargetUrl = payload?.targetUrl ?? (request as any).targetUrl;
+        if (!rawTargetUrl || typeof rawTargetUrl !== 'string') {
+          sendResponse({ success: false, error: 'ERR_INVALID_CODE', code: 'ERR_INVALID_CODE' });
+          return true;
+        }
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (currentRoomState && currentRoomState.isHost) {
+            const cleanTarget = getCanonicalVideoUrl(rawTargetUrl);
+            if (!isUrlAllowed(cleanTarget)) {
+              verifyAndRedirect(cleanTarget);
+              sendResponse({ success: false, error: 'ERR_UNAUTHORIZED_URL', code: 'ERR_UNAUTHORIZED_URL' });
+              return;
+            }
+            currentRoomState.currentUrl = cleanTarget;
+            persistRoomSession(currentRoomState);
+            verifyAndRedirect(cleanTarget);
+            broadcastToVideoTabs({
+              type: 'CS_ROOM_STATE_CHANGED',
+              payload: currentRoomState
+            });
+
+            if (currentRoomState.mode === 'P2P') {
+              chrome.runtime
+                .sendMessage({
+                  type: 'OFFSCREEN_SEND_DATA',
+                  payload: {
+                    type: 'REDIRECT_ROOM',
+                    targetUrl: cleanTarget
+                  }
+                } as ExtensionMessage)
+                .catch(() => {});
+            }
+
+            const socket = getSocket();
+            if (socket) {
+              socket.emit('REDIRECT_ROOM', {
+                event: 'REDIRECT_ROOM',
+                roomId: currentRoomState.roomId,
+                data: {
+                  targetUrl: cleanTarget,
+                  allowUniversal: getCandidatesUnlocked()
+                }
+              });
+            }
+            sendResponse({ success: true });
+          } else {
+            sendResponse({ success: false, error: 'ERR_HOST_ONLY', code: 'ERR_HOST_ONLY' });
+          }
+        });
+        return true;
+      }
+
+      case 'BG_TOGGLE_PERMISSION': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (currentRoomState && currentRoomState.isHost) {
+            currentRoomState.allowGuestControl = Boolean(payload?.allowGuestControl);
+            persistRoomSession(currentRoomState);
+            broadcastToVideoTabs({
+              type: 'CS_PERMISSION_UPDATED',
+              payload: { allowGuestControl: currentRoomState.allowGuestControl }
+            });
+
+            if (currentRoomState.mode === 'P2P') {
+              chrome.runtime
+                .sendMessage({
+                  type: 'OFFSCREEN_UPDATE_PERMISSION',
+                  payload: { allowGuestControl: currentRoomState.allowGuestControl }
+                } as ExtensionMessage)
+                .catch(() => {});
+
+              if (currentRoomState.p2pStatus === 'CONNECTED') {
+                chrome.runtime
+                  .sendMessage({
+                    type: 'OFFSCREEN_SEND_DATA',
+                    payload: {
+                      type: 'TOGGLE_PERMISSION',
+                      allowGuestControl: currentRoomState.allowGuestControl
+                    }
+                  } as ExtensionMessage)
+                  .catch(() => {});
+              }
+            }
+
+            const socket = getSocket();
+            if (socket) {
+              socket.emit('TOGGLE_PERMISSION', {
+                event: 'TOGGLE_PERMISSION',
+                roomId: currentRoomState.roomId,
+                data: { allowGuestControl: currentRoomState.allowGuestControl }
+              });
+            }
+            sendResponse({ success: true });
+          } else {
+            sendResponse({ success: false, error: 'ERR_HOST_ONLY', code: 'ERR_HOST_ONLY' });
+          }
+        });
+        return true;
+      }
+
+      case 'BG_LEAVE_ROOM': {
+        chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLOSE_P2P' } as ExtensionMessage).catch(() => {});
+        disconnectSocket(true);
+        closeOffscreenDocument().catch(() => {});
+        clearBadgeAndResetSession(true);
+        sendResponse({ success: true });
+        break;
+      }
+
+      case 'BG_APPROVE_JOIN_REQUEST': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          sendOffscreenMessage({
+            type: 'OFFSCREEN_APPROVE_JOIN_REQUEST',
+            payload: {
+              requestId: payload.requestId,
+              hostCurrentUrl: currentRoomState?.currentUrl
+            }
+          } as ExtensionMessage).then(() => {
+            const latestRoom = getRoomState();
+            if (latestRoom?.pendingJoinRequests) {
+              latestRoom.pendingJoinRequests = latestRoom.pendingJoinRequests.filter(
+                (r) => r.requestId !== payload.requestId
+              );
+              persistRoomSession(latestRoom);
+              syncJoinRequestBadge(latestRoom.pendingJoinRequests);
+              broadcastRoomState(latestRoom);
+            }
+            // 房主核准觀眾後，分階段延遲主動推播當前影片時間與播放狀態，兼顧已就緒與導航載入中之觀眾對齊
+            for (const delay of [600, 1800]) {
+              setTimeout(() => {
+                if (getRoomState()?.isHost) {
+                  broadcastToVideoTabs({
+                    type: 'CS_REQUEST_CURRENT_STATE',
+                    payload: {}
+                  });
+                }
+              }, delay);
+            }
+            sendResponse({ success: true });
+          });
+        });
+        return true;
+      }
+
+      case 'BG_REJECT_JOIN_REQUEST': {
+        hydrateBackgroundSession().then(() => {
+          sendOffscreenMessage({
+            type: 'OFFSCREEN_REJECT_JOIN_REQUEST',
+            payload: { requestId: payload.requestId }
+          } as ExtensionMessage).then(() => {
+            const latestRoom = getRoomState();
+            if (latestRoom?.pendingJoinRequests) {
+              latestRoom.pendingJoinRequests = latestRoom.pendingJoinRequests.filter(
+                (r) => r.requestId !== payload.requestId
+              );
+              persistRoomSession(latestRoom);
+              syncJoinRequestBadge(latestRoom.pendingJoinRequests);
+              broadcastRoomState(latestRoom);
+            }
+            sendResponse({ success: true });
+          });
+        });
+        return true;
+      }
+
+      case 'BG_REQUEST_INIT_SYNC': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (currentRoomState && !currentRoomState.isHost) {
+            if (currentRoomState.mode === 'P2P') {
+              chrome.runtime
+                .sendMessage({
+                  type: 'OFFSCREEN_SEND_DATA',
+                  payload: { type: 'REQUEST_INIT_SYNC' }
+                } as ExtensionMessage)
+                .catch(() => {});
+            } else {
+              const socket = getSocket();
+              if (socket && socket.connected) {
+                socket.emit('REQUEST_INIT_SYNC', {
+                  event: 'REQUEST_INIT_SYNC',
+                  roomId: currentRoomState.roomId
+                });
+              }
+            }
+          }
+          sendResponse({ success: true });
+        });
+        return true;
+      }
+
+      case 'CS_JOIN_REQUESTS_UPDATED': {
+        const currentRoomState = getRoomState();
+        if (currentRoomState) {
+          const requests = payload?.pendingRequests || [];
+          currentRoomState.pendingJoinRequests = requests;
+          syncJoinRequestBadge(requests);
+          broadcastRoomState(currentRoomState);
+        }
+        break;
+      }
+
+      case 'GET_ROOM_STATE': {
+        const tabUrl = sender.tab?.url;
+        hydrateBackgroundSession().then(() => {
+          const roomState = getRoomState();
+          sendResponse({
+            roomState,
+            userId: getUserId(),
+            compositeCode: roomState?.compositeCode,
+            tabUrl
+          });
+        });
+        return true;
+      }
+
+      case 'BG_PLAYBACK_CONFLICT_DETECTED': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (!currentRoomState || !payload) {
+            sendResponse({ success: false });
+            return;
+          }
+          const rawConflict = payload as PlaybackConflictState;
+          const cleanHost = String(rawConflict.hostname || 'unknown')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9.-]/g, '')
+            .slice(0, 80) || 'unknown';
+          const cleanPlatform = sanitizeLog(rawConflict.platformId || 'unknown', 32) || 'unknown';
+          const sanitizedConflict: PlaybackConflictState = {
+            detected: Boolean(rawConflict.detected),
+            platformId: cleanPlatform,
+            hostname: cleanHost,
+            reversalCount: Math.max(0, Math.min(9999, Number(rawConflict.reversalCount) || 0)),
+            circuitBreakerActive: Boolean(rawConflict.circuitBreakerActive),
+            lastDetectedAt: Number(rawConflict.lastDetectedAt) || Date.now(),
+            dismissed: currentRoomState.playbackConflict?.dismissed ?? false,
+            recentEvents: Array.isArray(rawConflict.recentEvents)
+              ? rawConflict.recentEvents.slice(-15).map((evt) => ({
+                  timestamp: Number(evt?.timestamp) || Date.now(),
+                  type: evt?.type || 'UNPROMPTED_STATE_FLIP',
+                  platformId: cleanPlatform,
+                  hostname: cleanHost,
+                  expectedState: evt?.expectedState || 'IDLE',
+                  observedAction: evt?.observedAction || 'PLAY',
+                  deltaMs: Math.max(0, Math.min(60000, Number(evt?.deltaMs) || 0)),
+                  hadRecentUserInput: Boolean(evt?.hadRecentUserInput)
+                }))
+              : []
+          };
+          currentRoomState.playbackConflict = sanitizedConflict;
+          recordContentionDiagnostic(sanitizedConflict);
+          persistRoomSession(currentRoomState);
+          broadcastRoomState(currentRoomState);
+          sendResponse({ success: true });
+        });
+        return true;
+      }
+
+      case 'BG_DISMISS_PLAYBACK_CONFLICT': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (currentRoomState?.playbackConflict) {
+            currentRoomState.playbackConflict = {
+              ...currentRoomState.playbackConflict,
+              dismissed: true
+            };
+            recordDiagnosticEvent('CONTENTION', 'CONFLICT_BANNER_DISMISSED');
+            persistRoomSession(currentRoomState);
+            broadcastRoomState(currentRoomState);
+          }
+          sendResponse({ success: true });
+        });
+        return true;
+      }
+
+      case 'GET_DIAGNOSTIC_REPORT':
+      case 'GET_P2P_DIAGNOSTIC': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          const requestedCode = typeof payload?.errorCode === 'string' ? payload.errorCode : undefined;
+          const needsP2POffscreen =
+            currentRoomState?.mode === 'P2P' || (typeof requestedCode === 'string' && requestedCode.startsWith('ERR_P2P'));
+
+          if (!needsP2POffscreen) {
+            const report = buildUnifiedDiagnosticReport({
+              roomState: currentRoomState,
+              errorCode: requestedCode
+            });
+            sendResponse({ success: true, data: report });
+            return;
+          }
+
+          ensureOffscreenDocument()
+            .then(() => {
+              chrome.runtime.sendMessage(
+                {
+                  type: 'OFFSCREEN_GET_DIAGNOSTIC',
+                  payload: { errorCode: requestedCode }
+                } as ExtensionMessage,
+                (res) => {
+                  const p2pMd = !chrome.runtime.lastError && res?.success ? res?.data?.markdownReport : undefined;
+                  const report = buildUnifiedDiagnosticReport({
+                    roomState: currentRoomState,
+                    errorCode: requestedCode,
+                    p2pMarkdown: p2pMd
+                  });
+                  sendResponse({ success: true, data: report });
+                }
+              );
+            })
+            .catch(() => {
+              const report = buildUnifiedDiagnosticReport({
+                roomState: currentRoomState,
+                errorCode: requestedCode
+              });
+              sendResponse({ success: true, data: report });
+            });
+        });
+        return true;
+      }
+
+      case 'BG_P2P_GUEST_APPROVED': {
+        hydrateBackgroundSession().then(() => {
+          const currentRoomState = getRoomState();
+          if (currentRoomState) {
+            currentRoomState.p2pStatus = 'CONNECTED';
+            currentRoomState.guestAwaitingApproval = false;
+            currentRoomState.connectedPeerCount = payload?.memberCount || 2;
+            const prevUrl = currentRoomState.currentUrl;
+            if (payload?.hostCurrentUrl) {
+              const cleanHostUrl = getCanonicalVideoUrl(payload.hostCurrentUrl);
+              if (isUrlAllowed(cleanHostUrl)) {
+                currentRoomState.currentUrl = cleanHostUrl;
+              } else {
+                verifyAndRedirect(cleanHostUrl);
+              }
+            }
+            persistRoomSession(currentRoomState);
+            // 核心防轟炸：若網址未變更且已在 JOIN_ROOM_SUCCESS 階段校驗過，切勿重複執行 verifyAndRedirect 避免二次警報
+            if (!currentRoomState.isHost && currentRoomState.currentUrl) {
+              if (!prevUrl || prevUrl !== currentRoomState.currentUrl) {
+                verifyAndRedirect(currentRoomState.currentUrl);
+              }
+            }
+            broadcastRoomState(currentRoomState);
+          }
+          sendResponse({ success: true });
+        });
+        return true;
+      }
+
+      case 'CS_ROOM_STATE_CHANGED': {
+        if (payload === null) {
+          clearBadgeAndResetSession(false);
+          broadcastToVideoTabs({
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: null
+          });
+        } else if (payload) {
+          const nextState: RoomStateInfo = {
+            ...(getRoomState() || ({} as RoomStateInfo)),
+            ...payload
+          };
+          setRoomState(nextState);
+          persistRoomSession(nextState);
+          syncKeepAliveAlarm(true);
+          broadcastToVideoTabs({
+            type: 'CS_ROOM_STATE_CHANGED',
+            payload: nextState
+          });
+        }
+        break;
+      }
+
+      case 'OFFSCREEN_P2P_STATUS': {
+        const currentRoomState = getRoomState();
+        if (currentRoomState) {
+          currentRoomState.p2pStatus = payload.status;
+          currentRoomState.connectedPeerCount = payload.peerCount;
+          persistRoomSession(currentRoomState);
+          broadcastRoomState(currentRoomState);
+        }
+        break;
+      }
+
+      case 'OFFSCREEN_DATA_RECEIVED': {
+        handleOffscreenDataReceived(payload);
+        break;
+      }
+    }
+  });
+}
+
+// 監聽分頁載入完成：若處於 activeTab 通用模式且為外部網頁，安全嘗試注入 content.js；若已在房間內則主動推播房間狀態加速首連同步
 if (typeof chrome !== 'undefined' && chrome.tabs?.onUpdated) {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab?.url) {
-      if (candidatesUnlocked && isUniversalSupportedUrl(tab.url) && !isPlatformPermitted(tab.url)) {
+      if (getCandidatesUnlocked() && isUniversalSupportedUrl(tab.url) && !isPlatformPermitted(tab.url)) {
         if (typeof (chrome as any).scripting !== 'undefined' && (chrome as any).scripting.executeScript) {
           (chrome as any).scripting
             .executeScript({
@@ -1535,6 +908,22 @@ if (typeof chrome !== 'undefined' && chrome.tabs?.onUpdated) {
             })
             .catch(() => {});
         }
+      }
+
+      const activeRoom = getRoomState();
+      if (activeRoom && (isPlatformPermitted(tab.url) || (getCandidatesUnlocked() && isUniversalSupportedUrl(tab.url)))) {
+        setTimeout(() => {
+          const latestRoom = getRoomState();
+          if (latestRoom) {
+            chrome.tabs
+              .sendMessage(tabId, {
+                type: 'CS_ROOM_STATE_CHANGED',
+                payload: latestRoom,
+                parentTabUrl: tab.url
+              })
+              .catch(() => {});
+          }
+        }, 200);
       }
     }
   });

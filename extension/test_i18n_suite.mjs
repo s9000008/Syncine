@@ -18,6 +18,22 @@ function assert(condition, testName, detail = '') {
   }
 }
 
+function readModuleTree(relPath) {
+  const fullPath = path.join(__dirname, relPath);
+  if (!fs.existsSync(fullPath)) return '';
+  if (fs.statSync(fullPath).isFile()) return fs.readFileSync(fullPath, 'utf-8');
+  const chunks = [];
+  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRel = path.posix.join(relPath, entry.name);
+    if (entry.isDirectory()) {
+      chunks.push(readModuleTree(childRel));
+    } else if (/\.(ts|tsx|js|mjs)$/i.test(entry.name)) {
+      chunks.push(fs.readFileSync(path.join(__dirname, childRel), 'utf-8'));
+    }
+  }
+  return chunks.join('\n');
+}
+
 console.log('====================================================');
 console.log('🧪 Syncine 前端與多語系 (i18n) 自動化測試套件開始執行');
 console.log('====================================================\n');
@@ -190,7 +206,7 @@ for (const file of localeFiles) {
 // 模組 5: React 元件與獨立腳本整合性走查
 // ----------------------------------------------------
 console.log('\n--- 模組 5: React 元件與獨立腳本整合性驗證 ---');
-const popupTsx = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+const popupTsx = readModuleTree('src/popup');
 assert(popupTsx.includes('useTranslation'), 'Popup.tsx 引入並使用 useTranslation');
 assert(popupTsx.includes('LanguageSelector'), 'Popup.tsx 包含 LanguageSelector 元件');
 assert(popupTsx.includes('translateReturnCode'), 'Popup.tsx 使用 translateReturnCode 轉譯錯誤');
@@ -203,16 +219,16 @@ assert(popupTsx.includes('MessageSquarePlus'), 'Popup.tsx 引入了 MessageSquar
 assert(popupTsx.includes('unsupportedBadge'), 'Popup.tsx 支援紅燈不支援徽章');
 assert(popupTsx.includes('footerFeedbackBtn'), 'Popup.tsx 包含左下角問題回報小按鈕');
 
-const bgTs = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const bgTs = readModuleTree('src/background');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
 assert(bgTs.includes('formatShareCode'), 'background/index.ts 引入並使用 formatShareCode');
 assert(bgTs.includes('GET_P2P_DIAGNOSTIC'), 'background/index.ts 支援 GET_P2P_DIAGNOSTIC 轉發');
 
-const contentTs = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentTs = readModuleTree('src/content');
 assert(contentTs.includes('getStandaloneText'), 'content/index.ts 引入並使用 getStandaloneText');
 
 const offscreenTs = fs.readFileSync(path.join(__dirname, 'src/offscreen/index.ts'), 'utf-8');
-assert(offscreenTs.includes('getStandaloneText'), 'offscreen/index.ts 引入並使用 getStandaloneText');
+assert(offscreenTs.includes('ERR_P2P_TIMEOUT') && offscreenTs.includes('ERR_AUDIT_REJECTED'), 'offscreen/index.ts 傳遞標準 ReturnCode 交由 UI 層轉譯');
 assert(offscreenTs.includes('P2PLogger'), 'offscreen/index.ts 引入並使用 P2PLogger 結構化日誌');
 assert(offscreenTs.includes('getDiagnosticData'), 'offscreen/index.ts 支援 getDiagnosticData 產生脫敏診斷報告');
 
@@ -388,7 +404,7 @@ assert(p2pLoggerSource.includes('https://github.com/s9000008/Syncine/issues/new'
 // ----------------------------------------------------
 console.log('\n--- 模組 9: 無權限觀眾 Seeking 回滾與 Background 狀態對接驗證 ---');
 
-const contentScriptSource = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentScriptSource = readModuleTree('src/content');
 assert(contentScriptSource.includes('let lastSyncedTime = 0'), 'Content Script 定義了 lastSyncedTime 同步時間追蹤基準');
 assert(
   contentScriptSource.includes('video.currentTime = lastSyncedTime'),
@@ -399,14 +415,14 @@ assert(
   'Content Script 確保 canplay 事件監聽器無重複註冊'
 );
 
-const backgroundScriptSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const backgroundScriptSource = readModuleTree('src/background');
 assert(
   backgroundScriptSource.includes('payload?.data ?? (request as any).data'),
   'Background 實作了 BG_SYNC_STATE 新舊版本雙格式兼容解析'
 );
 assert(
-  backgroundScriptSource.includes("socket.on('HOST_CHANGED'") &&
-    backgroundScriptSource.includes("socket.on('HOST_PRIVILEGE_GRANTED'"),
+  backgroundScriptSource.includes(".on('HOST_CHANGED'") &&
+    backgroundScriptSource.includes(".on('HOST_PRIVILEGE_GRANTED'"),
   'Background 同時監聽 HOST_CHANGED 與 HOST_PRIVILEGE_GRANTED 確保房主逾時轉移狀態一致'
 );
 
@@ -461,14 +477,17 @@ assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix
 
 // 3. Content Script 選擇器與懶載入輔助驗證 (確保既有 YouTube/Bilibili 完全不變)
 assert(contentScriptSource.includes("document.querySelector('video.html5-main-video')"), 'Content Script 完整保留 YouTube 專用選擇器');
-assert(contentScriptSource.includes("document.querySelector('.bpx-player-video-wrap video')"), 'Content Script 完整保留 Bilibili 專用選擇器');
+assert(contentScriptSource.includes('.bpx-player-video-wrap video'), 'Content Script 完整保留 Bilibili 專用選擇器');
 assert(contentScriptSource.includes('findNiconicoVideo'), 'Content Script 實作 Niconico 智慧選擇器 (排除廣告與空殼 Video)');
 assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 保留通用模式 Anime1.me Video.js (.vjs-tech) 選擇器');
 assert(contentScriptSource.includes('findNetflixVideo'), 'Content Script 實作 Netflix 專屬選擇器');
 assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 保留通用模式 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
 
 // 4. Background 與 Platforms 白名單與廣播範圍驗證 (單一真理來源)
-const platformsSource = fs.readFileSync(path.join(__dirname, 'src/platforms.ts'), 'utf-8');
+const platformsSource =
+  fs.readFileSync(path.join(__dirname, 'src/platforms.ts'), 'utf-8') +
+  '\n' +
+  fs.readFileSync(path.join(__dirname, '../shared/platforms.ts'), 'utf-8');
 const whitelistSource = backgroundScriptSource + '\n' + platformsSource;
 assert(whitelistSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'HOST_WHITELIST 支援 Niconico 安全跳轉');
 assert(whitelistSource.includes('catchplay\\.com\\/.*(watch|play|video)\\/[a-zA-Z0-9_-]+'), 'HOST_WHITELIST 支援 CATCHPLAY+ 安全跳轉');

@@ -18,6 +18,22 @@ function assert(condition, testName, detail = '') {
   }
 }
 
+function readModuleTree(relPath) {
+  const fullPath = path.join(__dirname, relPath);
+  if (!fs.existsSync(fullPath)) return '';
+  if (fs.statSync(fullPath).isFile()) return fs.readFileSync(fullPath, 'utf-8');
+  const chunks = [];
+  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRel = path.posix.join(relPath, entry.name);
+    if (entry.isDirectory()) {
+      chunks.push(readModuleTree(childRel));
+    } else if (/\.(ts|tsx|js|mjs)$/i.test(entry.name)) {
+      chunks.push(fs.readFileSync(path.join(__dirname, childRel), 'utf-8'));
+    }
+  }
+  return chunks.join('\n');
+}
+
 console.log('====================================================');
 console.log('🛡️ Syncine P2P 錯誤日誌與 GitHub Issue 回報深度驗證套件');
 console.log('====================================================\n');
@@ -313,7 +329,7 @@ assert(detailWithIds.peerId === 'sy***RQ', 'sanitizeDetails 自動遮蔽 peerId 
 assert(detailWithIds.userId === 'us***54', 'sanitizeDetails 自動遮蔽 userId 為 us***54');
 assert(detailWithIds.requestId === 're***56', 'sanitizeDetails 自動遮蔽 requestId 為 re***56');
 
-const popupSource = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+const popupSource = readModuleTree('src/popup');
 assert(
   popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'") &&
     popupSource.includes('NON_REPORTABLE_ERROR_CODES') &&
@@ -330,7 +346,7 @@ assert(
   'Popup.tsx 收到 CS_CONNECTION_STATUS_CHANGED 時同步寫入 lastErrorCode'
 );
 
-const bgSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const bgSource = readModuleTree('src/background');
 assert(
   bgSource.includes("const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED'") &&
     bgSource.includes('sendResponse({ success: false, error: errCode, code: errCode })'),
@@ -369,7 +385,7 @@ assert(
 );
 
 // 5. Content Script 必須具備 isShowingSecurityAlert 阻塞旗標與版本號防重疊 (vv2.x.x -> v2.x.x)
-const contentSource = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentSource = readModuleTree('src/content');
 assert(
   contentSource.includes('isShowingSecurityAlert') &&
     contentSource.includes('lastAlertedSecurityUrl && now - lastAlertedSecurityTime < 15000'),

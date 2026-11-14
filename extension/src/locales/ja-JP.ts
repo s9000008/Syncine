@@ -141,6 +141,12 @@ export const jaJP: TranslationSchema = {
     diagnosticErrorCodeLabel: 'エラーコード',
     diagnosticTimestampLabel: 'タイムスタンプ',
     diagnosticDetailPrefix: 'エラー詳細',
+    conflictAlertTitle: '⚠️ 再生制御の競合を検出しました',
+    conflictAlertDesc: (host: string, count: number) =>
+      `${host} 上で短時間に ${count} 回の再生/一時停止の反転を検出したため、保護スロットリングを有効にしました。他の同時視聴や再生制御拡張機能が有効な場合は、無効にして再読み込みしてください。`,
+    conflictCopyReportBtn: '競合レポートをコピー',
+    conflictReportGithubBtn: 'GitHub へ報告',
+    conflictDismissBtn: '非表示にする',
   },
   languageSelector: {
     label: '言語 / Language',

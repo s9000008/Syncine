@@ -140,6 +140,12 @@ export const zhTW = {
     diagnosticErrorCodeLabel: '錯誤代碼',
     diagnosticTimestampLabel: '時間戳',
     diagnosticDetailPrefix: '錯誤詳情',
+    conflictAlertTitle: '⚠️ 偵測到播放控制權衝突',
+    conflictAlertDesc: (host: string, count: number) =>
+      `系統於 ${host} 短時間內偵測到 ${count} 次異常播放/暫停反轉，已啟動保護節流避免畫面卡死。若頁面另有其他同步觀影或播放控制擴充套件，建議暫時停用後重新整理。`,
+    conflictCopyReportBtn: '複製衝突診斷',
+    conflictReportGithubBtn: '回報衝突至 GitHub',
+    conflictDismissBtn: '忽略提醒',
   },
   languageSelector: {
     label: '語言 / Language',

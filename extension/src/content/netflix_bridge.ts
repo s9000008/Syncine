@@ -21,10 +21,32 @@ function getNetflixPlayer(): any {
   }
 }
 
+function parseNetflixBridgeDetail(event: any): any {
+  const fromEvent = event?.detail;
+  if (fromEvent && typeof fromEvent === 'object' && fromEvent.action) {
+    return fromEvent;
+  }
+  const rawCmd = document.documentElement?.dataset?.syncineBridgeCmd;
+  if (rawCmd) {
+    try {
+      return JSON.parse(rawCmd);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
 // 監聽來自 Syncine Content Script (Isolated World) 之自訂事件
-window.addEventListener('SYNCINE_NETFLIX_CMD', (event: any) => {
+// 若擴充套件更新重新注入，先卸載舊有監聽器避免重複觸發
+const prevNfHandler = (window as any).__syncineNfBridgeHandler;
+if (typeof prevNfHandler === 'function') {
+  window.removeEventListener('SYNCINE_NETFLIX_CMD', prevNfHandler);
+}
+
+const handleNetflixBridgeCommand = (event: any) => {
   try {
-    const detail = event?.detail;
+    const detail = parseNetflixBridgeDetail(event);
     if (!detail || !detail.action) return;
 
     const player = getNetflixPlayer();
@@ -66,6 +88,9 @@ window.addEventListener('SYNCINE_NETFLIX_CMD', (event: any) => {
     document.documentElement.dataset.syncineNfHandled = '0';
     console.error('[Syncine Netflix Bridge] 執行指令異常:', err);
   }
-});
+};
+
+(window as any).__syncineNfBridgeHandler = handleNetflixBridgeCommand;
+window.addEventListener('SYNCINE_NETFLIX_CMD', handleNetflixBridgeCommand);
 
 console.log('[Syncine] Netflix Main World Bridge 已成功載入');

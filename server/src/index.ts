@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
 import { RateLimiter } from './rateLimiter';
-import { sanitizeLog, checkNodeSecurityVersion } from './utils';
+import { sanitizeLog, checkNodeSecurityVersion, extractClientIp } from './utils';
 import {
   CreateRoomReq,
   JoinRoomReq,
@@ -15,10 +15,9 @@ import {
   RedirectRoomMsg,
   TogglePermissionMsg,
   CreateRoomRes,
-  SignalOfferMsg,
-  SignalAnswerMsg,
-  SignalIceCandidateMsg,
-  SERVER_HOST_WHITELIST, isServerUrlAllowed, getCanonicalVideoUrl
+  validateSyncData,
+  isServerUrlAllowed,
+  getCanonicalVideoUrl
 } from './types';
 
 dotenv.config();
@@ -29,7 +28,7 @@ const serverPkg = JSON.parse(
 const SERVER_VERSION: string = serverPkg.version;
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const ALLOWED_ORIGINS = CORS_ORIGIN === '*'
   ? null
@@ -163,6 +162,11 @@ function registerSafeHandler<T>(
 }
 
 io.on('connection', (socket: Socket) => {
+  const clientIp = extractClientIp(
+    socket.handshake.headers['x-forwarded-for'],
+    socket.handshake.address
+  );
+  rateLimiter.registerSocketIp(socket.id, clientIp);
   console.log(`[Socket.IO] 新用戶連線: ${sanitizeLog(socket.id)}`);
 
   const cleanupPreviousSocketRoom = (targetRoomId?: string) => {
@@ -196,6 +200,11 @@ io.on('connection', (socket: Socket) => {
       if (/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,4})?$/.test(trimmed) && trimmed.length <= 10) {
         sanitizedLang = trimmed;
       }
+    }
+
+    if (roomManager.isAtRoomCapacity()) {
+      socket.emit('ERROR', { code: 'ERR_ROOM_FULL', message: 'ERR_ROOM_FULL' });
+      return;
     }
 
     const room = roomManager.createRoom(
@@ -333,6 +342,20 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
+    // 嚴格執行期 Schema 與角色校驗 + 僅重組白名單欄位轉發，防範畸形數值與 Guest 偽造 HEARTBEAT
+    const isHost = actualRoom.hostSocketId === socket.id;
+    const validatedData = validateSyncData(payload.data, isHost);
+    if (!validatedData) {
+      console.warn(`[Security Check Drop] 收到非法 SYNC_STATE Payload 或 Guest 偽造 HEARTBEAT (Socket: ${sanitizeLog(socket.id)})`);
+      return;
+    }
+
+    const cleanOutboundPayload: SyncStateMsg = {
+      event: 'SYNC_STATE',
+      roomId: actualRoom.roomId,
+      data: validatedData
+    };
+
     // 若包含目標 Guest Socket ID，代表是單向回傳狀態給新進觀眾
     if ((payload as any).targetGuestSocketId) {
       const targetId = (payload as any).targetGuestSocketId;
@@ -341,11 +364,12 @@ io.on('connection', (socket: Socket) => {
         console.warn(`[Security Alert] 目標 Socket ${sanitizeLog(targetId)} 不在同一房間內，拒絕單向發送`);
         return;
       }
+      cleanOutboundPayload.targetGuestSocketId = targetId;
       console.log(`[Socket.IO] 將拉取的初始化狀態獨立回傳給新觀眾: ${sanitizeLog(targetId)}`);
-      io.to(targetId).emit('SYNC_STATE', payload);
+      io.to(targetId).emit('SYNC_STATE', cleanOutboundPayload);
     } else {
       // 廣播給房間內其他所有成員
-      socket.to(actualRoom.roomId).emit('SYNC_STATE', payload);
+      socket.to(actualRoom.roomId).emit('SYNC_STATE', cleanOutboundPayload);
     }
   }, true, 'SYNC');
 
@@ -407,72 +431,7 @@ io.on('connection', (socket: Socket) => {
     });
   });
 
-  // 6. WebRTC 信令轉發 (P2P DataChannel 握手) - 需確保同房成員
-  registerSafeHandler<SignalOfferMsg>(socket, 'SIGNAL_OFFER', (payload) => {
-    const actualRoom = roomManager.getRoomBySocketId(socket.id);
-    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
-
-    payload.roomId = actualRoom.roomId;
-    payload.data.senderSocketId = socket.id;
-    if (payload.data.targetSocketId) {
-      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
-      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
-        console.log(`[WebRTC Signaling] 轉發 SIGNAL_OFFER 至 targetSocketId: ${sanitizeLog(payload.data.targetSocketId)}`);
-        io.to(payload.data.targetSocketId).emit('SIGNAL_OFFER', payload);
-      }
-    } else {
-      socket.to(actualRoom.roomId).emit('SIGNAL_OFFER', payload);
-    }
-  });
-
-  registerSafeHandler<SignalAnswerMsg>(socket, 'SIGNAL_ANSWER', (payload) => {
-    const actualRoom = roomManager.getRoomBySocketId(socket.id);
-    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
-
-    payload.roomId = actualRoom.roomId;
-    payload.data.senderSocketId = socket.id;
-    if (payload.data.targetSocketId) {
-      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
-      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
-        console.log(`[WebRTC Signaling] 轉發 SIGNAL_ANSWER 至 targetSocketId: ${sanitizeLog(payload.data.targetSocketId)}`);
-        io.to(payload.data.targetSocketId).emit('SIGNAL_ANSWER', payload);
-      }
-    } else {
-      socket.to(actualRoom.roomId).emit('SIGNAL_ANSWER', payload);
-    }
-  });
-
-  registerSafeHandler<SignalIceCandidateMsg>(socket, 'SIGNAL_ICE_CANDIDATE', (payload) => {
-    const actualRoom = roomManager.getRoomBySocketId(socket.id);
-    if (!actualRoom || !payload.data || typeof payload.data !== 'object') return;
-
-    payload.roomId = actualRoom.roomId;
-    payload.data.senderSocketId = socket.id;
-    if (payload.data.targetSocketId) {
-      const targetRoom = roomManager.getRoomBySocketId(payload.data.targetSocketId);
-      if (targetRoom && targetRoom.roomId === actualRoom.roomId) {
-        io.to(payload.data.targetSocketId).emit('SIGNAL_ICE_CANDIDATE', payload);
-      }
-    } else {
-      socket.to(actualRoom.roomId).emit('SIGNAL_ICE_CANDIDATE', payload);
-    }
-  });
-
-  // 7. WebRTC 連線受阻時的降級回退廣播
-  registerSafeHandler<{ roomId: string; reason?: string }>(socket, 'P2P_FALLBACK', (payload) => {
-    const actualRoom = roomManager.getRoomBySocketId(socket.id);
-    if (!actualRoom) return;
-
-    console.log(`[WebRTC Signaling] 房間 ${sanitizeLog(actualRoom.roomId)} 收到 P2P_FALLBACK 請求，通知全體成員切換為中繼模式`);
-    actualRoom.mode = 'DEFAULT';
-    io.to(actualRoom.roomId).emit('P2P_FALLBACK', {
-      roomId: actualRoom.roomId,
-      code: 'ERR_P2P_CONNECTION_LOST',
-      message: payload?.reason || 'ERR_P2P_CONNECTION_LOST'
-    });
-  });
-
-  // 8. 主動退出房間 (用戶手動點擊退房)
+  // 6. 主動退出房間 (用戶手動點擊退房)
   registerSafeHandler<void>(socket, 'LEAVE_ROOM', () => {
     console.log(`[Socket.IO] 用戶主動退出房間: ${sanitizeLog(socket.id)}`);
     const result = roomManager.handleDisconnect(socket.id, undefined, true);

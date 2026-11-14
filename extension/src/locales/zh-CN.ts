@@ -141,6 +141,12 @@ export const zhCN: TranslationSchema = {
     diagnosticErrorCodeLabel: '错误代码',
     diagnosticTimestampLabel: '时间戳',
     diagnosticDetailPrefix: '错误详情',
+    conflictAlertTitle: '⚠️ 检测到播放控制权冲突',
+    conflictAlertDesc: (host: string, count: number) =>
+      `系统在 ${host} 短时间内检测到 ${count} 次异常播放/暂停反转，已启用保护节流避免画面卡死。若当前同时启用了其他同步观影或播放控制扩展，建议暂时停用后刷新页面。`,
+    conflictCopyReportBtn: '复制冲突诊断',
+    conflictReportGithubBtn: '反馈冲突至 GitHub',
+    conflictDismissBtn: '忽略提醒',
   },
   languageSelector: {
     label: '语言 / Language',

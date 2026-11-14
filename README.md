@@ -12,7 +12,7 @@
 
 ## 🌟 專案特色
 
-* 🎬 **跨平台支援與解耦架構**：現行版本支援 **YouTube**、**Bilibili**、**Niconico**、**Anime1.me**、**Netflix**、**Vimeo**、**巴哈姆特動畫瘋**、**Twitch**、**Disney+**、**Prime Video**、**MyVideo**、**LINE TV**、**KKTV**、**Crunchyroll**、**遠傳 friDay 影音**、**Max (HBO Max)**、**愛奇藝 (iQIYI)** 與 **Apple TV+** 等 18 大串流影音平台。並實裝「權限預授權與支援名單解耦架構」（v2.10.0），中央登錄表精確控制啟用狀態，未開放平台零 DOM 注入與零網路開銷，避免未來更新觸發 Chrome 權限停用警告。
+* 🎬 **跨平台支援與解耦架構**：現行版本正式支援 **YouTube**、**Bilibili**、**Niconico**、**CATCHPLAY+**、**Netflix**、**Vimeo**、**巴哈姆特動畫瘋**、**Twitch**、**Disney+**、**Prime Video**、**MyVideo**、**LINE TV**、**KKTV**、**Crunchyroll**、**遠傳 friDay 影音**、**Max (HBO Max)**、**愛奇藝 (iQIYI)** 與 **Apple TV+** 等 18 大正版串流影音平台（非官方或高風險站台如 Anime1.me 已移出正式授權，僅置於進階測試彩蛋通用清單）。並實裝「權限預授權與支援名單解耦架構」，透過 `shared/` 單一真理來源控制啟用狀態。
 * ⚡ **5 秒時間容差與單程延遲補償**：被動心跳控制在 5 秒差值內不強制跳轉進度（避免抖動卡頓），大於 5 秒強制定位；主動操作 (`PLAY` / `PAUSE` / `SEEK`) 無視容差強制秒級同步。
 * 🌐 **三大彈性連線架構**：
   1. **⚡ 純端對端直連 (WebRTC P2P Direct)**：免自架伺服器！採用統一 6 碼邀請碼 (`P2P:XXXXXX`) 搭配 Google / Cloudflare 公共 STUN 穿透 NAT，支援多人申請與房主即時審核清單（一鍵允許/拒絕），透過加密星狀拓撲 `RTCDataChannel` 低延遲直連同步。
@@ -26,7 +26,7 @@
 * 🔒 **多重資安防衛**：
   * **網域白名單與嚴格 HTTPS 防禦**：房主進行網頁跳轉或選集連播時，前後端雙重驗證 `https:` 協定與合法平台白名單，自動攔截惡意釣魚連結，並自動剝離個人推薦追蹤參數（如 `tctx`、`utm_*`、`fbclid`）。
   * **雙層權限 Drop 防線**：房主關閉「觀眾操作權限」時，非 Host 發送之同步請求會在後端伺服器與 P2P 房主通道直接丟棄，前端亦自動回滾越權拖曳。
-* 🔋 **MV3 保活與 bfcache 生命週期管理**：採用 `chrome.runtime.connect` Port 長連接、`pagehide`/`pageshow` 快取釋放與 20 秒 `chrome.alarms` 心跳，兼顧穩定長連線與瀏覽器省電效能。
+* 🔋 **MV3 保活與 bfcache 生命週期管理**：採用 `chrome.runtime.connect` Port 長連接、`pagehide`/`pageshow` 快取釋放與活躍期間 `0.5` 分鐘（30 秒）`chrome.alarms` 巡檢，兼顧穩定長連線與瀏覽器省電效能。
 * 🖥️ **MV3 Offscreen 載體與 Netflix MAIN Bridge**：採用 `chrome.offscreen` 承載 WebRTC 引擎，並透過 MV3 `world: "MAIN"` 安全橋接 Netflix Cadmium 播放器 API。
 
 ---
@@ -100,8 +100,9 @@ cp .env.example .env
 
 | 環境變數 | 預設值 | 說明 |
 | :--- | :--- | :--- |
-| `PORT` | `3000` | 後端伺服器通訊埠 (Port) |
-| `VITE_DEFAULT_SERVER_URL` | `https://syncine.fly.dev` | 前端 Extension 預設連線中繼伺服器位置（本地開發可改設 `http://localhost:3000`） |
+| `PORT` | `8080` | 後端伺服器通訊埠 (Port，對齊 Fly.io 線上環境) |
+| `MAX_ROOMS` | `1000` | 伺服器全域最大併發房間數（防範容器 OOM） |
+| `VITE_DEFAULT_SERVER_URL` | `https://syncine.fly.dev` | 前端 Extension 預設連線中繼伺服器位置（本地開發可改設 `http://localhost:8080`） |
 | `CORS_ORIGIN` | `*` | 跨域請求 CORS 允許來源（支援逗號分隔多組網域；擴充套件 `chrome-extension://` 自動放行） |
 | `LOG_LEVEL` | `info` | 日誌紀錄等級 |
 
@@ -132,7 +133,7 @@ npm run build
 npm start
 ```
 
-伺服器啟動後可存取 `http://localhost:3000/health` 確認健康狀態。
+伺服器啟動後可存取 `http://localhost:8080/health` 確認健康狀態。
 
 ### 前端擴充套件 (Extension)
 
@@ -168,15 +169,17 @@ npm run build
 
 ### 1. 後端伺服器部署 (Docker / Fly.io / Railway / Render)
 
-可使用內附 Node.js 22 安全基準的 `server/Dockerfile` 部署至容器雲平台：
+可使用內附 Node.js 26 安全基準的 `server/Dockerfile` 部署至容器雲平台：
 
 ```dockerfile
-FROM node:22-alpine
+FROM node:26-alpine AS runner
 WORKDIR /app
+ENV NODE_ENV=production PORT=8080
 COPY package*.json ./
 RUN npm ci --omit=dev
-COPY dist ./dist
+COPY --from=builder /app/dist ./dist
 EXPOSE 8080
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/index.js"]
 ```
 
@@ -222,16 +225,17 @@ jobs:
 ## 🔮 功能里程碑與未來規劃 (Roadmap)
 
 ### 已完成里程碑 (Completed Milestones)
-* [x] **18 大主流串流平台與選集連播同步**：支援 YouTube、Netflix、Bilibili、Disney+、Prime Video、巴哈姆特動畫瘋、Niconico、Twitch、Anime1.me、Vimeo、MyVideo、LINE TV、KKTV、Crunchyroll、friDay 影音、Max、愛奇藝與 Apple TV+。
+* [x] **18 大正版串流平台與選集連播同步**：支援 YouTube、Netflix、Bilibili、Niconico、CATCHPLAY+、Vimeo、巴哈姆特動畫瘋、Twitch、Disney+、Prime Video、MyVideo、LINE TV、KKTV、Crunchyroll、friDay 影音、Max、愛奇藝與 Apple TV+（`Anime1.me` 轉為非正式彩蛋清單隔離）。
+* [x] **共用通訊協定與平台適配器模組化 (`shared/` & Adapters)**：前後端共用唯一 `platforms.ts`、`protocol.ts`、`sanitize.ts` 與 `validateSyncData`，Content/Background/Popup 全面拆解為單一職責模組。
 * [x] **權限預授權與支援名單解耦架構**：中央平台登錄表控管啟用狀態，候選網域零執行期開銷。
 * [x] **突發斷線恢復與防劫持機制**：本機持久化工作階段搭配伺服器 60 秒保留寬限期與 `resumeToken` 密碼學憑證校驗。
 * [x] **P2P 脫敏診斷與一鍵問題回報**：自動遮蔽 IP 與識別碼，一鍵生成 GitHub Issue 診斷報告。
 * [x] **四國語系介面支援 (i18n)**：控制面板與商店支援繁中、英文、日文、簡中即時切換。
 
 ### 長期主要功能 (Long-Term Roadmap)
-* [ ] **共用通訊協定模組化與播放器適配器插件化**：抽離前後端共用型別與獨立平台 Adapter，進一步提升擴充維護性。
-* [ ] **逐步開放更多預授權串流平台專屬適配器**：針對已完成權限預佈署之串流平台逐步實裝客製化播放器適配器。
+* [ ] **逐步開放 8 大預授權串流平台專屬適配器**：針對已完成權限預佈署之候選串流平台（LiTV、WeTV 等）逐步實裝客製化播放器適配器。
 * [ ] **本地影片檔案 P2P 串流播放**：房主選取本機 `.mp4` 影片，透過 WebRTC DataChannel 分塊傳輸與 MSE 技術點對點同步觀影。
+* [ ] **平滑倍速微調追趕與 P2P 自動中繼降級**：1.5s～5s 誤差以倍速平滑對齊，P2P 握手全面失敗時一鍵無縫切換至官方中繼房間。
 
 ---
 

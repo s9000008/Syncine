@@ -1,25 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  Tv,
-  Users,
-  Copy,
-  Check,
-  Shield,
-  Server,
-  LogOut,
-  ExternalLink,
-  Loader2,
-  Plus,
-  ChevronDown,
-  Video,
-  Zap,
-  Bell,
-  UserCheck,
-  UserX,
-  Clock,
-  MessageSquarePlus,
-  Sparkles
-} from 'lucide-react';
+import { MessageSquarePlus, Tv } from 'lucide-react';
 import { RoomStateInfo, ConnectionMode, DetectedShareCodeType, getCanonicalVideoUrl } from '../types/protocol';
 import {
   isPlatformActive,
@@ -31,66 +11,13 @@ import {
 import { DEFAULT_SERVER_URL } from '../config';
 import { useTranslation } from '../locales';
 import { LanguageSelector } from '../components/LanguageSelector';
-import { parseConnectionCode, formatShareCode } from '../utils/connectionParser';
-
-const CHROME_STORE_URL =
-  'https://chromewebstore.google.com/detail/syncine-%E5%90%8C%E6%98%A0-%E9%81%A0%E7%AB%AF%E5%BD%B1%E7%89%87%E5%90%8C%E6%AD%A5%E6%92%AD%E6%94%BE-watch/filebpdgpniidghnnepdndpfgbcgnkip';
-
-// 屬於使用者輸入校驗或正常房間業務邏輯狀態之提示碼（非系統/網路故障，不顯示 GitHub Issue 回報與診斷複製按鈕）
-const NON_REPORTABLE_ERROR_CODES = new Set<string>([
-  'ERR_AUDIT_REJECTED',
-  'ERR_INVALID_CODE',
-  'ERR_CUSTOM_IP_REQUIRED',
-  'ERR_ROOM_NOT_FOUND',
-  'ERR_ROOM_FULL',
-  'ERR_ROOM_CLOSED',
-  'ERR_PERMISSION_DENIED',
-  'ERR_HOST_ONLY',
-  'ERR_UNAUTHORIZED_URL'
-]);
-
-type PlatformStatusKey =
-  | 'youtubeConnected'
-  | 'bilibiliConnected'
-  | 'niconicoConnected'
-  | 'anime1Connected'
-  | 'netflixConnected'
-  | 'vimeoConnected'
-  | 'gamerConnected'
-  | 'twitchConnected'
-  | 'disneyConnected'
-  | 'primeConnected'
-  | 'myVideoConnected'
-  | 'lineTvConnected'
-  | 'kktvConnected'
-  | 'crunchyrollConnected'
-  | 'fridayConnected'
-  | 'maxConnected'
-  | 'iqiyiConnected'
-  | 'appleTvConnected'
-  | 'catchplayConnected';
-
-const PLATFORM_TAB_STATUS_KEY_MAP: Record<string, PlatformStatusKey> = {
-  youtube: 'youtubeConnected',
-  bilibili: 'bilibiliConnected',
-  niconico: 'niconicoConnected',
-  anime1: 'anime1Connected',
-  netflix: 'netflixConnected',
-  vimeo: 'vimeoConnected',
-  gamer: 'gamerConnected',
-  twitch: 'twitchConnected',
-  disney: 'disneyConnected',
-  prime: 'primeConnected',
-  myvideo: 'myVideoConnected',
-  linetv: 'lineTvConnected',
-  kktv: 'kktvConnected',
-  crunchyroll: 'crunchyrollConnected',
-  friday: 'fridayConnected',
-  max: 'maxConnected',
-  iqiyi: 'iqiyiConnected',
-  appletv: 'appleTvConnected',
-  catchplay: 'catchplayConnected',
-};
+import { parseConnectionCode } from '../utils/connectionParser';
+import { CHROME_STORE_URL, PLATFORM_TAB_STATUS_KEY_MAP } from './constants';
+import { TabStatusBanner } from './components/TabStatusBanner';
+import { DiagnosticActions } from './components/DiagnosticActions';
+import { ContentionAlertBanner } from './components/ContentionAlertBanner';
+import { ConnectionModeCard } from './components/ConnectionModeCard';
+import { ActiveRoomPanel } from './components/ActiveRoomPanel';
 
 export default function Popup() {
   const { t, translateReturnCode, language } = useTranslation();
@@ -215,14 +142,12 @@ export default function Popup() {
   }, [connectionMode]);
 
   useEffect(() => {
-    // 獲取當前分頁網址，若處於 activeTab 通用模式且為外部網頁，自動檢查並注入 content.js
     chrome.tabs?.query?.({ active: true, currentWindow: true }, (tabs) => {
       const curTab = tabs[0];
       if (curTab?.url) {
         setActiveTabUrl(curTab.url);
         if (curTab.id && (curTab.url.startsWith('http://') || curTab.url.startsWith('https://'))) {
           chrome.storage?.local?.get(['syncine_unlock_candidates'], (res) => {
-            // 最小權限原則 (Least Privilege)：僅在解鎖彩蛋且當前網址屬於核可之通用影音網域或預授權平台時才動態探測與注入 content.js
             if (
               res?.syncine_unlock_candidates &&
               curTab.id &&
@@ -252,7 +177,6 @@ export default function Popup() {
       }
     });
 
-    // 獲取房間狀態
     chrome.runtime?.sendMessage?.({ type: 'GET_ROOM_STATE' }, (res) => {
       if (res?.roomState) {
         setRoomState(res.roomState);
@@ -268,7 +192,6 @@ export default function Popup() {
       }
     });
 
-    // 監聽房間狀態即時變更與連線錯誤
     const handleMessage = (msg: any) => {
       if (msg.type === 'CS_ROOM_STATE_CHANGED') {
         setRoomState(msg.payload);
@@ -289,12 +212,9 @@ export default function Popup() {
     };
   }, [translateReturnCode]);
 
-  // 依據中央平台註冊表單一真理來源判定是否為「已正式開放啟用支援 (Active)」之影音分頁
-  // 未開放支援的網站（即使在 Manifest 權限名單內）均嚴格顯示紅燈不支援，不作特殊提示
   const currentPlatform = getPlatformByUrl(activeTabUrl);
   const isTargetSite = isPlatformActive(activeTabUrl, candidatesUnlocked);
-  const activeStatusKey =
-    isTargetSite && currentPlatform ? PLATFORM_TAB_STATUS_KEY_MAP[currentPlatform.id] : undefined;
+  const activeStatusKey = isTargetSite && currentPlatform ? PLATFORM_TAB_STATUS_KEY_MAP[currentPlatform.id] : undefined;
   let displaySiteName = currentPlatform ? currentPlatform.name : '';
   if (!displaySiteName && activeTabUrl) {
     const highRisk = getHighRiskPlatform(activeTabUrl);
@@ -304,20 +224,18 @@ export default function Popup() {
       try {
         const parsed = new URL(activeTabUrl);
         displaySiteName = parsed.hostname.replace(/^www\./, '');
-      } catch (_) {
+      } catch {
         displaySiteName = 'Universal';
       }
     }
   }
 
-  const tabStatusLabel =
-    isTargetSite
-      ? activeStatusKey
-        ? t.tabStatus[activeStatusKey]
-        : t.tabStatus.genericModeConnected(displaySiteName)
-      : t.tabStatus.notSupported;
-  const tabStatusTooltip =
-    isTargetSite ? tabStatusLabel : t.tabStatus.supportedTooltip;
+  const tabStatusLabel = isTargetSite
+    ? activeStatusKey
+      ? t.tabStatus[activeStatusKey]
+      : t.tabStatus.genericModeConnected(displaySiteName)
+    : t.tabStatus.notSupported;
+  const tabStatusTooltip = isTargetSite ? tabStatusLabel : t.tabStatus.supportedTooltip;
 
   const safeSendMessage = (message: any, callback?: (res: any) => void) => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -327,14 +245,11 @@ export default function Popup() {
         console.warn('[Popup] sendMessage 失敗:', e);
         if (callback) callback({ success: false, error: 'ERR_SEND_MESSAGE_FAILED' });
       }
-    } else {
-      if (callback) callback({ success: true, roomState: null });
+    } else if (callback) {
+      callback({ success: true, roomState: null });
     }
   };
 
-  // ----------------------------------------------------
-  // 1. 建房處理 (支援同一邀請碼邀請多人群體加入)
-  // ----------------------------------------------------
   const handleCreateRoom = () => {
     setLoading(true);
     setErrorMessage(null);
@@ -349,7 +264,6 @@ export default function Popup() {
         setLoading(false);
         return;
       }
-      // 自動補齊協定，若為 localhost 補 http://，否則一律自動補上 https://
       if (!input.startsWith('http://') && !input.startsWith('https://')) {
         input = (input.includes('localhost') || input.includes('127.0.0.1') ? 'http://' : 'https://') + input;
       }
@@ -382,9 +296,6 @@ export default function Popup() {
     );
   };
 
-  // ----------------------------------------------------
-  // 2. 智慧輸入與加房處理 (支援前綴自動識別與全相容對接)
-  // ----------------------------------------------------
   const handleShareCodeChange = (input: string) => {
     setShareCodeInput(input);
     if (errorMessage) {
@@ -402,7 +313,6 @@ export default function Popup() {
       isLegacy: parsed.isLegacy
     });
 
-    // 權威前綴或帶管道之複合分享碼，自動切換對應模式
     if (parsed.detectedType === 'P2P') {
       if (connectionMode !== 'P2P') setConnectionMode('P2P');
     } else if (parsed.detectedType === 'DEFAULT') {
@@ -421,9 +331,7 @@ export default function Popup() {
 
   const handleJoinRoom = () => {
     const input = shareCodeInput.trim();
-    if (!input) {
-      return;
-    }
+    if (!input) return;
 
     const parsed = parseConnectionCode(input, connectionMode, DEFAULT_SERVER_URL);
     if (!parsed.roomId || !/^[A-Z0-9]{6}$/i.test(parsed.roomId)) {
@@ -454,33 +362,19 @@ export default function Popup() {
     );
   };
 
-  // ----------------------------------------------------
-  // 3. 房主審核處理 (批准 / 拒絕入房申請)
-  // ----------------------------------------------------
   const handleApproveRequest = (requestId: string) => {
-    safeSendMessage({
-      type: 'BG_APPROVE_JOIN_REQUEST',
-      payload: { requestId }
-    });
+    safeSendMessage({ type: 'BG_APPROVE_JOIN_REQUEST', payload: { requestId } });
   };
 
   const handleRejectRequest = (requestId: string) => {
-    safeSendMessage({
-      type: 'BG_REJECT_JOIN_REQUEST',
-      payload: { requestId }
-    });
+    safeSendMessage({ type: 'BG_REJECT_JOIN_REQUEST', payload: { requestId } });
   };
 
   const handleApproveAll = () => {
     if (!roomState?.pendingJoinRequests) return;
-    roomState.pendingJoinRequests.forEach((req) => {
-      handleApproveRequest(req.requestId);
-    });
+    roomState.pendingJoinRequests.forEach((req) => handleApproveRequest(req.requestId));
   };
 
-  // ----------------------------------------------------
-  // 4. 房內操作與控制
-  // ----------------------------------------------------
   const handleLeaveRoom = () => {
     safeSendMessage({ type: 'BG_LEAVE_ROOM' }, () => {
       setRoomState(null);
@@ -491,17 +385,11 @@ export default function Popup() {
   };
 
   const handleTogglePermission = (allow: boolean) => {
-    safeSendMessage(
-      {
-        type: 'BG_TOGGLE_PERMISSION',
-        payload: { allowGuestControl: allow }
-      },
-      () => {
-        if (roomState) {
-          setRoomState({ ...roomState, allowGuestControl: allow });
-        }
+    safeSendMessage({ type: 'BG_TOGGLE_PERMISSION', payload: { allowGuestControl: allow } }, () => {
+      if (roomState) {
+        setRoomState({ ...roomState, allowGuestControl: allow });
       }
-    );
+    });
   };
 
   const handleSyncCurrentTab = () => {
@@ -521,24 +409,35 @@ export default function Popup() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const fetchDiagnosticReport = (callback: (data: { markdownReport: string; githubIssueUrl: string }) => void) => {
+  const fetchDiagnosticReport = (
+    callback: (data: { markdownReport: string; githubIssueUrl: string }) => void,
+    overrideErrorCode?: string
+  ) => {
+    const effectiveCode =
+      overrideErrorCode ||
+      lastErrorCode ||
+      (roomState?.playbackConflict?.detected ? 'ERR_PLAYBACK_CONTENTION' : undefined);
+
     safeSendMessage(
       {
-        type: 'GET_P2P_DIAGNOSTIC',
-        payload: { errorCode: lastErrorCode || 'ERR_P2P_TIMEOUT' }
+        type: 'GET_DIAGNOSTIC_REPORT',
+        payload: { errorCode: effectiveCode }
       },
       (res) => {
         if (res?.success && res.data) {
           callback(res.data);
         } else {
-          // 本機脫敏診斷備援 (Fallback)
-          const fallbackCode = lastErrorCode || 'ERR_UNKNOWN';
+          const fallbackCode = effectiveCode || 'ERR_UNKNOWN';
           const fallbackDetail = errorMessage || translateReturnCode(fallbackCode);
+          const conflictLine = roomState?.playbackConflict?.detected
+            ? `- **Playback Contention**: ${roomState.playbackConflict.hostname} (${roomState.playbackConflict.reversalCount} reversals)`
+            : null;
           const fallbackReport = [
             t.roomUi.diagnosticFallbackTitle,
             `- **${t.roomUi.diagnosticVersionLabel}**: Syncine ${getVersion()} (Chrome MV3)`,
             `- **${t.roomUi.diagnosticModeLabel}**: ${connectionMode}`,
             `- **${t.roomUi.diagnosticErrorCodeLabel}**: ${fallbackCode}`,
+            ...(conflictLine ? [conflictLine] : []),
             `- **${t.roomUi.diagnosticTimestampLabel}**: ${new Date().toISOString()}`,
             '',
             `> 💡 ${t.roomUi.diagnosticDetailPrefix}: ${fallbackDetail}`
@@ -546,7 +445,7 @@ export default function Popup() {
           const repoBase = 'https://github.com/s9000008/Syncine/issues/new';
           const query = new URLSearchParams({
             title: `[Connection Issue] ${fallbackCode}`,
-            labels: 'bug,p2p',
+            labels: fallbackCode === 'ERR_PLAYBACK_CONTENTION' ? 'bug,compatibility' : 'bug,p2p',
             body: fallbackReport
           });
           callback({
@@ -558,13 +457,32 @@ export default function Popup() {
     );
   };
 
+  const handleCopyContentionReport = () => {
+    fetchDiagnosticReport((data) => {
+      navigator.clipboard?.writeText(data.markdownReport).catch(() => {});
+    }, 'ERR_PLAYBACK_CONTENTION');
+  };
+
+  const handleReportContentionGithub = () => {
+    fetchDiagnosticReport((data) => {
+      chrome.tabs?.create?.({ url: data.githubIssueUrl });
+    }, 'ERR_PLAYBACK_CONTENTION');
+  };
+
+  const handleDismissContention = () => {
+    safeSendMessage({ type: 'BG_DISMISS_PLAYBACK_CONFLICT' }, () => {
+      setRoomState((prev) =>
+        prev?.playbackConflict
+          ? { ...prev, playbackConflict: { ...prev.playbackConflict, dismissed: true } }
+          : prev
+      );
+    });
+  };
+
   const handleReportToGitHub = () => {
     fetchDiagnosticReport(({ markdownReport, githubIssueUrl }) => {
-      // 1. 同步複製至剪貼簿 (防止網址過長被瀏覽器截斷)
       navigator.clipboard.writeText(markdownReport).catch(() => {});
-      // 2. 開啟 GitHub Issue 預填網址
       chrome.tabs?.create?.({ url: githubIssueUrl });
-      // 3. 顯示 Toast 反饋
       setDiagnosticToast(true);
       setTimeout(() => setDiagnosticToast(false), 3000);
     });
@@ -579,13 +497,10 @@ export default function Popup() {
     });
   };
 
-  const pendingRequests = roomState?.pendingJoinRequests || [];
-  const isGuestWaitingApproval = roomState && !roomState.isHost && roomState.guestAwaitingApproval;
-  const currentMemberCount = roomState?.connectedPeerCount || 1;
+  const currentFooterMode = roomState ? roomState.mode : connectionMode;
 
   return (
     <div className="w-[380px] bg-slate-900 text-slate-100 p-4 font-sans border border-slate-800 rounded-xl shadow-2xl flex flex-col justify-between min-h-[460px]">
-      {/* 頂部 Header */}
       <div>
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -655,611 +570,92 @@ export default function Popup() {
           </div>
         </div>
 
-        {/* 隱藏候選名單彩蛋切換短暫提示 Toast */}
-        {unlockToast && (
-          <div className="mb-2.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 border bg-amber-950/50 text-amber-200 border-amber-500/40 shadow-sm">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-            <span className="truncate">{unlockToast}</span>
-          </div>
-        )}
+        <TabStatusBanner
+          unlockToast={unlockToast}
+          roomState={roomState}
+          isTargetSite={isTargetSite}
+          tabStatusLabel={tabStatusLabel}
+          tabStatusTooltip={tabStatusTooltip}
+          bannersText={{
+            reconnecting: t.banners.reconnecting,
+            disconnected: t.banners.disconnected
+          }}
+          tabBadgeText={{
+            supported: t.tabStatus.supportBadge,
+            unsupported: t.tabStatus.unsupportedBadge
+          }}
+        />
 
-        {/* 斷線與自動重連回魂中醒目橫幅 */}
-        {roomState && roomState.connectionStatus && roomState.connectionStatus !== 'CONNECTED' && (
-          <div
-            className={`mb-3 p-2.5 rounded-lg text-xs flex items-center gap-2 border shadow-sm ${
-              roomState.connectionStatus === 'RECONNECTING'
-                ? 'bg-amber-950/40 text-amber-300 border-amber-600/50'
-                : 'bg-rose-950/40 text-rose-300 border-rose-600/50'
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                roomState.connectionStatus === 'RECONNECTING' ? 'bg-amber-400 animate-ping' : 'bg-rose-400'
-              }`}
-            />
-            <span className="leading-snug">
-              {roomState.connectionStatus === 'RECONNECTING'
-                ? t.banners.reconnecting
-                : t.banners.disconnected}
-            </span>
-          </div>
-        )}
+        <DiagnosticActions
+          errorMessage={errorMessage}
+          lastErrorCode={lastErrorCode}
+          diagnosticToast={diagnosticToast}
+          onDismiss={() => {
+            setErrorMessage(null);
+            setLastErrorCode(null);
+          }}
+          onReportToGitHub={handleReportToGitHub}
+          onCopyDiagnosticReport={handleCopyDiagnosticReport}
+          labels={{
+            reportIssueGithub: t.roomUi.reportIssueGithub,
+            copyDiagnosticReport: t.roomUi.copyDiagnosticReport,
+            reportCopiedToast: t.roomUi.reportCopiedToast
+          }}
+        />
 
-        {/* 當前分頁狀態提示條（燈號標記：綠燈支援 / 紅燈不支援） */}
-        <div
-          className={`mb-3 p-2 rounded-lg text-[11px] flex items-center justify-between border transition cursor-help ${
-            isTargetSite
-              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
-              : 'bg-rose-950/25 text-rose-300 border-rose-900/40'
-          }`}
-          title={tabStatusTooltip}
-        >
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                isTargetSite
-                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse'
-                  : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)]'
-              }`}
-            />
-            <Video className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">{tabStatusLabel}</span>
-          </div>
-          <span
-            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ml-2 ${
-              isTargetSite
-                ? 'text-emerald-400 bg-emerald-900/60 border-emerald-700/50'
-                : 'text-rose-400 bg-rose-950/70 border-rose-800/60'
-            }`}
-          >
-            {isTargetSite ? t.tabStatus.supportBadge : t.tabStatus.unsupportedBadge}
-          </span>
-        </div>
-
-        {/* 錯誤提示與 GitHub Issue 回報 */}
-        {errorMessage && (
-          <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs space-y-2 shadow-lg">
-            <div className="flex items-start justify-between gap-2">
-              <span className="leading-relaxed font-medium">{errorMessage}</span>
-              <button
-                onClick={() => {
-                  setErrorMessage(null);
-                  setLastErrorCode(null);
-                }}
-                className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* 一鍵回報至 GitHub 與複製診斷按鈕 (使用者輸入驗證、房號不存在或房主拒絕入房等非系統錯誤不顯示回報按鈕) */}
-            {lastErrorCode !== 'ERR_AUDIT_REJECTED' && !NON_REPORTABLE_ERROR_CODES.has(lastErrorCode || '') && (
-              <>
-                <div className="pt-1.5 border-t border-red-500/20 flex items-center gap-2">
-                  <button
-                    onClick={handleReportToGitHub}
-                    className="flex-1 py-1.5 px-2 bg-red-950/60 hover:bg-red-900/60 text-red-200 border border-red-500/40 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                  >
-                    <ExternalLink className="w-3 h-3 text-red-300" />
-                    <span>{t.roomUi.reportIssueGithub}</span>
-                  </button>
-                  <button
-                    onClick={handleCopyDiagnosticReport}
-                    className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
-                    title={t.roomUi.copyDiagnosticReport}
-                  >
-                    <Copy className="w-3 h-3 text-slate-400" />
-                    <span>{t.roomUi.copyDiagnosticReport}</span>
-                  </button>
-                </div>
-
-                {diagnosticToast && (
-                  <div className="text-[10px] text-emerald-400 bg-emerald-950/80 p-1.5 rounded border border-emerald-500/40 text-center animate-fade-in flex items-center justify-center gap-1 font-semibold">
-                    <Check className="w-3 h-3 text-emerald-400" />
-                    <span>{t.roomUi.reportCopiedToast}</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ---------------------------------------------------- */}
-        {/* 情境 A: 觀眾送出申請，等待房主審核中                 */}
-        {/* ---------------------------------------------------- */}
-        {isGuestWaitingApproval ? (
-          <div className="space-y-3.5 bg-slate-800/90 p-5 rounded-xl border border-teal-500/50 shadow-xl text-center">
-            <div className="w-12 h-12 bg-teal-500/10 rounded-full flex items-center justify-center mx-auto border border-teal-500/30">
-              <Loader2 className="w-6 h-6 animate-spin text-teal-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-teal-300">{t.roomUi.awaitingTitle}</h3>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                {t.roomUi.awaitingDesc}
-              </p>
-            </div>
-            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-700 text-xs font-mono text-slate-400 flex items-center justify-center gap-2">
-              <Clock className="w-3.5 h-3.5 text-teal-400" />
-              <span>{t.roomUi.roomCodeLabel}: <strong className="text-teal-300">{roomState.roomId}</strong></span>
-            </div>
-            <button
-              onClick={handleLeaveRoom}
-              className="w-full text-center text-xs text-slate-400 hover:text-red-400 pt-1 cursor-pointer"
-            >
-              {t.roomUi.cancelAndBack}
-            </button>
-          </div>
-        ) : !roomState ? (
-          /* ---------------------------------------------------- */
-          /* 情境 B: 未進入房間 (連線選項模組化面板)              */
-          /* ---------------------------------------------------- */
-          <div>
-            {/* 分頁切換按鈕 */}
-            <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl border border-slate-800 mb-3.5">
-              <button
-                onClick={() => {
-                  setActiveTab('join');
-                  setErrorMessage(null);
-                  setLastErrorCode(null);
-                }}
-                className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  activeTab === 'join'
-                    ? 'bg-teal-600 text-white shadow-md shadow-teal-600/30 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                {t.roomUi.joinTab}
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveTab('create');
-                  setErrorMessage(null);
-                  setLastErrorCode(null);
-                }}
-                className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  activeTab === 'create'
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {t.roomUi.createTab}
-              </button>
-            </div>
-
-            {/* TAB 1: 加入房間面板 (預設) */}
-            {activeTab === 'join' && (
-              <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                {/* 當前連線方式狀態指示與即時切換區 */}
-                <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-                      <Server className="w-3.5 h-3.5 text-teal-400" />
-                      {t.connectionModes.modeLabel}:
-                    </span>
-                    <span className="text-[10px] text-teal-400 font-medium">{t.connectionModes.switchableHint}</span>
-                  </div>
-
-                  <div className="relative">
-                    <select
-                      value={connectionMode}
-                      onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-teal-500 transition appearance-none cursor-pointer pr-8 font-medium"
-                    >
-                      <option value="P2P">{t.connectionModes.p2p.selectOptionJoin}</option>
-                      <option value="DEFAULT">{t.connectionModes.default.selectOption}</option>
-                      <option value="CUSTOM_IP">{t.connectionModes.customIp.selectOption}</option>
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
-                  </div>
-
-                  {/* 當前模式專屬狀態反饋與指引 */}
-                  {connectionMode === 'P2P' && (
-                    <div className="text-[10px] text-emerald-400/90 flex items-center gap-1 pt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <span>{t.connectionModes.p2p.joinFeedback}</span>
-                    </div>
-                  )}
-                  {connectionMode === 'DEFAULT' && (
-                    <div className="text-[10px] text-teal-400/90 flex items-center justify-between pt-0.5">
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
-                        <span>{t.connectionModes.default.joinFeedback}</span>
-                      </span>
-                      <span className="text-[9px] text-slate-400">
-                        {serverHealth === 'ONLINE'
-                          ? `🟢 ${t.connectionModes.default.serverOnline}`
-                          : serverHealth === 'OFFLINE'
-                          ? `🔴 ${t.connectionModes.default.serverOffline}`
-                          : `🟡 ${t.connectionModes.default.serverProbing}`}
-                      </span>
-                    </div>
-                  )}
-                  {connectionMode === 'CUSTOM_IP' && (
-                    <div className="text-[10px] text-blue-400/90 flex items-center gap-1 pt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
-                      <span>{t.connectionModes.customIp.joinFeedback}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center gap-1">
-                    <Users className="w-3.5 h-3.5 text-teal-400" />
-                    {t.roomUi.pasteCodeLabel}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder={
-                      connectionMode === 'P2P'
-                        ? t.connectionModes.p2p.placeholder
-                        : connectionMode === 'CUSTOM_IP'
-                        ? t.connectionModes.customIp.placeholder
-                        : t.connectionModes.default.placeholder
-                    }
-                    value={shareCodeInput}
-                    onChange={(e) => handleShareCodeChange(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500 transition font-mono tracking-wider"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {connectionMode === 'P2P'
-                      ? t.connectionModes.p2p.inputHint
-                      : connectionMode === 'CUSTOM_IP'
-                      ? t.connectionModes.customIp.inputHint
-                      : t.connectionModes.default.inputHint}
-                  </p>
-
-                  {/* 智慧識別反饋與向下相容引導 */}
-                  {detectedCodeInfo && shareCodeInput.trim() && (
-                    <div className="mt-2 text-[10px] space-y-1">
-                      {detectedCodeInfo.detectedType === 'P2P' && (
-                        <div className="bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
-                          <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          <span>{t.connectionModes.smartDetection?.p2pDetected}</span>
-                        </div>
-                      )}
-                      {detectedCodeInfo.detectedType === 'DEFAULT' && (
-                        <div className="bg-teal-950/70 border border-teal-500/40 text-teal-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
-                          <Server className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                          <span>{t.connectionModes.smartDetection?.defaultDetected}</span>
-                        </div>
-                      )}
-                      {detectedCodeInfo.detectedType === 'CUSTOM_IP' && (
-                        <div className="bg-blue-950/70 border border-blue-500/40 text-blue-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
-                          <Server className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          <span>{t.connectionModes.smartDetection?.customIpDetected}</span>
-                        </div>
-                      )}
-                      {detectedCodeInfo.detectedType === 'LEGACY_COMPOSITE' && (
-                        <div className="bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
-                          <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                          <span>{t.connectionModes.smartDetection?.legacyCompositeHint}</span>
-                        </div>
-                      )}
-                      {detectedCodeInfo.detectedType === 'LEGACY_RAW' && (
-                        <div className="bg-amber-950/70 border border-amber-500/40 text-amber-300 w-full rounded-md p-1.5 flex items-center gap-1.5 shadow-sm">
-                          <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span>
-                            {(t.connectionModes.smartDetection?.legacyRawHint || '')
-                              .replace(
-                                '{mode}',
-                                connectionMode === 'P2P'
-                                  ? t.connectionModes.p2p.footerLabel
-                                  : connectionMode === 'DEFAULT'
-                                  ? t.connectionModes.default.footerLabel
-                                  : t.connectionModes.customIp.footerLabel
-                              )}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    id="btn-join-room"
-                    onClick={handleJoinRoom}
-                    disabled={loading || !shareCodeInput.trim()}
-                    className="w-full mt-3 py-2.5 px-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center gap-2 border border-teal-400/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>{t.roomUi.joiningRoom}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4" />
-                        <span className="text-sm">{t.roomUi.btnJoin}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: 建立房間面板 */}
-            {activeTab === 'create' && (
-              <div className="space-y-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-300 block mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Server className="w-3.5 h-3.5 text-emerald-400" />
-                      {t.connectionModes.modeLabel}
-                    </span>
-                  </label>
-
-                  <div className="relative">
-                    <select
-                      value={connectionMode}
-                      onChange={(e) => setConnectionMode(e.target.value as ConnectionMode)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 transition appearance-none cursor-pointer pr-8"
-                    >
-                      <option value="P2P">{t.connectionModes.p2p.selectOptionCreate}</option>
-                      <option value="DEFAULT">{t.connectionModes.default.selectOption}</option>
-                      <option value="CUSTOM_IP">{t.connectionModes.customIp.selectOption}</option>
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
-                  </div>
-                </div>
-
-                {/* 模式說明卡片 */}
-                {connectionMode === 'P2P' && (
-                  <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/50 rounded-lg space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <Zap className="w-3.5 h-3.5" /> {t.connectionModes.p2p.cardTitle}
-                      </span>
-                      <span className="text-[10px] text-emerald-300 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-700/50">
-                        {t.connectionModes.p2p.cardBadge}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 leading-relaxed">
-                      {t.connectionModes.p2p.description}
-                    </p>
-                    <div className="text-[10px] text-amber-300/90 bg-amber-950/40 p-1.5 rounded border border-amber-800/40 mt-1 flex items-start gap-1">
-                      <span className="flex-shrink-0">💡</span>
-                      <span>{t.connectionModes.p2p.fallbackHint}</span>
-                    </div>
-                  </div>
-                )}
-
-                {connectionMode === 'DEFAULT' && (
-                  <div className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-lg space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400">{t.connectionModes.default.serverStatusLabel}</span>
-                      <span
-                        className={`text-[10px] font-semibold flex items-center gap-1 ${
-                          serverHealth === 'ONLINE'
-                            ? 'text-emerald-400'
-                            : serverHealth === 'OFFLINE'
-                            ? 'text-rose-400'
-                            : 'text-amber-400'
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            serverHealth === 'ONLINE'
-                              ? 'bg-emerald-400 animate-pulse'
-                              : serverHealth === 'OFFLINE'
-                              ? 'bg-rose-500'
-                              : 'bg-amber-400 animate-ping'
-                          }`}
-                        ></span>
-                        {serverHealth === 'ONLINE'
-                          ? t.connectionModes.default.serverOnline
-                          : serverHealth === 'OFFLINE'
-                          ? t.connectionModes.default.serverOffline
-                          : t.connectionModes.default.serverProbing}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400">
-                      {t.connectionModes.default.description}
-                    </p>
-                  </div>
-                )}
-
-                {connectionMode === 'CUSTOM_IP' && (
-                  <div className="p-2.5 bg-slate-950/70 border border-blue-900/40 rounded-lg space-y-1.5">
-                    <label className="text-[11px] text-slate-300 block font-medium">
-                      {t.connectionModes.customIp.inputLabel}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={t.connectionModes.customIp.inputPlaceholder}
-                      value={customServerUrl}
-                      onChange={(e) => setCustomServerUrl(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
-                    />
-                  </div>
-                )}
-
-                {/* 建立按鈕 */}
-                <button
-                  id="btn-create-room"
-                  onClick={handleCreateRoom}
-                  disabled={loading}
-                  className="w-full mt-2 py-2.5 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 border border-emerald-400/30 cursor-pointer disabled:opacity-50"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>{t.roomUi.creatingRoom}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-4 h-4" />
-                      <span className="text-sm">
-                        {connectionMode === 'P2P' ? t.connectionModes.p2p.btnCreate : t.connectionModes.default.btnCreate}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
+        {!roomState ? (
+          <ConnectionModeCard
+            activeTab={activeTab}
+            onTabChange={(tab) => {
+              setActiveTab(tab);
+              setErrorMessage(null);
+              setLastErrorCode(null);
+            }}
+            connectionMode={connectionMode}
+            onConnectionModeChange={setConnectionMode}
+            customServerUrl={customServerUrl}
+            onCustomServerUrlChange={setCustomServerUrl}
+            shareCodeInput={shareCodeInput}
+            onShareCodeChange={handleShareCodeChange}
+            detectedCodeInfo={detectedCodeInfo}
+            serverHealth={serverHealth}
+            loading={loading}
+            onJoinRoom={handleJoinRoom}
+            onCreateRoom={handleCreateRoom}
+            t={t}
+          />
         ) : (
-          /* ---------------------------------------------------- */
-          /* 情境 C: 統一觀影操作模組 (全模式通用)                */
-          /* ---------------------------------------------------- */
           <div className="space-y-3">
-            {/* 1. 統一頂部房間資訊卡片 */}
-            <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 space-y-2.5 shadow-xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
-                    {t.roomUi.roomCodeLabel}
-                  </span>
-                  <p className="text-2xl font-mono font-extrabold text-emerald-400 tracking-wider mt-0.5">
-                    {roomState.roomId}
-                  </p>
-                </div>
-
-                {/* 複製分享碼按鈕 */}
-                <button
-                  id="btn-copy-room-code"
-                  onClick={() => {
-                    const codeToCopy =
-                      compositeCode ||
-                      roomState.compositeCode ||
-                      formatShareCode(
-                        roomState.mode || connectionMode || 'P2P',
-                        roomState.roomId,
-                        roomState.serverUrl || (connectionMode === 'CUSTOM_IP' ? customServerUrl : DEFAULT_SERVER_URL)
-                      );
-                    copyToClipboard(codeToCopy);
-                  }}
-                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition active:scale-95 font-semibold cursor-pointer shadow-sm"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? t.roomUi.copiedCode : t.roomUi.copyCode}
-                </button>
-              </div>
-
-              {/* 全模式統一的人數顯示 */}
-              <div className="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-700/60 pt-2">
-                <span className="flex items-center gap-1 font-medium text-slate-300">
-                  <Users className="w-3.5 h-3.5 text-emerald-400" />
-                  {t.roomUi.membersPrefix}{' '}
-                  <strong className="text-emerald-400 text-xs">{t.roomUi.membersCount(currentMemberCount)}</strong>
-                </span>
-                <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  {roomState.mode === 'P2P' ? t.connectionModes.p2p.roomStatus : t.connectionModes.default.roomStatus}
-                </span>
-              </div>
-            </div>
-
-            {/* 2. 房主審核通知佇列 (支援多位朋友同時申請) */}
-            {roomState.isHost && pendingRequests.length > 0 && (
-              <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-xl space-y-2 shadow-lg animate-in fade-in slide-in-from-top-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <Bell className="w-4 h-4 text-amber-400 animate-bounce" />
-                    {t.roomUi.auditRequestTitle} ({t.roomUi.auditWaitingSuffix(pendingRequests.length)})
-                  </span>
-                  {pendingRequests.length > 1 && (
-                    <button
-                      onClick={handleApproveAll}
-                      className="text-[10px] text-emerald-400 font-bold hover:underline cursor-pointer"
-                    >
-                      {t.roomUi.approveAll}
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
-                  {pendingRequests.map((req) => (
-                    <div
-                      key={req.requestId}
-                      className="flex items-center justify-between p-2 bg-slate-900/90 rounded-lg border border-slate-700/80"
-                    >
-                      <div className="truncate max-w-[170px]">
-                        <span className="text-xs font-medium text-slate-200 block truncate">
-                          {req.guestShortId
-                            ? t.roomUi.defaultGuestName(req.guestShortId)
-                            : t.roomUi.defaultGuestName(req.requestId.slice(-4))}
-                        </span>
-                        <span className="text-[9px] text-slate-500">
-                          {t.roomUi.appliedAt(new Date(req.timestamp).toLocaleTimeString())}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleApproveRequest(req.requestId)}
-                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold flex items-center gap-0.5 shadow transition cursor-pointer"
-                        >
-                          <UserCheck className="w-3 h-3" />
-                          {t.roomUi.approve}
-                        </button>
-                        <button
-                          onClick={() => handleRejectRequest(req.requestId)}
-                          className="px-2 py-1 bg-red-600/70 hover:bg-red-600 text-white rounded text-[10px] font-bold flex items-center gap-0.5 transition cursor-pointer"
-                        >
-                          <UserX className="w-3 h-3" />
-                          {t.roomUi.reject}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {roomState.playbackConflict?.detected && !roomState.playbackConflict.dismissed && (
+              <ContentionAlertBanner
+                conflict={roomState.playbackConflict}
+                onCopyReport={handleCopyContentionReport}
+                onReportGithub={handleReportContentionGithub}
+                onDismiss={handleDismissContention}
+                t={t}
+              />
             )}
-
-            {/* 3. 統一房主權限管理面板 */}
-            {roomState.isHost && (
-              <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-800 space-y-2.5">
-                <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" /> {t.roomUi.hostPermissionTitle}
-                </h3>
-
-                {/* 允許觀眾操作切換 */}
-                <div className="flex items-center justify-between p-2 bg-slate-900/70 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-300">{t.roomUi.allowGuestControl}</span>
-                  <button
-                    onClick={() => handleTogglePermission(!roomState.allowGuestControl)}
-                    className={`w-10 h-5 flex items-center rounded-full p-1 transition duration-300 cursor-pointer ${
-                      roomState.allowGuestControl ? 'bg-emerald-600' : 'bg-slate-700'
-                    }`}
-                  >
-                    <div
-                      className={`bg-white w-3.5 h-3.5 rounded-full shadow-md transform transition duration-300 ${
-                        roomState.allowGuestControl ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* 強制網頁跳轉同步 */}
-                <button
-                  onClick={handleSyncCurrentTab}
-                  className="w-full bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-medium py-2 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  {t.roomUi.forceSyncTab}
-                </button>
-              </div>
-            )}
-
-            {/* 4. 統一房內離開按鈕 */}
-            <div className="pt-1">
-              <button
-                onClick={handleLeaveRoom}
-                className="w-full py-2.5 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs transition flex items-center justify-center gap-1.5 font-medium cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                {t.roomUi.leaveRoom}
-              </button>
-            </div>
+            <ActiveRoomPanel
+              roomState={roomState}
+              compositeCode={compositeCode}
+              connectionMode={connectionMode}
+              customServerUrl={customServerUrl}
+              copied={copied}
+              onCopyCode={copyToClipboard}
+              onApproveRequest={handleApproveRequest}
+              onRejectRequest={handleRejectRequest}
+              onApproveAll={handleApproveAll}
+              onTogglePermission={handleTogglePermission}
+              onSyncCurrentTab={handleSyncCurrentTab}
+              onLeaveRoom={handleLeaveRoom}
+              t={t}
+            />
           </div>
         )}
       </div>
 
-      {/* 底部 Footer */}
       <div className="mt-4 pt-2.5 border-t border-slate-800/80 text-center text-[10px] text-slate-500 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {/* 左下角小按鈕：問題回報 */}
           <button
             onClick={handleReportToGitHub}
             className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-300 transition px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/60 cursor-pointer flex-shrink-0 shadow-sm"
@@ -1269,7 +665,6 @@ export default function Popup() {
             <span>{t.roomUi.footerFeedbackBtn}</span>
           </button>
 
-          {/* 支援網站標籤（懸停顯示具體支援網站，點擊開啟 Chrome 商店） */}
           <span
             className="cursor-pointer hover:text-slate-300 transition truncate text-[10px] text-slate-500"
             title={t.tabStatus.supportedTooltip}
@@ -1281,9 +676,9 @@ export default function Popup() {
 
         <span className="font-mono text-emerald-400 font-semibold text-[10px] flex-shrink-0">
           {t.connectionModes.footerPrefix}
-          {(roomState ? roomState.mode : connectionMode) === 'P2P'
+          {currentFooterMode === 'P2P'
             ? t.connectionModes.p2p.footerLabel
-            : (roomState ? roomState.mode : connectionMode) === 'CUSTOM_IP'
+            : currentFooterMode === 'CUSTOM_IP'
             ? t.connectionModes.customIp.footerLabel
             : t.connectionModes.default.footerLabel}
         </span>

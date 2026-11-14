@@ -92,7 +92,6 @@
         "https://www.bilibili.com/*",
         "https://bilibili.com/*",
         "https://www.bilibili.com/video/*",
-        "https://www.bilibili.com/bangumi/play/*",
         "https://www.nicovideo.jp/*",
         "https://nicovideo.jp/*",
         "https://www.nicovideo.jp/watch/*",
@@ -160,8 +159,7 @@
     {
       "matches": [
         "https://www.netflix.com/*",
-        "https://netflix.com/*",
-        "https://www.netflix.com/watch*"
+        "https://netflix.com/*"
       ],
       "js": [
         "src/content/netflix_bridge.ts"

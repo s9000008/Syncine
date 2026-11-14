@@ -4,9 +4,12 @@
   "description": "Syncine Video Sync WebSocket Server",
   "main": "dist/index.js",
   "scripts": {
+    "predev": "node -e \"import('fs').then(fs=>{if(fs.existsSync('../scripts/sync-shared.mjs'))return import('../scripts/sync-shared.mjs')})\"",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "prebuild": "node -e \"import('fs').then(fs=>{if(fs.existsSync('../scripts/sync-shared.mjs'))return import('../scripts/sync-shared.mjs')})\"",
     "build": "tsc",
     "start": "node dist/index.js",
+    "pretest": "node -e \"import('fs').then(fs=>{if(fs.existsSync('../scripts/sync-shared.mjs'))return import('../scripts/sync-shared.mjs')})\"",
     "test": "tsc && ts-node -P tsconfig.json --transpile-only test_suite.ts && node test_security_p1.mjs && node test_security_cve.mjs",
     "security:check": "node ../.agents/skills/security-agent/scripts/scan_secrets.js"
   },
@@ -19,7 +22,7 @@
   "author": "Syncine Team",
   "license": "MIT",
   "engines": {
-    "node": ">=20.18.1 || >=22.23.4 || >=24.22.1 || >=26.12.1"
+    "node": ">=22.23.4 || >=24.22.1 || >=26.12.1"
   },
   "dependencies": {
     "cors": "^2.8.5",

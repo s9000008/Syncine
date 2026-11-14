@@ -141,6 +141,12 @@ export const enUS: TranslationSchema = {
     diagnosticErrorCodeLabel: 'Error Code',
     diagnosticTimestampLabel: 'Timestamp',
     diagnosticDetailPrefix: 'Error Detail',
+    conflictAlertTitle: '⚠️ Playback Contention Detected',
+    conflictAlertDesc: (host: string, count: number) =>
+      `Detected ${count} rapid playback/pause reversals on ${host}. Cooldown protection is active to prevent freezing. If another watch-party or playback extension is running, please disable it and refresh.`,
+    conflictCopyReportBtn: 'Copy Conflict Log',
+    conflictReportGithubBtn: 'Report Conflict',
+    conflictDismissBtn: 'Dismiss',
   },
   languageSelector: {
     label: 'Language',

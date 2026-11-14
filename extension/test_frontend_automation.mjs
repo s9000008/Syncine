@@ -18,6 +18,22 @@ function assert(condition, testName, detail = '') {
   }
 }
 
+function readModuleTree(relPath) {
+  const fullPath = path.join(__dirname, relPath);
+  if (!fs.existsSync(fullPath)) return '';
+  if (fs.statSync(fullPath).isFile()) return fs.readFileSync(fullPath, 'utf-8');
+  const chunks = [];
+  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRel = path.posix.join(relPath, entry.name);
+    if (entry.isDirectory()) {
+      chunks.push(readModuleTree(childRel));
+    } else if (/\.(ts|tsx|js|mjs)$/i.test(entry.name)) {
+      chunks.push(fs.readFileSync(path.join(__dirname, childRel), 'utf-8'));
+    }
+  }
+  return chunks.join('\n');
+}
+
 console.log('====================================================');
 console.log('🌐 Syncine 前端與多平台動作控制自動化深度測試套件');
 console.log('====================================================\n');
@@ -629,7 +645,7 @@ const manifestObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'src/manifes
 assert(manifestObj.content_scripts[0].all_frames === false, 'manifest.json 停用 all_frames (防止注入廣告/沙盒 iframe)');
 assert(!manifestObj.content_scripts[0].match_about_blank, 'manifest.json 移除 match_about_blank');
 
-const contentSrc = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentSrc = readModuleTree('src/content');
 assert(contentSrc.includes('isPlatformActive'), 'content/index.ts 實裝 isPlatformActive 局部開放靜默退出守衛');
 assert(contentSrc.includes('window.self !== window.top'), 'content/index.ts 包含頂層視窗防禦守衛 (window.self !== window.top)');
 assert(contentSrc.includes('pagehide'), 'content/index.ts 監聽 pagehide 事件以釋放 Port');
@@ -640,7 +656,7 @@ assert(contentSrc.includes('chrome.runtime.lastError'), 'content/index.ts 存取
 assert(contentSrc.includes('findGenericVideoElement'), 'content/index.ts 實裝標準影片通用檢索方案 (findGenericVideoElement)');
 assert(contentSrc.includes('syncine_unlock_candidates'), 'content/index.ts 監聽彩蛋解鎖儲存旗標 (syncine_unlock_candidates)');
 
-const popupSrc = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+const popupSrc = readModuleTree('src/popup');
 assert(popupSrc.includes('handleVersionTripleClick'), 'Popup.tsx 實裝版本號點擊 3 次隱藏彩蛋觸發器 (handleVersionTripleClick)');
 assert(popupSrc.includes('syncine_unlock_candidates'), 'Popup.tsx 透過 syncine_unlock_candidates 儲存解鎖狀態');
 assert(popupSrc.includes('isPlatformActive(activeTabUrl, candidatesUnlocked)'), 'Popup.tsx 根據彩蛋解鎖狀態計算目標支援判定');
@@ -650,7 +666,7 @@ assert(manifestObj.permissions.includes('activeTab'), 'Manifest 宣告 activeTab
 assert(manifestObj.permissions.includes('scripting'), 'Manifest 宣告 scripting 權限以支援動態注入');
 assert(contentSrc.includes('CS_PING') && contentSrc.includes('CS_ACTIVATE_UNIVERSAL'), 'content/index.ts 支援 activeTab 通用激活與 Ping 響應');
 
-const bgSrc = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const bgSrc = readModuleTree('src/background');
 assert(bgSrc.includes('isPlatformActive'), 'background/index.ts 實裝 isPlatformActive 廣播與白名單過濾守衛');
 assert(bgSrc.includes('chrome.runtime.lastError'), 'background/index.ts 存取 chrome.runtime.lastError 消除斷開異常');
 
@@ -1033,8 +1049,8 @@ assert(
   '動畫瘋與 OTT Google IMA 前置廣告容器過濾與暫緩同步防護已實裝'
 );
 assert(
-  contentSrc.includes("host.includes('nicovideo.jp')") &&
-    contentSrc.includes("host.includes('anime1.me')") &&
+  contentSrc.includes("'nicovideo.jp'") &&
+    contentSrc.includes("'anime1.me'") &&
     contentSrc.includes('Niconico Next/Series Click') &&
     contentSrc.includes('Anime1 Prev/Next Episode Click'),
   'Niconico 與 Anime1.me 納入上下集/系列連播自動跳轉支援 (18 平台 100% 覆蓋)'
@@ -1165,7 +1181,7 @@ assert(
   '[YouTube 核心檢驗] 短網址 (youtu.be)、Shorts、Live 直播與 Embed 內嵌網址全數支援'
 );
 assert(
-  contentSrc.includes('isYouTubeAdPlaying') &&
+  contentSrc.includes('isAdPlaying') &&
     contentSrc.includes('.ytp-ad-player-overlay') &&
     contentSrc.includes('yt-navigate-finish'),
   '[YouTube 核心檢驗] 具備 AdBlocker 相容廣告過濾器與 yt-navigate-finish SPA 換片監聽'
@@ -1246,6 +1262,123 @@ assert(
     contentSrc.includes('ytd-compact-video-renderer') &&
     contentSrc.includes('lastPlaylistActionTime = 0'),
   '[YouTube 換片行為邊界檢驗] 僅在點擊上下一集按鈕或播放清單時自動同步，點擊一般推薦影片/搜尋結果時不自動跳轉，保留手動推送機制'
+);
+
+// ----------------------------------------------------
+// 測試套件 17: SDD Phase 1-3 架構模組化、跨站選擇器隔離與 P2P 安全迴歸測試
+// ----------------------------------------------------
+console.log('\n--- 測試套件 17: SDD Phase 1-3 模組化與安全加固迴歸測試 ---');
+
+// 1. Content Script 跨站點擊選擇器隔離實測 (matchPlaylistClickForHostname)
+const syncEngineModulePath = path.join(__dirname, 'dist_test/syncEngine.mjs');
+execSync(`npx esbuild "${path.join(__dirname, 'src/content/syncEngine.ts')}" --bundle --format=esm --outfile="${syncEngineModulePath}"`, { stdio: 'pipe' });
+const { matchPlaylistClickForHostname } = await import(`file://${syncEngineModulePath.replace(/\\/g, '/')}`);
+
+const makeTargetWithClass = (matchingSelectors) => ({
+  closest: (selector) => matchingSelectors.some((s) => selector.includes(s)) ? {} : null
+});
+
+const epTarget = makeTargetWithClass(['.episode-item']);
+assert(
+  matchPlaylistClickForHostname('www.myvideo.net.tw', epTarget).matched === true &&
+    matchPlaylistClickForHostname('www.youtube.com', epTarget).matched === false &&
+    matchPlaylistClickForHostname('www.netflix.com', epTarget).matched === false &&
+    matchPlaylistClickForHostname('example.com', epTarget).matched === false,
+  '跨站換集選擇器嚴格依 hostname 隔離：.episode-item 僅於所屬影音平台觸發，絕不在 YouTube/Netflix/未知網站誤觸'
+);
+assert(
+  matchPlaylistClickForHostname('www.youtube.com', makeTargetWithClass(['ytd-compact-video-renderer'])).ignored === true,
+  'YouTube 一般推薦影片點擊明確標記 ignored 以重置自動連播計時'
+);
+
+// 2. Offscreen PeerJSWebRTCManager 安全邊界實測 (本機收件時間戳防偽造 + 單次核准 + SyncData 驗證)
+const offscreenModulePath = path.join(__dirname, 'dist_test/offscreen.mjs');
+execSync(`npx esbuild "${path.join(__dirname, 'src/offscreen/index.ts')}" --bundle --format=esm --outfile="${offscreenModulePath}"`, { stdio: 'pipe' });
+const { PeerJSWebRTCManager } = await import(`file://${offscreenModulePath.replace(/\\/g, '/')}`);
+
+const mgr = new PeerJSWebRTCManager(false);
+const sentPackets = [];
+const dataHandlers = [];
+const mockConn = {
+  peer: 'guest-peer-1',
+  open: true,
+  metadata: { userId: 'guest_u1', timestamp: Date.now() - 600_000 }, // 惡意偽造 10 分鐘前過期時間戳
+  send: (msg) => sentPackets.push(msg),
+  close: () => {},
+  on: (evt, cb) => {
+    if (evt === 'data') dataHandlers.push(cb);
+  },
+  once: () => {}
+};
+
+const forwarded = [];
+const origChrome = globalThis.chrome;
+globalThis.chrome = {
+  runtime: {
+    sendMessage: (msg) => {
+      forwarded.push(msg);
+      return Promise.resolve();
+    }
+  }
+};
+
+try {
+  const localNow = Date.now();
+  mgr['role'] = 'HOST';
+  mgr['pendingRequests'].set('guest-peer-1', mockConn);
+  mgr['pendingReceivedAt'].set('guest-peer-1', localNow);
+  mgr['notifyJoinRequestsChanged']();
+
+  const updatedReqMsg = forwarded.find((m) => m.type === 'CS_JOIN_REQUESTS_UPDATED');
+  assert(
+    updatedReqMsg && updatedReqMsg.payload.pendingRequests[0].timestamp >= localNow,
+    'Host 待審核佇列採用本地 pendingReceivedAt 時間戳，不受遠端偽造 metadata.timestamp 污染'
+  );
+
+  mgr.approveJoinRequest('guest-peer-1', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert(
+    sentPackets.filter((p) => p?.type === 'JOIN_APPROVED').length === 1,
+    'Host 核准觀眾僅發送單次確定性 JOIN_APPROVED 封包（無重複 setTimeout 連發）'
+  );
+
+  forwarded.length = 0;
+  mgr.updatePermission(true);
+  const guestDataHandler = dataHandlers[0];
+  assert(typeof guestDataHandler === 'function', 'Host 核准觀眾後成功註冊 DataChannel data 監聽器');
+
+  guestDataHandler({ action: 'HEARTBEAT', currentTime: 12, timestamp: Date.now(), paused: false });
+  guestDataHandler({ action: 'PLAY', currentTime: -50, playbackRate: 99, timestamp: Date.now() });
+  assert(
+    forwarded.length === 0,
+    'Offscreen Host 端攔截 Guest 偽造 HEARTBEAT 與負數時間/違法倍速同步封包'
+  );
+
+  guestDataHandler({ action: 'PLAY', currentTime: 42, timestamp: Date.now(), paused: false });
+  assert(
+    forwarded.length === 1 && forwarded[0].type === 'OFFSCREEN_DATA_RECEIVED' && forwarded[0].payload.currentTime === 42,
+    'Offscreen Host 端於授權後正常放行合法 Guest PLAY 操作封包'
+  );
+} finally {
+  globalThis.chrome = origChrome;
+}
+
+// 3. Background Service Worker MV3 合規與僵死信令清理驗證
+assert(
+  bgSrc.includes('ensureSessionHydrated') &&
+    bgSrc.includes('periodInMinutes: 0.5') &&
+    !bgSrc.includes('periodInMinutes: 0.33'),
+  'Background 具備單一並行 storage 狀態還原鎖與合規 0.5 分鐘 (30秒) 保活 Alarm'
+);
+assert(
+  !bgSrc.includes("'PING_ALIVE'") &&
+    !bgSrc.includes("'BG_SERVERLESS_CREATE_OFFER'") &&
+    !bgSrc.includes("'OFFSCREEN_INIT_P2P'") &&
+    !bgSrc.includes("'OFFSCREEN_TRIGGER_FALLBACK'"),
+  'Background 已徹底移除過時 PING_ALIVE / Serverless 剪貼簿 / 舊版信令冗餘程式碼'
+);
+assert(
+  isUrlAllowed('http://www.youtube.com/watch?v=dQw4w9WgXcQ') === false,
+  '擴充端平台註冊表嚴格拒絕明文 http:// 協定'
 );
 
 // ----------------------------------------------------
