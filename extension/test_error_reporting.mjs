@@ -18,6 +18,22 @@ function assert(condition, testName, detail = '') {
   }
 }
 
+function readModuleTree(relPath) {
+  const fullPath = path.join(__dirname, relPath);
+  if (!fs.existsSync(fullPath)) return '';
+  if (fs.statSync(fullPath).isFile()) return fs.readFileSync(fullPath, 'utf-8');
+  const chunks = [];
+  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRel = path.posix.join(relPath, entry.name);
+    if (entry.isDirectory()) {
+      chunks.push(readModuleTree(childRel));
+    } else if (/\.(ts|tsx|js|mjs)$/i.test(entry.name)) {
+      chunks.push(fs.readFileSync(path.join(__dirname, childRel), 'utf-8'));
+    }
+  }
+  return chunks.join('\n');
+}
+
 console.log('====================================================');
 console.log('🛡️ Syncine P2P 錯誤日誌與 GitHub Issue 回報深度驗證套件');
 console.log('====================================================\n');
@@ -313,10 +329,16 @@ assert(detailWithIds.peerId === 'sy***RQ', 'sanitizeDetails 自動遮蔽 peerId 
 assert(detailWithIds.userId === 'us***54', 'sanitizeDetails 自動遮蔽 userId 為 us***54');
 assert(detailWithIds.requestId === 're***56', 'sanitizeDetails 自動遮蔽 requestId 為 re***56');
 
-const popupSource = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+const popupSource = readModuleTree('src/popup');
 assert(
-  popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'"),
-  'Popup.tsx 在 ERR_AUDIT_REJECTED (被拒絕加入 P2P) 時隱藏回報與複製診斷按鈕'
+  popupSource.includes("lastErrorCode !== 'ERR_AUDIT_REJECTED'") &&
+    popupSource.includes('NON_REPORTABLE_ERROR_CODES') &&
+    popupSource.includes("'ERR_INVALID_CODE'"),
+  'Popup.tsx 在 ERR_AUDIT_REJECTED 與 ERR_INVALID_CODE 等非系統錯誤時隱藏 GitHub 回報與診斷複製按鈕'
+);
+assert(
+  popupSource.includes('disabled={loading || !shareCodeInput.trim()}'),
+  'Popup.tsx 在邀請碼輸入框為空值時直接禁用 (disabled) 申請加入房間按鈕，杜絕空值誤送出'
 );
 assert(
   popupSource.includes("msg.type === 'CS_CONNECTION_STATUS_CHANGED'") &&
@@ -324,11 +346,54 @@ assert(
   'Popup.tsx 收到 CS_CONNECTION_STATUS_CHANGED 時同步寫入 lastErrorCode'
 );
 
-const bgSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const bgSource = readModuleTree('src/background');
 assert(
   bgSource.includes("const errCode = res?.error || 'ERR_P2P_SIGNAL_FAILED'") &&
     bgSource.includes('sendResponse({ success: false, error: errCode, code: errCode })'),
   'background/index.ts 完整保留 Offscreen 回傳之具體錯誤碼 (如 ERR_ROOM_NOT_FOUND)'
+);
+
+// ----------------------------------------------------
+// 測試套件 11: 資安警告防轟炸、冷卻去重與內部網址防呆保護驗證
+// ----------------------------------------------------
+console.log('\n--- 測試套件 11: 資安警告防轟炸、冷卻去重與內部網址防呆保護驗證 ---');
+
+// 1. Background verifyAndRedirect 必須包含 15 秒同網址警告冷卻防護
+assert(
+  bgSource.includes('cleanUrl === lastSecurityAlertUrl && now - lastSecurityAlertTime < 15000'),
+  'background/index.ts verifyAndRedirect 實裝 15 秒同網址資安警告冷卻抑制'
+);
+
+// 2. Background BG_P2P_GUEST_APPROVED 必須防重：網址未變時不得二度調用 verifyAndRedirect
+assert(
+  bgSource.includes('if (!prevUrl || prevUrl !== currentRoomState.currentUrl)') &&
+    bgSource.includes('verifyAndRedirect(currentRoomState.currentUrl)'),
+  'background/index.ts BG_P2P_GUEST_APPROVED 實裝網址防重守衛 (避免入房成功後二次報警)'
+);
+
+// 3. Background BG_CREATE_ROOM 必須過濾 chrome:// 等瀏覽器內部網址
+assert(
+  bgSource.includes("rawUrl.startsWith('chrome://')") &&
+    bgSource.includes("isBrowserInternalUrl ? '' : getCanonicalVideoUrl(rawUrl)"),
+  'background/index.ts BG_CREATE_ROOM 自動過濾 chrome://newtab/ 等內部網址為空值'
+);
+
+// 4. Popup.tsx 必須防呆過濾非 HTTP(S) 網址建立房間與同步分頁
+assert(
+  popupSource.includes("activeTabUrl.startsWith('http://') || activeTabUrl.startsWith('https://')"),
+  'Popup.tsx 在新分頁建立房間或同步時嚴格校驗合法 HTTP(S) 協定'
+);
+
+// 5. Content Script 必須具備 isShowingSecurityAlert 阻塞旗標與版本號防重疊 (vv2.x.x -> v2.x.x)
+const contentSource = readModuleTree('src/content');
+assert(
+  contentSource.includes('isShowingSecurityAlert') &&
+    contentSource.includes('lastAlertedSecurityUrl && now - lastAlertedSecurityTime < 15000'),
+  'content/index.ts 實裝 isShowingSecurityAlert 與 15 秒冷卻守衛 (杜絕連鎖阻塞彈窗)'
+);
+assert(
+  contentSource.includes("payload.version.replace(/^v+/, '')"),
+  'content/index.ts 資安警告視窗動態版本號格式化正確，杜絕 [Syncine vv2.10.0] 重複 v 前綴'
 );
 
 // ----------------------------------------------------

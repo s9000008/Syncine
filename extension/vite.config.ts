@@ -21,6 +21,9 @@ export default defineConfig({
     react(),
     crx({ manifest: { ...manifest, version: pkg.version } }),
   ],
+  esbuild: {
+    pure: ['console.log', 'console.debug']
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -18,6 +18,22 @@ function assert(condition, testName, detail = '') {
   }
 }
 
+function readModuleTree(relPath) {
+  const fullPath = path.join(__dirname, relPath);
+  if (!fs.existsSync(fullPath)) return '';
+  if (fs.statSync(fullPath).isFile()) return fs.readFileSync(fullPath, 'utf-8');
+  const chunks = [];
+  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRel = path.posix.join(relPath, entry.name);
+    if (entry.isDirectory()) {
+      chunks.push(readModuleTree(childRel));
+    } else if (/\.(ts|tsx|js|mjs)$/i.test(entry.name)) {
+      chunks.push(fs.readFileSync(path.join(__dirname, childRel), 'utf-8'));
+    }
+  }
+  return chunks.join('\n');
+}
+
 console.log('====================================================');
 console.log('🧪 Syncine 前端與多語系 (i18n) 自動化測試套件開始執行');
 console.log('====================================================\n');
@@ -174,6 +190,11 @@ for (const file of localeFiles) {
   assert(content.includes('unsupportedBadge:'), `${file} 包含 unsupportedBadge 徽章`);
   assert(content.includes('footerFeedbackBtn:'), `${file} 包含 footerFeedbackBtn 回報按鈕`);
   assert(content.includes('footerFeedbackTooltip:'), `${file} 包含 footerFeedbackTooltip 懸停提示`);
+  assert(content.includes('genericModeConnected:'), `${file} 包含 genericModeConnected 通用模式翻譯`);
+  assert(content.includes('unlockToastOn:'), `${file} 包含 unlockToastOn 彩蛋開啟提示`);
+  assert(content.includes('unlockToastOff:'), `${file} 包含 unlockToastOff 彩蛋關閉提示`);
+  assert(content.includes('unlockBadgeTooltip:'), `${file} 包含 unlockBadgeTooltip 徽章提示`);
+  assert(content.includes('diagnosticFallbackTitle:'), `${file} 包含 diagnosticFallbackTitle 診斷標題翻譯`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
   for (const code of standardCodes) {
@@ -185,7 +206,7 @@ for (const file of localeFiles) {
 // 模組 5: React 元件與獨立腳本整合性走查
 // ----------------------------------------------------
 console.log('\n--- 模組 5: React 元件與獨立腳本整合性驗證 ---');
-const popupTsx = fs.readFileSync(path.join(__dirname, 'src/popup/Popup.tsx'), 'utf-8');
+const popupTsx = readModuleTree('src/popup');
 assert(popupTsx.includes('useTranslation'), 'Popup.tsx 引入並使用 useTranslation');
 assert(popupTsx.includes('LanguageSelector'), 'Popup.tsx 包含 LanguageSelector 元件');
 assert(popupTsx.includes('translateReturnCode'), 'Popup.tsx 使用 translateReturnCode 轉譯錯誤');
@@ -198,16 +219,16 @@ assert(popupTsx.includes('MessageSquarePlus'), 'Popup.tsx 引入了 MessageSquar
 assert(popupTsx.includes('unsupportedBadge'), 'Popup.tsx 支援紅燈不支援徽章');
 assert(popupTsx.includes('footerFeedbackBtn'), 'Popup.tsx 包含左下角問題回報小按鈕');
 
-const bgTs = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const bgTs = readModuleTree('src/background');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
 assert(bgTs.includes('formatShareCode'), 'background/index.ts 引入並使用 formatShareCode');
 assert(bgTs.includes('GET_P2P_DIAGNOSTIC'), 'background/index.ts 支援 GET_P2P_DIAGNOSTIC 轉發');
 
-const contentTs = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentTs = readModuleTree('src/content');
 assert(contentTs.includes('getStandaloneText'), 'content/index.ts 引入並使用 getStandaloneText');
 
 const offscreenTs = fs.readFileSync(path.join(__dirname, 'src/offscreen/index.ts'), 'utf-8');
-assert(offscreenTs.includes('getStandaloneText'), 'offscreen/index.ts 引入並使用 getStandaloneText');
+assert(offscreenTs.includes('ERR_P2P_TIMEOUT') && offscreenTs.includes('ERR_AUDIT_REJECTED'), 'offscreen/index.ts 傳遞標準 ReturnCode 交由 UI 層轉譯');
 assert(offscreenTs.includes('P2PLogger'), 'offscreen/index.ts 引入並使用 P2PLogger 結構化日誌');
 assert(offscreenTs.includes('getDiagnosticData'), 'offscreen/index.ts 支援 getDiagnosticData 產生脫敏診斷報告');
 
@@ -383,7 +404,7 @@ assert(p2pLoggerSource.includes('https://github.com/s9000008/Syncine/issues/new'
 // ----------------------------------------------------
 console.log('\n--- 模組 9: 無權限觀眾 Seeking 回滾與 Background 狀態對接驗證 ---');
 
-const contentScriptSource = fs.readFileSync(path.join(__dirname, 'src/content/index.ts'), 'utf-8');
+const contentScriptSource = readModuleTree('src/content');
 assert(contentScriptSource.includes('let lastSyncedTime = 0'), 'Content Script 定義了 lastSyncedTime 同步時間追蹤基準');
 assert(
   contentScriptSource.includes('video.currentTime = lastSyncedTime'),
@@ -394,14 +415,14 @@ assert(
   'Content Script 確保 canplay 事件監聽器無重複註冊'
 );
 
-const backgroundScriptSource = fs.readFileSync(path.join(__dirname, 'src/background/index.ts'), 'utf-8');
+const backgroundScriptSource = readModuleTree('src/background');
 assert(
   backgroundScriptSource.includes('payload?.data ?? (request as any).data'),
   'Background 實作了 BG_SYNC_STATE 新舊版本雙格式兼容解析'
 );
 assert(
-  backgroundScriptSource.includes("socket.on('HOST_CHANGED'") &&
-    backgroundScriptSource.includes("socket.on('HOST_PRIVILEGE_GRANTED'"),
+  backgroundScriptSource.includes(".on('HOST_CHANGED'") &&
+    backgroundScriptSource.includes(".on('HOST_PRIVILEGE_GRANTED'"),
   'Background 同時監聽 HOST_CHANGED 與 HOST_PRIVILEGE_GRANTED 確保房主逾時轉移狀態一致'
 );
 
@@ -414,22 +435,24 @@ assert(versionTsSource.includes("import pkg from '../package.json'"), 'version.t
 assert(zhTwSource.includes('defaultVersion: APP_VERSION'), '語系 defaultVersion 自動引用 APP_VERSION 免除硬編碼');
 
 // ----------------------------------------------------
-// 模組 10: Niconico 與 Anime1.me 平台擴充與既有功能零迴歸驗證
+// 模組 10: Niconico 與 CATCHPLAY+ 正版平台擴充與 Anime1.me 通用模式隔離驗證
 // ----------------------------------------------------
-console.log('\n--- 模組 10: Niconico 與 Anime1.me 平台擴充與既有功能零迴歸驗證 ---');
+console.log('\n--- 模組 10: Niconico 與 CATCHPLAY+ 正版平台擴充與 Anime1.me 通用模式隔離驗證 ---');
 
-// 1. Manifest 權限與注入範圍驗證
+// 1. Manifest 權限與注入範圍驗證 (確保 100% 為正版授權平台，0 未授權網域)
 const hostPerms = manifestJson.host_permissions || [];
 const csMatches = manifestJson.content_scripts?.[0]?.matches || [];
 assert(hostPerms.includes('https://www.youtube.com/*'), 'Manifest 完整保留 YouTube host_permissions');
 assert(hostPerms.includes('https://www.bilibili.com/*'), 'Manifest 完整保留 Bilibili host_permissions');
-assert(hostPerms.includes('https://www.nicovideo.jp/*'), 'Manifest 新增 Niconico host_permissions');
-assert(hostPerms.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me host_permissions');
+assert(hostPerms.includes('https://www.nicovideo.jp/*'), 'Manifest 包含 Niconico host_permissions');
+assert(hostPerms.includes('https://www.catchplay.com/*'), 'Manifest 包含 CATCHPLAY+ host_permissions');
+assert(!hostPerms.includes('https://anime1.me/*'), 'Manifest 已移除非正版授權之 Anime1.me host_permissions');
 assert(hostPerms.includes('https://www.netflix.com/*'), 'Manifest 新增 Netflix host_permissions');
 assert(csMatches.includes('https://www.youtube.com/watch*'), 'Manifest 完整保留 YouTube content_scripts matches');
 assert(csMatches.includes('https://www.bilibili.com/video/*'), 'Manifest 完整保留 Bilibili video matches');
 assert(csMatches.includes('https://www.nicovideo.jp/watch/*'), 'Manifest 新增 Niconico watch matches');
-assert(csMatches.includes('https://anime1.me/*'), 'Manifest 新增 Anime1.me matches');
+assert(csMatches.includes('https://www.catchplay.com/*'), 'Manifest 包含 CATCHPLAY+ matches');
+assert(!csMatches.includes('https://anime1.me/*'), 'Manifest 已移除非正版授權之 Anime1.me matches');
 assert(csMatches.includes('https://www.netflix.com/*'), 'Manifest 新增 Netflix matches');
 assert(csMatches.includes('https://www.netflix.com/watch*'), 'Manifest 新增 Netflix watch matches');
 
@@ -444,42 +467,66 @@ assert(getVideoIdentifier('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s') =
 assert(getVideoIdentifier('https://www.bilibili.com/video/BV1xx411c7mD?p=1') === 'bili:BV1xx411c7mD', 'getVideoIdentifier 正確提取 Bilibili BV 號');
 assert(getVideoIdentifier('https://www.nicovideo.jp/watch/sm9?ref=search_key_video') === 'nico:sm9', 'getVideoIdentifier 正確提取 Niconico sm 編號並忽略查詢參數');
 assert(getVideoIdentifier('https://www.nicovideo.jp/watch/so43652101') === 'nico:so43652101', 'getVideoIdentifier 正確提取 Niconico 官方動畫 so 編號');
-assert(getVideoIdentifier('https://anime1.me/23456') === 'anime1:23456', 'getVideoIdentifier 正確提取 Anime1.me 單集 ID');
+assert(getVideoIdentifier('https://www.catchplay.com/tw/watch/ed8c3d70-1234') === 'catchplay:ed8c3d70-1234', 'getVideoIdentifier 正確提取 CATCHPLAY+ 影片 ID');
+assert(getVideoIdentifier('https://anime1.me/23456') === 'anime1:23456', 'getVideoIdentifier 支援通用模式下提取 Anime1.me 單集 ID');
 assert(
   getVideoIdentifier('https://anime1.me/category/2026%E5%B9%B4%E5%86%AC%E5%AD%A3/') === 'anime1:category/2026年冬季',
-  'getVideoIdentifier 正確提取 Anime1.me 番劇分類路徑'
+  'getVideoIdentifier 支援通用模式下提取 Anime1.me 番劇分類路徑'
 );
 assert(getVideoIdentifier('https://www.netflix.com/watch/80057281') === 'netflix:80057281', 'getVideoIdentifier 正確提取 Netflix ID');
 
 // 3. Content Script 選擇器與懶載入輔助驗證 (確保既有 YouTube/Bilibili 完全不變)
 assert(contentScriptSource.includes("document.querySelector('video.html5-main-video')"), 'Content Script 完整保留 YouTube 專用選擇器');
-assert(contentScriptSource.includes("document.querySelector('.bpx-player-video-wrap video')"), 'Content Script 完整保留 Bilibili 專用選擇器');
+assert(contentScriptSource.includes('.bpx-player-video-wrap video'), 'Content Script 完整保留 Bilibili 專用選擇器');
 assert(contentScriptSource.includes('findNiconicoVideo'), 'Content Script 實作 Niconico 智慧選擇器 (排除廣告與空殼 Video)');
-assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 實作 Anime1.me Video.js (.vjs-tech) 選擇器');
+assert(contentScriptSource.includes('findAnime1Video'), 'Content Script 保留通用模式 Anime1.me Video.js (.vjs-tech) 選擇器');
 assert(contentScriptSource.includes('findNetflixVideo'), 'Content Script 實作 Netflix 專屬選擇器');
-assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 實作 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
+assert(contentScriptSource.includes('ensureAnime1SourceReady'), 'Content Script 保留通用模式 Anime1.me 懶載入 (.vjs-big-play-button) 自動喚醒機制');
 
-// 4. Background 白名單與廣播範圍驗證
-assert(backgroundScriptSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'Background HOST_WHITELIST 支援 Niconico 安全跳轉');
-assert(backgroundScriptSource.includes('anime1\\.me\\/.+'), 'Background HOST_WHITELIST 支援 Anime1.me 安全跳轉');
-assert(backgroundScriptSource.includes('netflix\\.com\\/watch\\/[0-9]+'), 'Background HOST_WHITELIST 支援 Netflix 安全跳轉');
+// 4. Background 與 Platforms 白名單與廣播範圍驗證 (單一真理來源)
+const platformsSource =
+  fs.readFileSync(path.join(__dirname, 'src/platforms.ts'), 'utf-8') +
+  '\n' +
+  fs.readFileSync(path.join(__dirname, '../shared/platforms.ts'), 'utf-8');
+const whitelistSource = backgroundScriptSource + '\n' + platformsSource;
+assert(whitelistSource.includes('nicovideo\\.jp\\/watch\\/[a-zA-Z0-9]+'), 'HOST_WHITELIST 支援 Niconico 安全跳轉');
+assert(whitelistSource.includes('catchplay\\.com\\/.*(watch|play|video)\\/[a-zA-Z0-9_-]+'), 'HOST_WHITELIST 支援 CATCHPLAY+ 安全跳轉');
+assert(!whitelistSource.includes('anime1\\.me\\/.+'), '官方預設 HOST_WHITELIST 已移除 Anime1.me (改由彩蛋通用模式控管)');
+assert(whitelistSource.includes('netflix\\.com\\/watch\\/[0-9]+'), 'HOST_WHITELIST 支援 Netflix 安全跳轉');
 assert(
   backgroundScriptSource.includes("tab.url.includes('nicovideo.jp')") &&
-    backgroundScriptSource.includes("tab.url.includes('anime1.me')") && backgroundScriptSource.includes("tab.url.includes('netflix.com')"),
-  'Background broadcastToVideoTabs 涵蓋 Niconico、Anime1.me 與 Netflix 分頁'
+    backgroundScriptSource.includes("tab.url.includes('catchplay.com')") &&
+    backgroundScriptSource.includes("tab.url.includes('netflix.com')"),
+  'Background broadcastToVideoTabs 涵蓋 Niconico、CATCHPLAY+ 與 Netflix 分頁'
 );
 
 // 5. 四大語系與 Popup 狀態顯示驗證
 for (const file of localeFiles) {
   const content = fs.readFileSync(path.join(__dirname, 'src/locales', file), 'utf-8');
   assert(content.includes('niconicoConnected:'), `${file} 包含 niconicoConnected 翻譯`);
-  assert(content.includes('anime1Connected:'), `${file} 包含 anime1Connected 翻譯`);
+  assert(content.includes('catchplayConnected:'), `${file} 包含 catchplayConnected 翻譯`);
   assert(content.includes('netflixConnected:'), `${file} 包含 netflixConnected 翻譯`);
 }
 assert(
-  popupTsx.includes('isNiconico') && popupTsx.includes('isAnime1') && popupTsx.includes('isNetflix'),
-  'Popup.tsx 支援偵測並顯示 Niconico、Anime1.me 與 Netflix 連線狀態'
+  popupTsx.includes('PLATFORM_TAB_STATUS_KEY_MAP') &&
+    popupTsx.includes("niconico: 'niconicoConnected'") &&
+    popupTsx.includes("catchplay: 'catchplayConnected'") &&
+    popupTsx.includes("netflix: 'netflixConnected'"),
+  'Popup.tsx 透過單一真理來源 PLATFORM_TAB_STATUS_KEY_MAP 支援偵測並顯示 Niconico、CATCHPLAY+ 與 Netflix 連線狀態'
 );
+
+// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132) 與隱藏候選名單不外洩驗證
+const storeLocales = ['zh_TW', 'en', 'ja', 'zh_CN'];
+const hiddenKeywords = ['anime1', 'litv', 'wetv', 'dailymotion', 'hulu', 'peacock', 'paramount', 'hbogoasia'];
+for (const loc of storeLocales) {
+  const msgObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/_locales', loc, 'messages.json'), 'utf-8'));
+  const desc = msgObj?.appDesc?.message || '';
+  assert(desc.length > 10 && desc.length <= 132, `_locales/${loc}/messages.json appDesc 長度合規 (${desc.length} <= 132)`);
+  assert(desc.includes('Netflix'), `_locales/${loc}/messages.json appDesc 已同步更新多平台資訊`);
+  for (const kw of hiddenKeywords) {
+    assert(!desc.toLowerCase().includes(kw), `_locales/${loc}/messages.json 未外洩非正式或候選平台 (${kw})`);
+  }
+}
 
 console.log('\n====================================================');
 console.log(`📊 擴充測試執行完畢: 共 ${passed + failed} 項測試 | 通過: ${passed} | 失敗: ${failed}`);

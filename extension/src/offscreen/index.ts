@@ -1,7 +1,7 @@
 import { Peer, DataConnection } from 'peerjs';
-import { P2PStatus, ExtensionMessage, JoinRequest, P2PDiagnosticData } from '../types/protocol';
-import { getStandaloneText } from '../locales';
+import { P2PStatus, ExtensionMessage, JoinRequest, P2PDiagnosticData, validateSyncData } from '../types/protocol';
 import { P2PLogger } from '../utils/p2pLogger';
+import { sanitizeLog } from '../utils/sanitize';
 import { APP_VERSION } from '../version';
 
 console.log('[Syncine Offscreen] WebRTC Offscreen Document (PeerJS Engine) 已啟動');
@@ -36,7 +36,7 @@ function generateSecureRoomCode(length: number = 6): string {
   return result;
 }
 
-class PeerJSWebRTCManager {
+export class PeerJSWebRTCManager {
   private role: 'HOST' | 'GUEST' | null = null;
   private lastRole: 'HOST' | 'GUEST' | null = null;
   private roomId: string = '';
@@ -46,12 +46,14 @@ class PeerJSWebRTCManager {
   private peer: Peer | null = null;
   private allowGuestControl: boolean = false;
 
-  // 房主專屬：待審核入房申請佇列 (Key: conn.peer / requestId)
+  // 房主專屬：待審核入房申請佇列 (Key: conn.peer / requestId) 與本機接收時間戳 (不信任遠端時間戳)
   private pendingRequests: Map<string, DataConnection> = new Map();
+  private pendingReceivedAt: Map<string, number> = new Map();
   // 房主專屬：已批准之成員 ID 集合 (防止 DataChannel 未開啟前發送遺失)
   private approvedRequestIds: Set<string> = new Set();
   // 房主專屬：已批准的活躍連線清單 (Key: conn.peer)
   private activeConnections: Map<string, DataConnection> = new Map();
+  private dataListenerBoundIds: Set<string> = new Set();
   private hostCurrentUrl?: string;
 
   // 診斷日誌與重試追蹤
@@ -60,13 +62,16 @@ class PeerJSWebRTCManager {
 
   // 觀眾專屬：與房主的直連通道
   private guestConnection: DataConnection | null = null;
+  private guestKnownMemberCount: number = 2;
   private guestPollTimer?: ReturnType<typeof setInterval>;
 
   // 30 秒定期心跳檢測計時器 (全模式通用校準)
   private heartbeat30sTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor() {
-    this.start30sHeartbeat();
+  constructor(autoStartHeartbeat = true) {
+    if (autoStartHeartbeat) {
+      this.start30sHeartbeat();
+    }
   }
 
   private attachIceLogger(conn: DataConnection) {
@@ -140,17 +145,20 @@ class PeerJSWebRTCManager {
             } catch (e) {}
             this.activeConnections.delete(peerId);
             this.approvedRequestIds.delete(peerId);
+            this.dataListenerBoundIds.delete(peerId);
           }
         });
 
-        // 1.1 清理超過 30 秒未批准的過期懸掛申請
+        // 1.1 清理超過 30 秒未批准的過期懸掛申請 (一律以房主本機接收時間 pendingReceivedAt 判斷，防範遠端偽造未來時間戳)
         const now = Date.now();
         let pendingCleaned = false;
         this.pendingRequests.forEach((conn, reqId) => {
-          if (!conn.open && now - (conn.metadata?.timestamp || now) > 30000) {
-            console.log(`[Syncine 30s Heartbeat] 清理過期未連通入房申請: ${reqId}`);
-            try { conn.close(); } catch (e) {}
+          const receivedAt = this.pendingReceivedAt.get(reqId) ?? now;
+          if (!conn.open && now - receivedAt > 30000) {
+            console.log(`[Syncine 30s Heartbeat] 清理過期未連通入房申請: ${sanitizeLog(reqId)}`);
+            try { conn.close(); } catch {}
             this.pendingRequests.delete(reqId);
+            this.pendingReceivedAt.delete(reqId);
             pendingCleaned = true;
           }
         });
@@ -180,13 +188,15 @@ class PeerJSWebRTCManager {
   private updateStatus(newStatus: P2PStatus) {
     this.status = newStatus;
     const peerCount = this.getConnectedPeerCount();
-    chrome.runtime.sendMessage({
-      type: 'OFFSCREEN_P2P_STATUS',
-      payload: {
-        status: this.status,
-        peerCount
-      }
-    } as ExtensionMessage).catch(() => {});
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'OFFSCREEN_P2P_STATUS',
+        payload: {
+          status: this.status,
+          peerCount
+        }
+      } as ExtensionMessage).catch(() => {});
+    }
   }
 
   public getConnectedPeerCount(): number {
@@ -197,7 +207,7 @@ class PeerJSWebRTCManager {
       });
       return openCount;
     } else if (this.role === 'GUEST') {
-      return this.guestConnection && this.guestConnection.open ? 2 : 1;
+      return this.guestConnection && this.guestConnection.open ? Math.max(2, this.guestKnownMemberCount) : 1;
     }
     return 1;
   }
@@ -207,24 +217,27 @@ class PeerJSWebRTCManager {
     const list: JoinRequest[] = [];
     this.pendingRequests.forEach((conn, requestId) => {
       const shortId = requestId.slice(-4);
+      const safeName = sanitizeLog(conn.metadata?.guestName, 32) || shortId;
       list.push({
         requestId,
-        guestName: conn.metadata?.guestName || shortId,
+        guestName: safeName,
         guestShortId: shortId,
-        timestamp: conn.metadata?.timestamp || Date.now()
+        timestamp: this.pendingReceivedAt.get(requestId) ?? Date.now()
       });
     });
 
-    chrome.runtime.sendMessage({
-      type: 'CS_JOIN_REQUESTS_UPDATED',
-      payload: { pendingRequests: list }
-    } as ExtensionMessage).catch(() => {});
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'CS_JOIN_REQUESTS_UPDATED',
+        payload: { pendingRequests: list }
+      } as ExtensionMessage).catch(() => {});
+    }
   }
 
   // ----------------------------------------------------
   // 1. 房主建房 (統一 6 碼邀請碼，可邀請多人，無人數上限)
   // ----------------------------------------------------
-  public createRoom(userId: string): Promise<{ roomId: string }> {
+  public createRoom(userId: string, idRetryCount: number = 0): Promise<{ roomId: string }> {
     return new Promise((resolve, reject) => {
       this.close();
       this.userId = userId;
@@ -257,7 +270,14 @@ class PeerJSWebRTCManager {
         this.logger.record('AUDIT', '收到入房申請', 'INFO', { requestId });
         this.attachIceLogger(conn);
 
+        if (!this.pendingRequests.has(requestId) && !this.activeConnections.has(requestId) && this.pendingRequests.size >= 30) {
+          console.warn(`[Syncine P2P Host] 待審核申請佇列已滿 (30)，自動拒絕超額請求: ${requestId}`);
+          try { conn.close(); } catch (_) {}
+          return;
+        }
+
         this.pendingRequests.set(requestId, conn);
+        this.pendingReceivedAt.set(requestId, Date.now());
         this.notifyJoinRequestsChanged();
 
         // 綁定連線狀態事件
@@ -281,10 +301,12 @@ class PeerJSWebRTCManager {
         });
 
         conn.on('close', () => {
-          console.log(`[Syncine P2P Host] 成員連線關閉: ${requestId}`);
+          console.log(`[Syncine P2P Host] 成員連線關閉: ${sanitizeLog(requestId)}`);
           this.pendingRequests.delete(requestId);
+          this.pendingReceivedAt.delete(requestId);
           this.activeConnections.delete(requestId);
           this.approvedRequestIds.delete(requestId);
+          this.dataListenerBoundIds.delete(requestId);
           this.notifyJoinRequestsChanged();
           this.updateStatus(this.status);
         });
@@ -298,8 +320,8 @@ class PeerJSWebRTCManager {
       peer.on('error', (err) => {
         console.error('[Syncine P2P Host] 信令伺服器錯誤:', err);
         this.logger.record('ERROR', `信令錯誤 (${err.type || 'unknown'})`, 'ERROR', { type: err.type, error: err.message });
-        if (err.type === 'unavailable-id') {
-          this.createRoom(userId).then(resolve).catch(reject);
+        if (err.type === 'unavailable-id' && idRetryCount < 5) {
+          this.createRoom(userId, idRetryCount + 1).then(resolve).catch(reject);
         } else {
           reject(new Error(err.message || 'ERR_P2P_SIGNAL_FAILED'));
         }
@@ -339,40 +361,62 @@ class PeerJSWebRTCManager {
     }
 
     this.pendingRequests.delete(requestId);
+    this.pendingReceivedAt.delete(requestId);
     this.activeConnections.set(requestId, conn);
 
-    // 綁定已批准連線的同步事件
-    conn.on('data', (data: any) => {
-      try {
-        if (data?.type === 'GUEST_POLL_APPROVAL') {
-          this.sendApprovalSignal(conn, requestId);
-          return;
-        }
+    // 綁定已批准連線的同步事件 (確保每個成員僅綁定一次，避免重複轉發)
+    if (!this.dataListenerBoundIds.has(requestId)) {
+      this.dataListenerBoundIds.add(requestId);
+      conn.on('data', (data: any) => {
+        try {
+          if (data?.type === 'GUEST_POLL_APPROVAL') {
+            this.sendApprovalSignal(conn, requestId);
+            return;
+          }
 
-        // 1. 嚴格阻絕特權指令：觀眾端嚴禁發起 REDIRECT_ROOM 或 TOGGLE_PERMISSION
-        if (data?.type === 'REDIRECT_ROOM' || data?.type === 'TOGGLE_PERMISSION') {
-          console.warn(`[P2P Security Drop] 阻絕來自成員 ${requestId} 的特權指令:`, data?.type);
-          return;
-        }
+          // 0. 觀眾頁面就緒後請求初始時間軸狀態：單向轉交房主 Background，不轉廣播給其他觀眾
+          if (data?.type === 'REQUEST_INIT_SYNC') {
+            const now = Date.now();
+            const lastReq = (conn as any).__lastInitSyncAt || 0;
+            if (now - lastReq > 1000) {
+              (conn as any).__lastInitSyncAt = now;
+              chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_DATA_RECEIVED',
+                payload: { type: 'REQUEST_INIT_SYNC', requesterPeerId: requestId }
+              } as ExtensionMessage).catch(() => {});
+            }
+            return;
+          }
 
-        // 2. 播放動作權限檢查：若房主未開放觀眾控制，直接丟棄播放操作 (PLAY/PAUSE/SEEK)
-        if (data?.action && !this.allowGuestControl) {
-          console.warn(`[P2P Security Drop] 房主已關閉觀眾控制，丟棄來自 ${requestId} 的 ${data.action} 操作`);
-          return;
-        }
+          // 1. 嚴格阻絕特權指令：觀眾端嚴禁發起 REDIRECT_ROOM 或 TOGGLE_PERMISSION
+          if (data?.type === 'REDIRECT_ROOM' || data?.type === 'TOGGLE_PERMISSION') {
+            console.warn(`[P2P Security Drop] 阻絕來自成員 ${sanitizeLog(requestId)} 的特權指令:`, sanitizeLog(data?.type));
+            return;
+          }
 
-        console.log(`[Syncine P2P Host] 收到來自成員 ${requestId} 之同步指令:`, data);
-        chrome.runtime.sendMessage({
-          type: 'OFFSCREEN_DATA_RECEIVED',
-          payload: data
-        } as ExtensionMessage).catch(() => {});
+          // 2. 播放動作權限與 Schema 檢查：若房主未開放觀眾控制或 Payload 違規（含 Guest 偽造 HEARTBEAT），直接丟棄
+          if (data?.action) {
+            if (!this.allowGuestControl) {
+              console.warn(`[P2P Security Drop] 房主已關閉觀眾控制，丟棄來自 ${sanitizeLog(requestId)} 的 ${sanitizeLog(data.action)} 操作`);
+              return;
+            }
+            const cleanData = validateSyncData(data, false);
+            if (!cleanData) {
+              console.warn(`[P2P Security Drop] 丟棄來自 ${sanitizeLog(requestId)} 的無效或越權 SYNC_STATE 封包`);
+              return;
+            }
+            chrome.runtime.sendMessage({
+              type: 'OFFSCREEN_DATA_RECEIVED',
+              payload: cleanData
+            } as ExtensionMessage).catch(() => {});
+            this.broadcastExcept(requestId, cleanData);
+            return;
+          }
+        } catch {}
+      });
+    }
 
-        // 星狀拓撲：房主自動轉發廣播給其餘所有在線成員
-        this.broadcastExcept(requestId, data);
-      } catch (e) {}
-    });
-
-    // 若當前已 open 立即發送，否則註冊 once('open')
+    // 單次確定送達：已 open 立即發送，否則註冊 once('open') (由觀眾端 GUEST_POLL_APPROVAL 輪詢補位)
     if (conn.open) {
       this.sendApprovalSignal(conn, requestId);
     } else {
@@ -381,12 +425,7 @@ class PeerJSWebRTCManager {
       });
     }
 
-    // 額外保險計時重試發送，避免底層通道開啟競爭延遲
-    setTimeout(() => this.sendApprovalSignal(conn, requestId), 300);
-    setTimeout(() => this.sendApprovalSignal(conn, requestId), 800);
-    setTimeout(() => this.sendApprovalSignal(conn, requestId), 1500);
-
-    console.log(`[Syncine P2P Host] ✅ 已核准成員 ${requestId} 入房！(目前人數: ${this.getConnectedPeerCount()} 人)`);
+    console.log(`[Syncine P2P Host] ✅ 已核准成員 ${sanitizeLog(requestId)} 入房！(目前人數: ${this.getConnectedPeerCount()} 人)`);
     this.notifyJoinRequestsChanged();
     this.updateStatus('CONNECTED');
   }
@@ -396,11 +435,12 @@ class PeerJSWebRTCManager {
     if (!conn) return;
 
     this.pendingRequests.delete(requestId);
+    this.pendingReceivedAt.delete(requestId);
     this.approvedRequestIds.delete(requestId);
     try {
       conn.send({ type: 'JOIN_REJECTED' });
       setTimeout(() => conn.close(), 300);
-    } catch (e) {}
+    } catch {}
 
     console.log(`[Syncine P2P Host] ❌ 已拒絕成員 ${requestId} 的入房申請`);
     this.notifyJoinRequestsChanged();
@@ -522,10 +562,13 @@ class PeerJSWebRTCManager {
           if (data?.type === 'JOIN_APPROVED') {
             console.log('[Syncine P2P Guest] 🎉 收到房主 JOIN_APPROVED 核准通知！立即解鎖開播');
             this.logger.record('CONNECTED', '核准通過，直連就緒', 'INFO');
+            if (typeof data.memberCount === 'number' && data.memberCount >= 2) {
+              this.guestKnownMemberCount = data.memberCount;
+            }
             if (this.guestPollTimer) clearInterval(this.guestPollTimer);
             this.updateStatus('CONNECTED');
 
-            // 關鍵：直接通知 Background 更新房間狀態，解鎖轉圈狀態
+            // 關鍵：直接通知 Background 更新房間狀態並自動導航至房主當前影片，解鎖轉圈狀態
             chrome.runtime.sendMessage({
               type: 'BG_P2P_GUEST_APPROVED',
               payload: {
@@ -534,13 +577,6 @@ class PeerJSWebRTCManager {
                 memberCount: data.memberCount || 2
               }
             } as ExtensionMessage).catch(() => {});
-
-            if (data.hostCurrentUrl) {
-              chrome.runtime.sendMessage({
-                type: 'BG_REDIRECT_ROOM',
-                payload: { targetUrl: data.hostCurrentUrl }
-              } as ExtensionMessage).catch(() => {});
-            }
           } else if (data?.type === 'JOIN_REJECTED') {
             console.warn('[Syncine P2P Guest] 房主已婉拒您的加入申請');
             this.logger.record('AUDIT', '房主拒絕申請', 'WARN');
@@ -555,6 +591,9 @@ class PeerJSWebRTCManager {
               payload: { error: 'ERR_AUDIT_REJECTED', code: 'ERR_AUDIT_REJECTED' }
             } as ExtensionMessage).catch(() => {});
           } else if (data?.type === 'MEMBER_COUNT_UPDATE') {
+            if (typeof data.count === 'number' && data.count >= 1) {
+              this.guestKnownMemberCount = data.count;
+            }
             console.log(`[Syncine P2P Guest] 收到 30 秒人數校準更新: ${data.count} 人`);
             chrome.runtime.sendMessage({
               type: 'OFFSCREEN_P2P_STATUS',
@@ -563,9 +602,14 @@ class PeerJSWebRTCManager {
                 peerCount: data.count
               }
             } as ExtensionMessage).catch(() => {});
-          } else {
-            // 一般影音同步指令 (PLAY / PAUSE / SEEK / REDIRECT)
-            console.log('[Syncine Offscreen Guest] 收到 DataChannel 封包:', data);
+          } else if (data?.action) {
+            const cleanData = validateSyncData(data, true);
+            if (!cleanData) return;
+            chrome.runtime.sendMessage({
+              type: 'OFFSCREEN_DATA_RECEIVED',
+              payload: cleanData
+            } as ExtensionMessage).catch(() => {});
+          } else if (data?.type === 'REDIRECT_ROOM' || data?.type === 'TOGGLE_PERMISSION') {
             chrome.runtime.sendMessage({
               type: 'OFFSCREEN_DATA_RECEIVED',
               payload: data
@@ -650,13 +694,15 @@ class PeerJSWebRTCManager {
     });
     this.activeConnections.clear();
     this.approvedRequestIds.clear();
+    this.dataListenerBoundIds.clear();
 
     this.pendingRequests.forEach((conn) => {
       try {
         conn.close();
-      } catch (e) {}
+      } catch {}
     });
     this.pendingRequests.clear();
+    this.pendingReceivedAt.clear();
 
     if (this.guestConnection) {
       try {
@@ -674,60 +720,64 @@ class PeerJSWebRTCManager {
 
     this.role = null;
     this.roomId = '';
+    this.guestKnownMemberCount = 2;
     this.updateStatus('DISCONNECTED');
     this.notifyJoinRequestsChanged();
   }
 }
 
-const manager = new PeerJSWebRTCManager();
+const isRuntimeContext = typeof chrome !== 'undefined' && Boolean(chrome?.runtime?.onMessage);
+const manager = isRuntimeContext ? new PeerJSWebRTCManager(true) : null;
 
 // 監聽來自 Background / Popup 的訊息
-chrome.runtime.onMessage.addListener((request: ExtensionMessage, _sender, sendResponse) => {
-  const { type, payload } = request;
+if (isRuntimeContext && manager) {
+  chrome.runtime.onMessage.addListener((request: ExtensionMessage, _sender, sendResponse) => {
+    const { type, payload } = request;
 
-  switch (type) {
-    case 'OFFSCREEN_PEER_CREATE_ROOM':
-      manager
-        .createRoom(payload.userId)
-        .then((res) => sendResponse({ success: true, ...res }))
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true;
+    switch (type) {
+      case 'OFFSCREEN_PEER_CREATE_ROOM':
+        manager
+          .createRoom(payload.userId)
+          .then((res) => sendResponse({ success: true, ...res }))
+          .catch((err) => sendResponse({ success: false, error: err.message }));
+        return true;
 
-    case 'OFFSCREEN_PEER_JOIN_ROOM':
-      manager
-        .joinRoom(payload.roomId, payload.userId)
-        .then((res) => sendResponse({ success: true, ...res }))
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true;
+      case 'OFFSCREEN_PEER_JOIN_ROOM':
+        manager
+          .joinRoom(payload.roomId, payload.userId)
+          .then((res) => sendResponse({ success: true, ...res }))
+          .catch((err) => sendResponse({ success: false, error: err.message }));
+        return true;
 
-    case 'OFFSCREEN_APPROVE_JOIN_REQUEST':
-      manager.approveJoinRequest(payload.requestId, payload.hostCurrentUrl);
-      sendResponse({ success: true });
-      break;
+      case 'OFFSCREEN_APPROVE_JOIN_REQUEST':
+        manager.approveJoinRequest(payload.requestId, payload.hostCurrentUrl);
+        sendResponse({ success: true });
+        break;
 
-    case 'OFFSCREEN_REJECT_JOIN_REQUEST':
-      manager.rejectJoinRequest(payload.requestId);
-      sendResponse({ success: true });
-      break;
+      case 'OFFSCREEN_REJECT_JOIN_REQUEST':
+        manager.rejectJoinRequest(payload.requestId);
+        sendResponse({ success: true });
+        break;
 
-    case 'OFFSCREEN_SEND_DATA':
-      manager.sendData(payload);
-      sendResponse({ success: true });
-      break;
+      case 'OFFSCREEN_SEND_DATA':
+        manager.sendData(payload);
+        sendResponse({ success: true });
+        break;
 
-    case 'OFFSCREEN_UPDATE_PERMISSION':
-      manager.updatePermission(Boolean(payload?.allowGuestControl));
-      sendResponse({ success: true });
-      break;
+      case 'OFFSCREEN_UPDATE_PERMISSION':
+        manager.updatePermission(Boolean(payload?.allowGuestControl));
+        sendResponse({ success: true });
+        break;
 
-    case 'OFFSCREEN_CLOSE_P2P':
-      manager.close();
-      sendResponse({ success: true });
-      break;
+      case 'OFFSCREEN_CLOSE_P2P':
+        manager.close();
+        sendResponse({ success: true });
+        break;
 
-    case 'OFFSCREEN_GET_DIAGNOSTIC':
-      sendResponse({ success: true, data: manager.getDiagnosticData(payload?.errorCode) });
-      break;
-  }
-  return true;
-});
+      case 'OFFSCREEN_GET_DIAGNOSTIC':
+        sendResponse({ success: true, data: manager.getDiagnosticData(payload?.errorCode) });
+        break;
+    }
+    return true;
+  });
+}
