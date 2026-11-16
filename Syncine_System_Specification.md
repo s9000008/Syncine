@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.10.0)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.10.1)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -640,6 +640,9 @@ export type P2PDataMessage =
     - 安全防護：`ERR_UNAUTHORIZED_URL`
   * **去硬編碼展示原則**：入房審核申請之預設稱謂由 UI 層函式 `defaultGuestName(id)` 依用戶目前語系動態渲染，通道僅傳遞使用者 ID 或代碼。
   * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
+  * **Chrome Web Store 關鍵字堆砌合規防線（Anti-Keyword Stuffing Policy）**：
+    - 商店摘要（`public/_locales/*/messages.json` 之 `appDesc`）與商店長說明（Store Description）僅可自然舉例 **最多 3 個代表性平台**（如 `YouTube`、`Netflix`、`Bilibili`），且 `appDesc` 字數嚴格限制 `<= 132` 字元。
+    - 嚴禁於 `appDesc` 或商店說明中以逗號或項目符號條列完整平台品牌清單，其餘支援平台一律引導使用者參閱官方 GitHub `README.md` 或擴充套件內建清單，並由 `test_i18n_suite.mjs` 自動化統計攔截（`appDesc` 內出現之平台品牌數量不得超過 3 個）。
 
 
 

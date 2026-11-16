@@ -40,7 +40,7 @@ Syncine/
 ├── AGENTS.md                       # 專案頂層 Multi-Agent 協作指引
 ├── GEMINI.md                       # 專案核心規範與開發守則
 ├── PRIVACY_POLICY.md               # Chrome Web Store 雙語隱私權政策
-├── Syncine_System_Specification.md # 系統完整開發規格書 (v2.10.0)
+├── Syncine_System_Specification.md # 系統完整開發規格書 (v2.10.1)
 ├── .env.example                    # 專案環境變數範例檔
 ├── README.md                       # 專案完整說明文件
 │
