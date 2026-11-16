@@ -4,7 +4,7 @@
     "description": "拡張機能の名前"
   },
   "appDesc": {
-    "message": "YouTube・Netflix・Bilibili・Disney+・ニコニコ動画・アニメ瘋などに対応した同時視聴 (Watch Party) 拡張機能。離れた友達と一括同期再生。",
+    "message": "YouTube・Netflix・Bilibili などの配信サイトに対応した同時視聴 (Watch Party) 拡張機能。離れた友達とリアルタイムで同期再生できます。",
     "description": "拡張機能の説明"
   },
   "actionTitle": {

@@ -515,14 +515,39 @@ assert(
   'Popup.tsx 透過單一真理來源 PLATFORM_TAB_STATUS_KEY_MAP 支援偵測並顯示 Niconico、CATCHPLAY+ 與 Netflix 連線狀態'
 );
 
-// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132) 與隱藏候選名單不外洩驗證
+// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132)、防關鍵字堆砌 (<=3 平台) 與隱藏候選名單不外洩驗證
 const storeLocales = ['zh_TW', 'en', 'ja', 'zh_CN'];
 const hiddenKeywords = ['anime1', 'litv', 'wetv', 'dailymotion', 'hulu', 'peacock', 'paramount', 'hbogoasia'];
+const platformBrandMatchers = [
+  { id: 'youtube', regex: /youtube/i },
+  { id: 'netflix', regex: /netflix/i },
+  { id: 'bilibili', regex: /bilibili|哔哩哔哩|嗶哩嗶哩/i },
+  { id: 'niconico', regex: /niconico|nicovideo|ニコニコ動画/i },
+  { id: 'vimeo', regex: /vimeo/i },
+  { id: 'gamer', regex: /動畫瘋|动画疯|アニメ瘋|bahamut/i },
+  { id: 'twitch', regex: /twitch/i },
+  { id: 'disney', regex: /disney\+|disney plus/i },
+  { id: 'prime', regex: /prime video|amazon/i },
+  { id: 'myvideo', regex: /myvideo/i },
+  { id: 'linetv', regex: /line\s*tv/i },
+  { id: 'kktv', regex: /kktv/i },
+  { id: 'crunchyroll', regex: /crunchyroll/i },
+  { id: 'friday', regex: /friday/i },
+  { id: 'max', regex: /\b(hbo\s*max|max)\b/i },
+  { id: 'iqiyi', regex: /iqiyi|愛奇藝|爱奇艺/i },
+  { id: 'appletv', regex: /apple\s*tv/i },
+  { id: 'catchplay', regex: /catchplay/i }
+];
 for (const loc of storeLocales) {
   const msgObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/_locales', loc, 'messages.json'), 'utf-8'));
   const desc = msgObj?.appDesc?.message || '';
   assert(desc.length > 10 && desc.length <= 132, `_locales/${loc}/messages.json appDesc 長度合規 (${desc.length} <= 132)`);
   assert(desc.includes('Netflix'), `_locales/${loc}/messages.json appDesc 已同步更新多平台資訊`);
+  const matchedBrands = platformBrandMatchers.filter((b) => b.regex.test(desc)).map((b) => b.id);
+  assert(
+    matchedBrands.length <= 3,
+    `_locales/${loc}/messages.json appDesc 符合 CWS 反關鍵字堆砌規範，提及平台品牌數量 <= 3 (實際=${matchedBrands.length}: ${matchedBrands.join(', ')})`
+  );
   for (const kw of hiddenKeywords) {
     assert(!desc.toLowerCase().includes(kw), `_locales/${loc}/messages.json 未外洩非正式或候選平台 (${kw})`);
   }

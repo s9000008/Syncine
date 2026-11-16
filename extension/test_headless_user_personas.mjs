@@ -95,7 +95,7 @@ async function runHeadlessUserPersonaTests() {
 
     // 1.3 房主 A 解鎖彩蛋 (三連擊版本號)
     const eggResult = await popupPageA.evaluate(async () => {
-      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.0'));
+      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.1'));
       if (!verSpan) return { success: false };
       verSpan.click();
       verSpan.click();
@@ -200,7 +200,7 @@ async function runHeadlessUserPersonaTests() {
 
     // 觀眾 B 點擊版本號 3 次解鎖
     await popupPageB.evaluate(async () => {
-      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.0'));
+      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.1'));
       if (verSpan) {
         verSpan.click();
         verSpan.click();
