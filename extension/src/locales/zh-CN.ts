@@ -51,7 +51,12 @@ export const zhCN: TranslationSchema = {
     hintPrefix: '💡 提示',
     unlockToastOn: '🔓 已启用 activeTab 通用模式与候选支持名单',
     unlockToastOff: '🔒 已关闭隐藏候选支持名单',
-    unlockBadgeTooltip: '🔓 候选名单已启用 (连点 3 下关闭)',
+    unlockBadgeTooltip: '🔓 通用模式已启用 (连点 3 下关闭)',
+    versionHoverHint: '💡 连点 3 下版本号可切换“实验性通用网站支持模式”',
+    supportedListBtn: '支持列表',
+    supportedListTitle: '📌 主要支持网站列表 (18 大正式平台)',
+    supportedListUniversalNote: '💡 连点上方版本号 3 下可启用实验性通用 HTML5 <video> 支持模式',
+    supportedListUniversalActive: '🔓 已启用实验性通用 HTML5 <video> 与候选网站支持模式',
   },
   connectionModes: {
     modeLabel: '连接方式',

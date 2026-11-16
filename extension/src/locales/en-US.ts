@@ -51,7 +51,12 @@ export const enUS: TranslationSchema = {
     hintPrefix: '💡 Tip',
     unlockToastOn: '🔓 Enabled activeTab Universal Mode & candidate platforms',
     unlockToastOff: '🔒 Candidate platforms locked',
-    unlockBadgeTooltip: '🔓 Candidates unlocked (Triple-click to lock)',
+    unlockBadgeTooltip: '🔓 Universal Mode active (Triple-click to lock)',
+    versionHoverHint: '💡 Triple-click version to toggle Experimental Universal Mode',
+    supportedListBtn: 'Platforms',
+    supportedListTitle: '📌 Supported Platforms (18 Official Sites)',
+    supportedListUniversalNote: '💡 Triple-click the version badge above for Experimental Universal <video> Mode',
+    supportedListUniversalActive: '🔓 Experimental Universal HTML5 <video> & Candidate Mode Active',
   },
   connectionModes: {
     modeLabel: 'Connection Mode',

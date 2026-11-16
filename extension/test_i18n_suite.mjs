@@ -194,6 +194,9 @@ for (const file of localeFiles) {
   assert(content.includes('unlockToastOn:'), `${file} 包含 unlockToastOn 彩蛋開啟提示`);
   assert(content.includes('unlockToastOff:'), `${file} 包含 unlockToastOff 彩蛋關閉提示`);
   assert(content.includes('unlockBadgeTooltip:'), `${file} 包含 unlockBadgeTooltip 徽章提示`);
+  assert(content.includes('versionHoverHint:'), `${file} 包含 versionHoverHint 版本號懸停提示`);
+  assert(content.includes('supportedListBtn:'), `${file} 包含 supportedListBtn 支援清單按鈕翻譯`);
+  assert(content.includes('supportedListTitle:'), `${file} 包含 supportedListTitle 支援清單標題翻譯`);
   assert(content.includes('diagnosticFallbackTitle:'), `${file} 包含 diagnosticFallbackTitle 診斷標題翻譯`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
@@ -218,6 +221,8 @@ assert(popupTsx.includes('CHROME_STORE_URL'), 'Popup.tsx 定義了 Chrome 線上
 assert(popupTsx.includes('MessageSquarePlus'), 'Popup.tsx 引入了 MessageSquarePlus 回報圖示');
 assert(popupTsx.includes('unsupportedBadge'), 'Popup.tsx 支援紅燈不支援徽章');
 assert(popupTsx.includes('footerFeedbackBtn'), 'Popup.tsx 包含左下角問題回報小按鈕');
+assert(popupTsx.includes('version-hover-hint'), 'Popup.tsx 實作版本號游標懸停即時文字提示');
+assert(popupTsx.includes('supported-platforms-panel'), 'TabStatusBanner.tsx 實作可展開之 18 大主要支援網站清單面板');
 
 const bgTs = readModuleTree('src/background');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
