@@ -93,9 +93,42 @@ async function runHeadlessUserPersonaTests() {
     });
     assert(hostButtons.some((b) => b.includes('建立')), '房主點擊「建立房間 (Host)」標籤成功切換至建房表單視圖');
 
-    // 1.3 房主 A 解鎖彩蛋 (三連擊版本號)
+    // 1.3 驗證版本號游標懸停提示與主要支援網站清單展開面板，再三連擊解鎖通用模式
+    await popupPageA.hover('[data-testid="version-badge"]');
+    await new Promise((r) => setTimeout(r, 150));
+    const hoverHintInfo = await popupPageA.evaluate(() => {
+      const badge = document.querySelector('[data-testid="version-badge"]');
+      const hint = document.querySelector('[data-testid="version-hover-hint"]');
+      return {
+        title: badge ? badge.getAttribute('title') || '' : '',
+        hintText: hint ? hint.innerText.trim() : ''
+      };
+    });
+    assert(
+      hoverHintInfo.title.includes('連點 3 下') && hoverHintInfo.hintText.includes('連點 3 下'),
+      `[Popup UX E2E] 游標移至版本號時，即時顯示文字提示 (${hoverHintInfo.hintText}) 與懸停 Tooltip`
+    );
+
+    await popupPageA.click('[data-testid="toggle-supported-list-btn"]');
+    await new Promise((r) => setTimeout(r, 150));
+    const supportedPanelInfo = await popupPageA.evaluate(() => {
+      const panel = document.querySelector('[data-testid="supported-platforms-panel"]');
+      return {
+        visible: Boolean(panel),
+        text: panel ? panel.innerText : ''
+      };
+    });
+    assert(
+      supportedPanelInfo.visible &&
+        supportedPanelInfo.text.includes('YouTube') &&
+        supportedPanelInfo.text.includes('Netflix') &&
+        supportedPanelInfo.text.includes('巴哈姆特動畫瘋') &&
+        supportedPanelInfo.text.includes('CATCHPLAY+'),
+      '[Popup UX E2E] 點擊「支援清單」按鈕成功展開 18 大主要支援網站清單面板'
+    );
+
     const eggResult = await popupPageA.evaluate(async () => {
-      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.0'));
+      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.1'));
       if (!verSpan) return { success: false };
       verSpan.click();
       verSpan.click();
@@ -200,7 +233,7 @@ async function runHeadlessUserPersonaTests() {
 
     // 觀眾 B 點擊版本號 3 次解鎖
     await popupPageB.evaluate(async () => {
-      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.0'));
+      const verSpan = Array.from(document.querySelectorAll('span')).find((s) => s.innerText.includes('v2.10.1'));
       if (verSpan) {
         verSpan.click();
         verSpan.click();

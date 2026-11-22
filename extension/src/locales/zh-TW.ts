@@ -50,7 +50,12 @@ export const zhTW = {
     hintPrefix: '💡 提示',
     unlockToastOn: '🔓 已啟用 activeTab 通用模式與候選支援名單',
     unlockToastOff: '🔒 已關閉隱藏候選支援名單',
-    unlockBadgeTooltip: '🔓 候選名單已啟用 (連點 3 下關閉)',
+    unlockBadgeTooltip: '🔓 通用模式已啟用 (連點 3 下關閉)',
+    versionHoverHint: '💡 連點 3 下版本號可切換「實驗性通用網站支援模式」',
+    supportedListBtn: '支援清單',
+    supportedListTitle: '📌 主要支援網站清單 (18 大正式平台)',
+    supportedListUniversalNote: '💡 連點上方版本號 3 下可啟用實驗性通用 HTML5 <video> 支援模式',
+    supportedListUniversalActive: '🔓 已啟用實驗性通用 HTML5 <video> 與候選網站支援模式',
   },
   connectionModes: {
     modeLabel: '連線方式',

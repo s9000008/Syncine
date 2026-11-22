@@ -45,6 +45,7 @@ export default function Popup() {
   const [candidatesUnlocked, setCandidatesUnlocked] = useState<boolean>(false);
   const [, setVersionClicks] = useState<number>(0);
   const [unlockToast, setUnlockToast] = useState<string | null>(null);
+  const [isVersionHovered, setIsVersionHovered] = useState<boolean>(false);
 
   const versionClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -514,43 +515,57 @@ export default function Popup() {
                 </h1>
                 <span
                   onClick={handleVersionTripleClick}
+                  onMouseEnter={() => setIsVersionHovered(true)}
+                  onMouseLeave={() => setIsVersionHovered(false)}
+                  data-testid="version-badge"
                   className={`px-1.5 py-0.5 text-[9px] font-semibold rounded bg-slate-800 border flex-shrink-0 cursor-pointer select-none transition ${
                     candidatesUnlocked
                       ? 'text-amber-300 border-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
-                      : 'text-slate-300 border-slate-700 hover:border-slate-600'
+                      : 'text-slate-300 border-slate-700 hover:border-amber-400/60 hover:text-amber-200'
                   }`}
-                  title={candidatesUnlocked ? t.tabStatus.unlockBadgeTooltip : getVersion()}
+                  title={candidatesUnlocked ? t.tabStatus.unlockBadgeTooltip : t.tabStatus.versionHoverHint}
                 >
                   {getVersion()}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                    roomState?.connectionStatus === 'RECONNECTING'
-                      ? 'bg-amber-400 animate-ping'
-                      : roomState?.connectionStatus === 'DISCONNECTED'
-                      ? 'bg-rose-500'
-                      : 'bg-emerald-400 animate-pulse'
-                  }`}
-                ></span>
-                <span
-                  className="truncate"
-                  title={
-                    roomState?.connectionStatus === 'RECONNECTING'
+              {isVersionHovered ? (
+                <p
+                  data-testid="version-hover-hint"
+                  className="text-[10px] text-amber-300 flex items-center gap-1 mt-0.5 truncate animate-fade-in"
+                >
+                  <span className="truncate">
+                    {candidatesUnlocked ? t.tabStatus.unlockBadgeTooltip : t.tabStatus.versionHoverHint}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      roomState?.connectionStatus === 'RECONNECTING'
+                        ? 'bg-amber-400 animate-ping'
+                        : roomState?.connectionStatus === 'DISCONNECTED'
+                        ? 'bg-rose-500'
+                        : 'bg-emerald-400 animate-pulse'
+                    }`}
+                  ></span>
+                  <span
+                    className="truncate"
+                    title={
+                      roomState?.connectionStatus === 'RECONNECTING'
+                        ? t.connectionStatus.reconnecting
+                        : roomState?.connectionStatus === 'DISCONNECTED'
+                        ? t.connectionStatus.disconnected
+                        : t.connectionStatus.ready
+                    }
+                  >
+                    {roomState?.connectionStatus === 'RECONNECTING'
                       ? t.connectionStatus.reconnecting
                       : roomState?.connectionStatus === 'DISCONNECTED'
                       ? t.connectionStatus.disconnected
-                      : t.connectionStatus.ready
-                  }
-                >
-                  {roomState?.connectionStatus === 'RECONNECTING'
-                    ? t.connectionStatus.reconnecting
-                    : roomState?.connectionStatus === 'DISCONNECTED'
-                    ? t.connectionStatus.disconnected
-                    : t.connectionStatus.ready}
-                </span>
-              </p>
+                      : t.connectionStatus.ready}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -574,6 +589,8 @@ export default function Popup() {
           unlockToast={unlockToast}
           roomState={roomState}
           isTargetSite={isTargetSite}
+          currentPlatformId={currentPlatform?.id}
+          candidatesUnlocked={candidatesUnlocked}
           tabStatusLabel={tabStatusLabel}
           tabStatusTooltip={tabStatusTooltip}
           bannersText={{
@@ -582,7 +599,11 @@ export default function Popup() {
           }}
           tabBadgeText={{
             supported: t.tabStatus.supportBadge,
-            unsupported: t.tabStatus.unsupportedBadge
+            unsupported: t.tabStatus.unsupportedBadge,
+            supportedListBtn: t.tabStatus.supportedListBtn,
+            supportedListTitle: t.tabStatus.supportedListTitle,
+            supportedListUniversalNote: t.tabStatus.supportedListUniversalNote,
+            supportedListUniversalActive: t.tabStatus.supportedListUniversalActive
           }}
         />
 

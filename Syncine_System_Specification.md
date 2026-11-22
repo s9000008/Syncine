@@ -1,4 +1,4 @@
-# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.10.0)
+# Syncine (同映) - 跨平台網頁影片同步播放系統完整開發規格書 (v2.10.1)
 
 > **環境與用途說明**：本文件專為 **Google Antigravity** 及 AI 開發助理設計。內含三模彈性連線架構（預設官方中繼 / 自架 IP 模式 / WebRTC P2P 直連）、核心同步演算法、MV3 Offscreen 載體、保活防禦、邊界條件、WebSocket 通訊協定（Type Definitions）以及未來預期功能規劃。請嚴格依據此規格書進行前後端程式碼生成與維護。
 
@@ -602,8 +602,9 @@ export type P2PDataMessage =
    - 於 P2P 模式說明卡片提供防火牆受阻時改用預設中繼伺服器之清晰指引；房內介面精簡為單一明確之「離開房間」按鈕，移除冗餘技術提示與重複按鈕。
 5. **控制面板多語系文字自適應與懸停提示 (UI Text Truncation & Hover Tooltip)**：
    - 針對 380px 面板寬度精簡各語系分頁提示文案，避免固定寬度下字串截斷，並搭配 HTML `title` 懸停提示呈現完整說明。
-6. **網站支援燈號狀態指示與商店導流系統 (Site Support Traffic Light & Store Feedback)**：
-   - **單一真理來源燈號標記**：全面以 `platforms.ts` 中央註冊表判定支援狀態，當目前分頁為 18 大正式支援平台（或彩蛋解鎖之通用模式平台）之有效播放頁時顯示高亮綠燈與 `[支援]` 徽章；其餘頁面一律顯示紅燈與 `[不支援]` 徽章，杜絕燈號與文案不一致。
+6. **網站支援燈號狀態指示、內建支援清單與商店導流系統 (Site Support Traffic Light, Built-in Platform List & Store Feedback)**：
+   - **單一真理來源燈號標記与可展開支援清單**：全面以 `platforms.ts` 中央註冊表判定支援狀態，當目前分頁為 18 大正式支援平台（或彩蛋解鎖之通用模式平台）之有效播放頁時顯示高亮綠燈與 `[支援]` 徽章；其餘頁面一律顯示紅燈與 `[不支援]` 徽章。點擊分頁狀態橫幅可展開套件內建之「主要支援網站清單」面板（動態列出 18 大正式支援平台並高亮當前所在平台）。
+   - **版本號游標懸停提示 (Version Badge Hover Hint)**：當游標移至面板頂部版本號徽章時，即時於介面文字與懸停提示 (`versionHoverHint`) 顯示「連點 3 下可切換實驗性通用網站支援模式」之操作指引。
    - **官方商店導流**：點擊面板底部引擎支援標籤（`Syncine • YouTube / Netflix / Bilibili 與更多`），導向官方純淨 Chrome 線上應用程式商店頁面（不含任何個人帳號或語系尾綴參數）。
    - **左下角空間極簡化問題回報按鈕**：面板左下角配置低侵入性「`問題回報`」按鈕，一鍵發起 GitHub Issue 並自動整合本機脫敏診斷報告。
 
@@ -640,6 +641,9 @@ export type P2PDataMessage =
     - 安全防護：`ERR_UNAUTHORIZED_URL`
   * **去硬編碼展示原則**：入房審核申請之預設稱謂由 UI 層函式 `defaultGuestName(id)` 依用戶目前語系動態渲染，通道僅傳遞使用者 ID 或代碼。
   * **Chrome 原生 MV3 本地化**：於 `public/_locales/` 建置各語系 `messages.json`，支援 Chrome 擴充商店與管理清單原生多語系展示。
+  * **Chrome Web Store 關鍵字堆砌合規防線（Anti-Keyword Stuffing Policy）**：
+    - 商店摘要（`public/_locales/*/messages.json` 之 `appDesc`）與商店長說明（Store Description）僅可自然舉例 **最多 3 個代表性平台**（如 `YouTube`、`Netflix`、`Bilibili`），且 `appDesc` 字數嚴格限制 `<= 132` 字元。
+    - 嚴禁於 `appDesc` 或商店說明中以逗號或項目符號條列完整平台品牌清單，其餘支援平台一律引導使用者參閱官方 GitHub `README.md` 或擴充套件內建清單，並由 `test_i18n_suite.mjs` 自動化統計攔截（`appDesc` 內出現之平台品牌數量不得超過 3 個）。
 
 
 

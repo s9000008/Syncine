@@ -194,6 +194,9 @@ for (const file of localeFiles) {
   assert(content.includes('unlockToastOn:'), `${file} 包含 unlockToastOn 彩蛋開啟提示`);
   assert(content.includes('unlockToastOff:'), `${file} 包含 unlockToastOff 彩蛋關閉提示`);
   assert(content.includes('unlockBadgeTooltip:'), `${file} 包含 unlockBadgeTooltip 徽章提示`);
+  assert(content.includes('versionHoverHint:'), `${file} 包含 versionHoverHint 版本號懸停提示`);
+  assert(content.includes('supportedListBtn:'), `${file} 包含 supportedListBtn 支援清單按鈕翻譯`);
+  assert(content.includes('supportedListTitle:'), `${file} 包含 supportedListTitle 支援清單標題翻譯`);
   assert(content.includes('diagnosticFallbackTitle:'), `${file} 包含 diagnosticFallbackTitle 診斷標題翻譯`);
 
   // 驗證標準 ReturnCode 在各語系中皆有翻譯
@@ -218,6 +221,8 @@ assert(popupTsx.includes('CHROME_STORE_URL'), 'Popup.tsx 定義了 Chrome 線上
 assert(popupTsx.includes('MessageSquarePlus'), 'Popup.tsx 引入了 MessageSquarePlus 回報圖示');
 assert(popupTsx.includes('unsupportedBadge'), 'Popup.tsx 支援紅燈不支援徽章');
 assert(popupTsx.includes('footerFeedbackBtn'), 'Popup.tsx 包含左下角問題回報小按鈕');
+assert(popupTsx.includes('version-hover-hint'), 'Popup.tsx 實作版本號游標懸停即時文字提示');
+assert(popupTsx.includes('supported-platforms-panel'), 'TabStatusBanner.tsx 實作可展開之 18 大主要支援網站清單面板');
 
 const bgTs = readModuleTree('src/background');
 assert(bgTs.includes('parseConnectionCode'), 'background/index.ts 引入並使用 parseConnectionCode');
@@ -515,14 +520,39 @@ assert(
   'Popup.tsx 透過單一真理來源 PLATFORM_TAB_STATUS_KEY_MAP 支援偵測並顯示 Niconico、CATCHPLAY+ 與 Netflix 連線狀態'
 );
 
-// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132) 與隱藏候選名單不外洩驗證
+// 6. Chrome 商店 _locales/messages.json 字數上限 (<=132)、防關鍵字堆砌 (<=3 平台) 與隱藏候選名單不外洩驗證
 const storeLocales = ['zh_TW', 'en', 'ja', 'zh_CN'];
 const hiddenKeywords = ['anime1', 'litv', 'wetv', 'dailymotion', 'hulu', 'peacock', 'paramount', 'hbogoasia'];
+const platformBrandMatchers = [
+  { id: 'youtube', regex: /youtube/i },
+  { id: 'netflix', regex: /netflix/i },
+  { id: 'bilibili', regex: /bilibili|哔哩哔哩|嗶哩嗶哩/i },
+  { id: 'niconico', regex: /niconico|nicovideo|ニコニコ動画/i },
+  { id: 'vimeo', regex: /vimeo/i },
+  { id: 'gamer', regex: /動畫瘋|动画疯|アニメ瘋|bahamut/i },
+  { id: 'twitch', regex: /twitch/i },
+  { id: 'disney', regex: /disney\+|disney plus/i },
+  { id: 'prime', regex: /prime video|amazon/i },
+  { id: 'myvideo', regex: /myvideo/i },
+  { id: 'linetv', regex: /line\s*tv/i },
+  { id: 'kktv', regex: /kktv/i },
+  { id: 'crunchyroll', regex: /crunchyroll/i },
+  { id: 'friday', regex: /friday/i },
+  { id: 'max', regex: /\b(hbo\s*max|max)\b/i },
+  { id: 'iqiyi', regex: /iqiyi|愛奇藝|爱奇艺/i },
+  { id: 'appletv', regex: /apple\s*tv/i },
+  { id: 'catchplay', regex: /catchplay/i }
+];
 for (const loc of storeLocales) {
   const msgObj = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/_locales', loc, 'messages.json'), 'utf-8'));
   const desc = msgObj?.appDesc?.message || '';
   assert(desc.length > 10 && desc.length <= 132, `_locales/${loc}/messages.json appDesc 長度合規 (${desc.length} <= 132)`);
   assert(desc.includes('Netflix'), `_locales/${loc}/messages.json appDesc 已同步更新多平台資訊`);
+  const matchedBrands = platformBrandMatchers.filter((b) => b.regex.test(desc)).map((b) => b.id);
+  assert(
+    matchedBrands.length <= 3,
+    `_locales/${loc}/messages.json appDesc 符合 CWS 反關鍵字堆砌規範，提及平台品牌數量 <= 3 (實際=${matchedBrands.length}: ${matchedBrands.join(', ')})`
+  );
   for (const kw of hiddenKeywords) {
     assert(!desc.toLowerCase().includes(kw), `_locales/${loc}/messages.json 未外洩非正式或候選平台 (${kw})`);
   }

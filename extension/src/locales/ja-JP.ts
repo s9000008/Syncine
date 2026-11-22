@@ -51,7 +51,12 @@ export const jaJP: TranslationSchema = {
     hintPrefix: '💡 ヒント',
     unlockToastOn: '🔓 activeTab 汎用モードと候補リストを有効化しました',
     unlockToastOff: '🔒 候補サイト対応を無効化しました',
-    unlockBadgeTooltip: '🔓 候補サイト有効中 (3回クリックで無効化)',
+    unlockBadgeTooltip: '🔓 汎用モード有効中 (3回クリックで無効化)',
+    versionHoverHint: '💡 バージョンを3回クリックで実験的汎用モードを切替',
+    supportedListBtn: '対応一覧',
+    supportedListTitle: '📌 主な対応サイト一覧 (公式18サイト)',
+    supportedListUniversalNote: '💡 上部のバージョン番号を3回クリックすると実験的汎用 <video> モードが有効になります',
+    supportedListUniversalActive: '🔓 実験的汎用 HTML5 <video>・候補サイトモード有効中',
   },
   connectionModes: {
     modeLabel: '接続モード',
